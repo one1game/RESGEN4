@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>CoreBox 3.2 - Neural Cyberpunk Incremental</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Быстрые фиксы для мобильной версии и уведомлений */
+        @media (max-width: 768px) {
+            .floating-mine-btn { width: 70px; height: 70px; bottom: 20px; right: 20px; }
+            .floating-mine-btn .btn-text { display: none; }
+            .floating-mine-btn .btn-icon { font-size: 32px; margin: 0; }
+            .auth-container { width: 95%; margin: 20px auto; padding: 20px; }
+            .upgrade-container { grid-template-columns: 1fr; }
+            .inventory-grid { grid-template-columns: repeat(3, 1fr); }
+            .stat-card-large { min-width: auto; }
+        }
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            color: #0f0;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-weight: bold;
+            z-index: 10000;
+            animation: fadeOut 2s forwards;
+            border-left: 4px solid #0f0;
+            pointer-events: none;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .notification.error {
+            color: #f44;
+            border-left-color: #f44;
+        }
+        @keyframes fadeOut {
+            0% { opacity: 1; transform: translateX(-50%) translateY(0); }
+            70% { opacity: 1; }
+            100% { opacity: 0; transform: translateX(-50%) translateY(-20px); visibility: hidden; }
+        }
+        .offline-popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #0a0a0a;
+            border: 2px solid #0f0;
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+            z-index: 10001;
+            box-shadow: 0 0 50px rgba(0,255,0,0.3);
+            backdrop-filter: blur(10px);
+            font-family: monospace;
+        }
+        .offline-popup button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin-top: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            border-radius: 8px;
+        }
+        .fade-out {
+            transition: opacity 0.5s ease-out;
+            opacity: 0;
+        }
+        .craft-btn.processing, .design-btn.processing, .ship-btn.processing {
+            opacity: 0.5;
+            cursor: wait;
+        }
+        .auth-message.error { color: #ff4444; background: #330000; padding: 8px; border-radius: 6px; margin-top: 10px; }
+        .auth-message.success { color: #44ff44; background: #003300; padding: 8px; border-radius: 6px; margin-top: 10px; }
+        .auto-clicking {
+            box-shadow: 0 0 20px #0f0, 0 0 40px #0f0 !important;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .no-power {
+            animation: shake 0.5s ease-in-out;
+            background: #800 !important;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+        .power-full { box-shadow: 0 0 15px #ffaa00; }
+        .power-high { box-shadow: 0 0 10px #ff7700; }
+        .power-medium { box-shadow: 0 0 5px #ff5500; }
+        .power-low { box-shadow: 0 0 2px #ff3300; }
+        .turbine-critical { background: #f00 !important; box-shadow: 0 0 10px red; }
+        .turbine-hot { background: #ff6600; }
+        .turbine-warm { background: #ffcc00; }
+        .turbine-cool { background: #00aaff; }
+        .system-offline { filter: grayscale(0.8); opacity: 0.6; }
+        .offline-msg { color: #ff8888; font-size: 12px; text-align: center; margin-top: 8px; }
+        .blueprint-required { color: #ffaa00; font-size: 11px; text-align: center; margin-top: 6px; }
+        .faction-active { background: rgba(255,0,0,0.3); border-left: 3px solid red; }
+        .attack-record.defended { color: #8f8; }
+        .attack-record.failed { color: #f88; }
+        .disc-badge { background: #ffaa00; color: #000; padding: 2px 6px; border-radius: 12px; font-size: 10px; position: absolute; top: -8px; right: 8px; }
+        .trade-card { position: relative; }
+        
+        /* Стили для карты */
+        .space-planet {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .space-planet:hover {
+            transform: translate(-50%, -50%) scale(1.15);
+        }
+        .other-player-marker {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .other-player-marker:hover {
+            transform: translate(-50%, -50%) scale(1.2);
+        }
+        .star-map {
+            background: radial-gradient(ellipse at center, #0a0a1a 0%, #000005 100%);
+            overflow: hidden;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    
+    <!-- ============================================ -->
+    <!-- ФОРМА АВТОРИЗАЦИИ (Supabase)                 -->
+    <!-- ============================================ -->
+    <div id="authOverlay" class="auth-overlay">
+        <div class="auth-container">
+            <div class="auth-header">
+                <h2>⚙️ CoreBox 3.2</h2>
+                <p>Нейро-сеть требует авторизации</p>
+            </div>
+            
+            <div class="auth-form">
+                <div class="input-group">
+                    <label for="auth-email">📧 Нейро-интерфейс (Email):</label>
+                    <input type="email" id="auth-email" placeholder="your@email.com" required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="auth-password">🔒 Квантовый ключ (Пароль):</label>
+                    <input type="password" id="auth-password" placeholder="минимум 6 символов" required>
+                </div>
+                
+                <div class="input-group" id="username-group" style="display: none;">
+                    <label for="auth-username">🎮 Позывной (Имя):</label>
+                    <input type="text" id="auth-username" placeholder="Как вас называть?">
+                </div>
+                
+                <div class="auth-buttons">
+                    <button id="btn-login" class="auth-btn primary">🔑 Войти в систему</button>
+                    <button id="btn-register" class="auth-btn secondary">📝 Регистрация</button>
+                </div>
+                
+                <div class="auth-toggle">
+                    <button id="btn-toggle-mode" class="toggle-btn">✨ Нет аккаунта? Зарегистрироваться</button>
+                </div>
+            </div>
+            
+            <div id="auth-message" class="auth-message"></div>
+            
+            <div class="auth-info">
+                <p>💡 <strong>Нейро-подсказка:</strong> Ваш прогресс синхронизируется через нейро-облако</p>
+                <div class="additional-links">
+                    <a href="faq.html" class="story-link">📖 FAQ</a>
+                    <a href="history.html" class="story-link history-link">🎭 ИСТОРИЯ МИРА</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- ОСНОВНОЙ КОНТЕНТ ИГРЫ                        -->
+    <!-- ============================================ -->
+    <div id="gameContent" style="display: none;">
+        <div class="header">
+            <h1>⚙️ CoreBox 3.2 <span style="font-size: 14px;">| Нейро-эволюция</span></h1>
+            
+            <div class="user-info" id="userInfo" style="display: none;">
+                <span id="usernameDisplay"></span>
+                <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
+            </div>
+            
+            <div class="stats-container">
+                <div class="stat-card">
+                    <div>🕐 ЦИКЛ СИСТЕМЫ</div>
+                    <div id="timeDisplay" class="stat-value">ДЕНЬ 08:00</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="main">
+            <!-- ВКЛАДКИ СИСТЕМНЫЙ СТАТУС / СТАТИСТИКА / ЛИДЕРЫ -->
+            <div class="status-tabs">
+                <div class="status-tab active" id="system-status-tab">🖥️ СИСТЕМНЫЙ СТАТУС</div>
+                <div class="status-tab" id="statistics-tab">📊 СТАТИСТИКА</div>
+                <div class="status-tab" id="leaderboard-tab">🏆 ЛИДЕРЫ</div>
+            </div>
+            
+            <!-- СЕКЦИЯ СИСТЕМНЫЙ СТАТУС -->
+            <div id="system-status-section" class="status-section">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>🖥️ ДИАГНОСТИКА ЯДРА</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="system-status">
+                            <div class="status-line">
+                                <div class="status-label">🔥 ТЭЦ (Уголь):</div>
+                                <div class="status-value" id="coalStatus">ОФФЛАЙН</div>
+                                <div class="status-indicator offline"></div>
+                            </div>
+                            <div class="status-line">
+                                <div class="status-label">🧠 ИСКУССТВЕННЫЙ ИНТЕЛЛЕКТ:</div>
+                                <div class="status-value" id="aiStatusText">НЕАКТИВЕН</div>
+                                <div class="status-indicator offline"></div>
+                            </div>
+                            <div class="status-line">
+                                <div class="status-label">🛡️ СИСТЕМА ЗАЩИТЫ:</div>
+                                <div class="status-value" id="defenseStatusText">НЕАКТИВНА</div>
+                                <div class="status-indicator offline"></div>
+                            </div>
+                            <div class="status-line">
+                                <div class="status-label">🌙 УГРОЗА ПОВСТАНЦЕВ:</div>
+                                <div class="status-value" id="rebelStatus">НИЗКИЙ УРОВЕНЬ</div>
+                                <div class="threat-level low"></div>
+                            </div>
+
+                            <!-- ТУРБИНА -->
+                            <div class="turbine-container">
+                                <div class="stat-label" id="turbineHeatLabel">🌡️ Перегрев турбины: 0%</div>
+                                <div class="turbine-bar">
+                                    <div class="turbine-fill turbine-cool" id="turbineHeatBar" style="width: 0%"></div>
+                                </div>
+                                <div class="turbine-hint" id="turbineHeatHint">Чем чаще кликаешь — тем выше температура</div>
+                            </div>
+
+                            <div class="status-line">
+                                <div class="status-label">🧬 НЕЙРО-СОЗНАНИЕ:</div>
+                                <div class="status-value" id="neuroStatus">0.0% (Ур. 0)</div>
+                                <div class="neuro-level">
+                                    <div class="neuro-progress" id="neuroProgress"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Режим ИИ -->
+                            <div class="status-line ai-mode-row">
+                                <div class="status-label">🤖 РЕЖИМ ИИ:</div>
+                                <div class="status-value" id="aiMode">⚙️ Обычный</div>
+                            </div>
+                            
+                            <!-- Предупреждение об атаке -->
+                            <div id="attackWarning" class="attack-warning" style="display: none;"></div>
+                            
+                            <!-- Активные дебаффы -->
+                            <div id="miningDebuff" class="debuff-indicator mining-debuff" style="display: none;"></div>
+                            <div id="autoclickDebuff" class="debuff-indicator autoclick-debuff" style="display: none;"></div>
+                            <div id="defenseDebuff" class="debuff-indicator defense-debuff" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- СИСТЕМНЫЙ ЖУРНАЛ -->
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>📜 СИСТЕМНЫЙ ЖУРНАЛ (Лог)</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="log-controls">
+                            <button id="clearLogBtn" class="log-btn">🗑️ ОЧИСТИТЬ ЖУРНАЛ</button>
+                            <button id="autoScrollBtn" class="log-btn">📜 АВТОСКРОЛЛ</button>
+                        </div>
+                        <div id="logBox" style="height: 200px; overflow-y: auto; background: #000; color: #0f0; font-family: monospace; padding: 8px;"></div>
+                    </div>
+                </div>
+
+                <div class="mining-action">
+                    <div class="click-system">
+                        <!-- ШКАЛЫ МОЩНОСТИ -->
+                        <div class="power-section">
+                            <div class="power-label">
+                                <span>⚡ ВЫЧИСЛИТЕЛЬНАЯ МОЩНОСТЬ:</span>
+                                <span id="powerText">0/1000</span>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-fill" id="powerFill" style="width: 0%"></div>
+                            </div>
+                            <div class="power-tier-info">
+                                <span>📈 ТИР МОЩНОСТИ:</span>
+                                <span id="powerTier">Тир 0 | +1 мощности/клик</span>
+                            </div>
+                        </div>
+                        
+                        <div class="click-progress-section">
+                            <div class="click-label">
+                                <span>🔄 ПРОГРЕСС СИНХРОНИЗАЦИИ:</span>
+                                <span id="clickProgressText">0/10</span>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-fill click-progress" id="clickProgress" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- АВТОКЛИКЕР -->
+                        <div class="auto-click-section">
+                            <div class="auto-click-status">
+                                <span>🤖 АВТОМАТИЧЕСКАЯ ДОБЫЧА:</span>
+                                <span id="autoClickStatus">ОТКЛЮЧЕНА</span>
+                            </div>
+                            <div class="auto-click-settings">
+                                <span class="setting-icon">⚡</span>
+                                <span class="setting-label">МОЩНОСТЬ/ЦИКЛ:</span>
+                                <span id="powerPerClick" class="setting-value">1</span>
+                                
+                                <span class="setting-separator">|</span>
+                                
+                                <span class="setting-icon">⏱️</span>
+                                <span class="setting-label">ИНТЕРВАЛ:</span>
+                                <span id="autoClickInterval" class="setting-value">5</span>
+                                <span class="setting-unit">СЕК</span>
+                                
+                                <span class="setting-separator">|</span>
+                                
+                                <span class="setting-icon">💎</span>
+                                <span class="setting-label">СТОИМОСТЬ:</span>
+                                <span id="autoClickCost" class="setting-value">1</span>
+                                <span class="setting-unit">МОЩН</span>
+                            </div>
+                            <div class="auto-click-info">
+                                💡 УДЕРЖИВАЙТЕ ПЛАВАЮЩУЮ КНОПКУ ДЛЯ АКТИВАЦИИ АВТОМАТИЧЕСКОЙ ДОБЫЧИ
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- СЕКЦИЯ СТАТИСТИКИ -->
+            <div id="statistics-section" class="status-section" style="display: none;">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>📊 СТАТИСТИКА ОПЕРАТОРА</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="statistics-grid">
+                            <div class="stat-card-large">
+                                <div class="stat-title">🕹️ ОСНОВНОЕ</div>
+                                <div class="stat-line"><span class="stat-label">Всего кликов:</span><span class="stat-value" id="totalClicks">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Макс. мощность:</span><span class="stat-value" id="maxPowerReached">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Ночей пережито:</span><span class="stat-value" id="nightsSurvived">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Всего добыто:</span><span class="stat-value" id="totalMined">0</span></div>
+                            </div>
+                            
+                            <div class="stat-card-large">
+                                <div class="stat-title">🛡️ БЕЗОПАСНОСТЬ</div>
+                                <div class="stat-line"><span class="stat-label">Атак повстанцев:</span><span class="stat-value" id="rebelAttacks">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Отражено атак:</span><span class="stat-value" id="attacksDefended">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Текущ. активность:</span><span class="stat-value" id="rebelActivity">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Заметность:</span><span class="stat-value" id="visibility">0%</span></div>
+                            </div>
+                            
+                            <div class="stat-card-large">
+                                <div class="stat-title">⛏️ РЕСУРСЫ (Добыто)</div>
+                                <div class="stat-line"><span class="stat-label">Угля добыто:</span><span class="stat-value" id="coalMined">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Мусора найдено:</span><span class="stat-value" id="trashMined">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Плазмы добыто:</span><span class="stat-value" id="plasmaMined">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Руды добыто:</span><span class="stat-value" id="oreMined">0</span></div>
+                            </div>
+                            
+                            <div class="stat-card-large">
+                                <div class="stat-title">🔥 ПОТЕРИ И ПРОГРЕСС</div>
+                                <div class="stat-line"><span class="stat-label">Угля сожжено:</span><span class="stat-value" id="coalBurned">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Украдено угля:</span><span class="stat-value" id="coalStolen">0</span></div>
+                                <div class="stat-line"><span class="stat-label">Время игры:</span><span class="stat-value" id="playTime">0 сек</span></div>
+                                <div class="stat-line"><span class="stat-label">Сессий:</span><span class="stat-value" id="sessionsCount">1</span></div>
+                            </div>
+                        </div>
+                        
+                        <div class="statistics-controls">
+                            <button id="refreshStatsBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
+                            <button id="resetStatsBtn" class="stat-btn danger">🗑️ СБРОСИТЬ СТАТИСТИКУ</button>
+                            <button id="prestigeBtn" class="stat-btn prestige">🔁 ПРЕСТИЖ (Новая игра+)</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- СЕКЦИЯ ЛИДЕРОВ -->
+            <div id="leaderboard-section" class="status-section" style="display: none;">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>🏆 ТАБЛИЦА ЛИДЕРОВ (Нейро-рейтинг)</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div id="leaderboardContainer">
+                            <div class="leaderboard-loading">⏳ Загрузка данных из облака...</div>
+                        </div>
+                        <button id="refreshLeaderboardBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tabs" id="tabs">
+                <div class="tab active" data-tab="inventory" id="inventory-tab-btn">📦 ИНВЕНТАРЬ</div>
+                <div class="tab" data-tab="upgrades" id="upgrades-tab-btn">🔧 МОДУЛИ</div>
+                <div class="tab" data-tab="trade" id="trade-tab-btn">💱 ТОРГОВЛЯ</div>
+                <div class="tab" data-tab="quests" id="quests-tab-btn">📋 ЗАДАНИЯ</div>
+                <div class="tab" data-tab="command" id="command-tab-btn">⚔️ КОМАНДНЫЙ ПУНКТ</div>
+                <div class="tab" data-tab="craft" id="craft-tab-btn">🔨 КРАФТ</div>
+                <div class="tab" data-tab="design" id="design-tab-btn">📐 РАЗРАБОТКА</div>
+                <div class="tab" data-tab="fleet" id="fleet-tab-btn">🚀 ФЛОТ</div>
+                <div class="tab" data-tab="space" id="space-tab-btn">🌌 КАРТА</div>
+            </div>
+            
+            <div class="tab-content active" id="inventory-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>📦 СИСТЕМНЫЕ РЕСУРСЫ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="inventory-grid" id="resourcesContainer"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="upgrades-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>🔧 МОДУЛИ УЛУЧШЕНИЙ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="upgrade-container" id="upgradesContainer">
+                            <!-- Динамическая загрузка через JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="trade-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>💱 ТОРГОВЫЙ ТЕРМИНАЛ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="trade-container">
+                            <div class="trade-mode-toggle">
+                                <button id="buyModeBtn" class="trade-mode-btn active">🔄 ОБМЕН</button>
+                                <button id="sellModeBtn" class="trade-mode-btn">💰 ПРОДАЖА</button>
+                            </div>
+                            <div id="buyItemsContainer" class="trade-items-grid"></div>
+                            <div id="sellItemsContainer" class="trade-items-grid" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="quests-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>📋 СИСТЕМНЫЕ ЗАДАЧИ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="quest-container" id="questsContainer"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="command-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>🛡️ ЗАЩИТА ОТ ПОВСТАНЦЕВ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div id="rebelProtectionPanel" class="protection-panel"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>⚔️ ФРАКЦИИ ПОВСТАНЦЕВ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div id="factionPanel" class="faction-panel"></div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>📋 ИСТОРИЯ АТАК</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div id="attackHistory" class="attack-history"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="craft-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>🔨 СИСТЕМА КРАФТА</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="craft-container" id="craftContainer"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="design-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>📐 РАЗРАБОТКА КОРАБЛЕЙ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="design-container" id="designContainer"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-content" id="fleet-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>🚀 МОЙ ФЛОТ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="fleet-container" id="fleetContainer"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- НОВАЯ ВКЛАДКА КАРТА -->
+            <div class="tab-content" id="space-tab">
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>🌌 КОСМИЧЕСКАЯ КАРТА</span>
+                        <span id="space-online-count" style="font-size:10px;opacity:0.7;margin-left:auto;">0 онлайн</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content" style="padding:0;">
+
+                        <!-- Ресурсы и статус -->
+                        <div id="space-status-bar" style="display:flex;gap:12px;padding:10px 12px;background:rgba(0,0,0,0.3);flex-wrap:wrap;">
+                            <div style="font-size:11px;opacity:0.7;">
+                                ⚡ <span id="space-power-current">0</span>/<span id="space-power-max">1000</span>
+                            </div>
+                            <div style="font-size:11px;opacity:0.7;" id="space-day-status">☀️ ДЕНЬ</div>
+                            <div style="font-size:11px;opacity:0.7;">🧠 Ур.<span id="space-neuro-level">0</span></div>
+                            <div style="font-size:11px;opacity:0.7;">🚀 <span id="space-ships-count">0</span> кораблей</div>
+                        </div>
+
+                        <!-- Звёздная карта -->
+                        <div class="star-map" id="space-star-map" style="
+                            position: relative;
+                            width: 100%;
+                            height: 55vw;
+                            min-height: 260px;
+                            max-height: 400px;
+                        ">
+                            <div id="space-stars-layer"></div>
+                            <div id="space-objects-layer">
+                                <div style="
+                                    position:absolute;left:50%;top:50%;
+                                    transform:translate(-50%,-50%);
+                                    text-align:center;cursor:pointer;
+                                " id="space-base-planet">
+                                    <span style="font-size:28px;">🏠</span>
+                                    <div style="font-size:9px;color:#4aff9d;margin-top:2px;">БАЗА</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Кнопка исследования -->
+                        <div style="padding:10px 12px;">
+                            <button id="space-research-btn" style="
+                                width:100%;padding:10px;
+                                background:rgba(74,158,255,0.1);
+                                border:1px solid rgba(74,158,255,0.3);
+                                border-radius:8px;color:#4a9eff;
+                                font-family:monospace;font-size:12px;cursor:pointer;
+                            ">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
+                        </div>
+
+                        <!-- Список игроков онлайн -->
+                        <div style="padding:0 12px 12px;">
+                            <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
+                            <div id="space-players-list"></div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ПЛАВАЮЩАЯ КНОПКА ДОБЫЧИ -->
+        <div id="floatingMineBtn" class="floating-mine-btn">
+            <span class="btn-icon">⚙️</span>
+            <span class="btn-text">ДОБЫЧА</span>
+            <span id="miningBonusFloat" class="mining-bonus">+0%</span>
+        </div>
+    </div>
+   
+    <!-- ============================================ -->
+    <!-- ПОДКЛЮЧЕНИЕ СКРИПТОВ                        -->
+    <!-- ============================================ -->
+    
+    <!-- 1. Supabase библиотека -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- 2. Основной файл игры -->
+    <script type="module" src="game.js"></script>
+    
+    <!-- ============================================ -->
+    <!-- АУДИО ЭЛЕМЕНТЫ (Фоновые звуки)               -->
+    <!-- ============================================ -->
+    <audio id="clickSound" preload="auto" style="display: none;">
+        <source src="music/click.mp3" type="audio/mpeg">
+    </audio>
+    
+    <audio id="errorSound" preload="auto" style="display: none;">
+        <source src="music/error.mp3" type="audio/mpeg">
+    </audio>
+    
+    <audio id="upgradeSound" preload="auto" style="display: none;">
+        <source src="music/upgrade.mp3" type="audio/mpeg">
+    </audio>
+    
+    <audio id="bgMusic" autoplay loop style="display: none;">
+        <source src="music/game-music.mp3" type="audio/mpeg">
+    </audio>
+
+    <!-- Инициализация музыки и совместимости -->
+    <script>
+    (function() {
+        window.onload = function() {
+            const bgMusic = document.getElementById('bgMusic');
+            if (bgMusic) {
+                bgMusic.volume = 0.025;
+                function forcePlay() {
+                    document.addEventListener('click', function playOnce() {
+                        bgMusic.play().catch(() => {});
+                        document.removeEventListener('click', playOnce);
+                    }, { once: true });
+                }
+                forcePlay();
+            }
+            
+            const sounds = ['clickSound', 'errorSound', 'upgradeSound'];
+            sounds.forEach(soundId => {
+                const sound = document.getElementById(soundId);
+                if (sound) {
+                    sound.load();
+                    console.log(`🔊 Звук ${soundId} предзагружен`);
+                }
+            });
+        };
+        
+        window.showNotif = function(msg, isError = false) {
+            const div = document.createElement('div');
+            div.className = `notification ${isError ? 'error' : 'success'}`;
+            div.textContent = msg;
+            document.body.appendChild(div);
+            setTimeout(() => div.remove(), 2500);
+        };
+    })();
+    </script>
+</body>
+</html>
