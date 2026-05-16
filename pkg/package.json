@@ -1,0 +1,15 @@
+{
+  "name": "corebox-rs",
+  "type": "module",
+  "version": "3.0.0",
+  "files": [
+    "corebox_rs_bg.wasm",
+    "corebox_rs.js",
+    "corebox_rs.d.ts"
+  ],
+  "main": "corebox_rs.js",
+  "types": "corebox_rs.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
