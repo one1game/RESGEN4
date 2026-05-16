@@ -80,27 +80,116 @@
     }
   }, { passive: true });
 
-  /* ── ВИБРАЦИЯ ДЛЯ ПЛАВАЮЩЕЙ КНОПКИ ДОБЫЧИ ──────────────── */
+  /* ── ИСПРАВЛЕНИЕ ПЛАВАЮЩЕЙ КНОПКИ ДОБЫЧИ ───────────────────
+   *
+   * Проблема: оригинальный setupLongPressHandlers вешает touchstart
+   * с e.preventDefault() — это блокирует цепочку touch → click.
+   * На мобиле handleClick никогда не вызывается.
+   *
+   * Решение: перехватываем touchend и вручную вызываем handleClick,
+   * если это был короткий тап (не long-press).
+   * ────────────────────────────────────────────────────────── */
   function enhanceFloatingBtn () {
     const btn = document.getElementById('floatingMineBtn');
     if (!btn) return;
 
-    /* Клик — лёгкий тик */
-    btn.addEventListener('click', () => Haptic.light(), { passive: true });
+    let touchStartTime = 0;
+    let touchMoved = false;
+    const LONG_PRESS_MS = 600; // должно совпадать с оригинальным таймером
 
-    /* Удержание уже обработано в main.js через touchstart/touchend,
-       добавляем только вибро: */
-    btn.addEventListener('touchstart', () => {
+    btn.addEventListener('touchstart', (e) => {
+      touchStartTime = Date.now();
+      touchMoved = false;
       Haptic.light();
+      /* НЕ вызываем e.preventDefault() здесь — пусть браузер
+         генерирует click сам. Оригинальный обработчик уже вешает
+         e.preventDefault в своём touchstart — патчим его ниже. */
     }, { passive: true });
 
-    /* Слушаем активацию автоматической добычи — сильная вибра */
+    btn.addEventListener('touchmove', () => {
+      touchMoved = true; // палец сдвинулся — не считаем тапом
+    }, { passive: true });
+
+    btn.addEventListener('touchend', (e) => {
+      const elapsed = Date.now() - touchStartTime;
+      if (!touchMoved && elapsed < LONG_PRESS_MS) {
+        /* Короткий тап — вызываем handleClick напрямую,
+           потому что оригинальный touchstart с preventDefault
+           мог уже убить синтетический click */
+        if (typeof window.handleClick === 'function') {
+          window.handleClick();
+        }
+      }
+    }, { passive: true });
+
+    /* Вибро при активации автоматической добычи */
     const observer = new MutationObserver(() => {
       if (btn.classList.contains('auto-clicking')) {
         Haptic.longPress();
       }
     });
     observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  /* Патчим setupLongPressHandlers — убираем e.preventDefault()
+     чтобы не блокировать click-события.
+     Вместо него используем touchend-логику выше. */
+  function patchLongPressHandlers () {
+    const btn = document.getElementById('floatingMineBtn');
+    if (!btn) return;
+
+    /* Клонируем элемент — это удалит ВСЕ старые обработчики */
+    const clone = btn.cloneNode(true);
+    btn.parentNode.replaceChild(clone, btn);
+
+    let timer;
+    const newBtn = document.getElementById('floatingMineBtn');
+
+    /* Long-press → автодобыча */
+    newBtn.addEventListener('touchstart', (e) => {
+      /* НЕ вызываем preventDefault — браузер сгенерирует click */
+      timer = setTimeout(() => {
+        Haptic.longPress();
+        if (typeof window.toggleAutoClicking === 'function') {
+          window.toggleAutoClicking();
+        }
+      }, 600);
+    }, { passive: true }); // passive: true = нет preventDefault
+
+    newBtn.addEventListener('touchend', () => {
+      clearTimeout(timer);
+    }, { passive: true });
+
+    newBtn.addEventListener('touchcancel', () => {
+      clearTimeout(timer);
+    }, { passive: true });
+
+    /* Мышь (десктоп) */
+    newBtn.addEventListener('mousedown', () => {
+      timer = setTimeout(() => {
+        if (typeof window.toggleAutoClicking === 'function') {
+          window.toggleAutoClicking();
+        }
+      }, 600);
+    });
+    newBtn.addEventListener('mouseup', () => clearTimeout(timer));
+    newBtn.addEventListener('mouseleave', () => clearTimeout(timer));
+
+    /* Click → добыча */
+    newBtn.addEventListener('click', () => {
+      Haptic.light();
+      if (typeof window.handleClick === 'function') {
+        window.handleClick();
+      }
+    });
+
+    /* Вибро при автодобыче */
+    const observer = new MutationObserver(() => {
+      if (newBtn.classList.contains('auto-clicking')) {
+        Haptic.longPress();
+      }
+    });
+    observer.observe(newBtn, { attributes: true, attributeFilter: ['class'] });
   }
 
   /* ── ВИБРАЦИЯ НА ИГРОВЫЕ СОБЫТИЯ (через DOM Mutation Observer) */
@@ -179,14 +268,21 @@
   }
 
   /* ── ПРЕДОТВРАЩЕНИЕ ZOOM НА ДВОЙНОЙ ТАП ─────────────────── */
+  /* Блокируем zoom только на элементах UI, НЕ глобально —
+     иначе убиваем одиночные клики по плавающей кнопке */
   function preventDoubleTapZoom () {
     let lastTouch = 0;
     document.addEventListener('touchend', (e) => {
+      /* Пропускаем плавающую кнопку — у неё своя логика */
+      if (e.target.closest('#floatingMineBtn')) return;
       const now = Date.now();
-      if (now - lastTouch < 300) {
-        e.preventDefault();
-      }
+      const delta = now - lastTouch;
       lastTouch = now;
+      if (delta < 300 && delta > 0) {
+        if (e.target.closest('button, .tab, .status-tab, .craft-btn, .design-btn')) {
+          e.preventDefault();
+        }
+      }
     }, { passive: false });
   }
 
@@ -201,16 +297,23 @@
 
   /* ── ИНИЦИАЛИЗАЦИЯ ──────────────────────────────────────── */
   function init () {
-    enhanceFloatingBtn();
     watchGameNotifications();
     setupTabScroll();
     preventDoubleTapZoom();
     fixInputZoom();
     patchSounds();
 
-    /* Повторяем enhanceFloatingBtn после загрузки WASM/игры */
-    setTimeout(enhanceFloatingBtn, 2000);
-    setTimeout(patchSounds, 1500);
+    /* Плавающую кнопку патчим после загрузки WASM/игры */
+    function tryPatch (attempt) {
+      const btn = document.getElementById('floatingMineBtn');
+      if (btn && btn.parentNode) {
+        patchLongPressHandlers();
+        patchSounds();
+      } else if (attempt < 20) {
+        setTimeout(() => tryPatch(attempt + 1), 300);
+      }
+    }
+    tryPatch(0);
   }
 
   if (document.readyState === 'loading') {

@@ -25,7 +25,15 @@
 * {
   -webkit-tap-highlight-color: transparent;
   box-sizing: border-box;
-  touch-action: manipulation; /* убирает задержку 300ms */
+  /* touch-action НЕ выставляем глобально — это ломает
+     floating-mine-btn у которого свой touchstart с таймером */
+}
+
+/* Убираем 300ms задержку только на кнопках, не на всём документе */
+button, .tab, .status-tab, .craft-btn, .design-btn,
+.ship-btn, .upgrade-btn, .stat-btn, .log-btn,
+.auth-btn, .trade-mode-btn, .toggle-btn, .logout-btn {
+  touch-action: manipulation;
 }
 
 html, body {
@@ -510,18 +518,20 @@ html, body {
   .floating-mine-btn {
     width: 76px !important;
     height: 76px !important;
-    bottom: calc(70px + env(safe-area-inset-bottom)) !important;
+    bottom: calc(72px + env(safe-area-inset-bottom)) !important;
     right: 14px !important;
     border-radius: 50% !important;
     font-size: 30px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    z-index: 199 !important;
+    z-index: 1100 !important;   /* выше нижней навигации (200) */
     cursor: pointer;
-    touch-action: manipulation;
+    /* touch-action НЕ задаём — JS-патч обрабатывает touch сам */
     -webkit-tap-highlight-color: transparent;
     transition: transform 0.1s, box-shadow 0.15s;
+    /* Убираем pointer-events: none если вдруг наследуется */
+    pointer-events: auto !important;
   }
 
   .floating-mine-btn:active {
