@@ -1,11 +1,12 @@
 // multiplayer_combat.js
 // Боевая мультиплеерная система: разведка → атака → грабёж
-// ИСПРАВЛЕНА ВЕРСИЯ: обрабатывает возвраты даже если жертва оффлайн
+// Читает флот из fleetModule, ресурсы из Rust через game.get_statistics()
 
 import { supabase } from './supabase.js';
 import { fleetModule } from './fleet.js';
 
 // ─── Конфиг кораблей ───────────────────────────────────────────────────────
+// Время в минутах
 const SHIP_CONFIG = {
     scout:  { travel_minutes: 5,  cost: { ore: 0,   chips: 0,  plasma: 0  }, label: 'Разведчик',  icon: '🔭' },
     combat: { travel_minutes: 8,  cost: { ore: 0,   chips: 0,  plasma: 0  }, label: 'Боевой',     icon: '⚔️' },
@@ -86,8 +87,8 @@ export async function sendShip(attackerId, targetId, shipType) {
         return { success: false, error: 'Ошибка сервера. Попробуйте ещё раз' };
     }
 
-    // 7. Помечаем корабль как занятый (сохраняем время старта миссии)
-    fleetModule.setShipMissionStatus(ship.id, true, mission.id);
+    // 7. Помечаем корабль как занятый
+    fleetModule.setShipMissionStatus(ship.id, true);
 
     // 8. Оповещаем жертву
     await pushNotification(targetId, 'incoming_ship', {
@@ -102,9 +103,7 @@ export async function sendShip(attackerId, targetId, shipType) {
 export async function processArrivedMissions(currentUserId) {
     const now = new Date().toISOString();
 
-    // ============================================================
-    // 1. Входящие миссии, которые долетели до цели
-    // ============================================================
+    // Входящие миссии, которые долетели до цели
     const { data: arrived } = await supabase
         .from('missions')
         .select('*')
@@ -118,78 +117,45 @@ export async function processArrivedMissions(currentUserId) {
         if (mission.ship_type === 'cargo')  await _processCargo(mission);
     }
 
-    // ============================================================
-    // 2. Исходящие миссии, которые возвращаются домой (status = 'returning')
-    // ============================================================
+    // Исходящие миссии, которые возвращаются домой
     const { data: returning } = await supabase
         .from('missions')
         .select('*')
         .eq('attacker_id', currentUserId)
-        .eq('status', 'returning')
+        .in('status', ['returning', 'arrived'])
         .lte('returns_at', now);
 
     for (const mission of returning ?? []) {
-        await _finalizeMission(mission, currentUserId);
-    }
-
-    // ============================================================
-    // 3. НОВОЕ: Страховка — миссии в 'flying', у которых returns_at уже прошёл
-    //    Это случай когда жертва была оффлайн и никогда не обработала прилёт
-    // ============================================================
-    const { data: timedOut } = await supabase
-        .from('missions')
-        .select('*')
-        .eq('attacker_id', currentUserId)
-        .eq('status', 'flying')
-        .lte('returns_at', now);
-
-    for (const mission of timedOut ?? []) {
-        // Корабль считается вернувшимся без результата (жертва была оффлайн)
+        // Освобождаем корабль во флоте
         if (mission.fleet_ship_id) {
-            fleetModule.setShipMissionStatus(mission.fleet_ship_id, false, null);
+            fleetModule.setShipMissionStatus(mission.fleet_ship_id, false);
         }
-        await supabase.from('missions')
-            .update({ status: 'done' })
-            .eq('id', mission.id);
+        
+        await supabase.from('missions').update({ status: 'done' }).eq('id', mission.id);
 
-        await pushNotification(mission.attacker_id, 'mission_timeout', {
-            message: `⏱ ${SHIP_CONFIG[mission.ship_type]?.icon ?? '🚀'} Корабль вернулся — цель была оффлайн, миссия не выполнена.`,
-            payload: { mission_id: mission.id }
-        });
-    }
-}
+        // Если грузовой — добавляем лут в инвентарь
+        if (mission.ship_type === 'cargo' && mission.loot && window.game) {
+            _applyLootToGame(mission.loot);
+            await pushNotification(mission.attacker_id, 'cargo_returned', {
+                message: `📦 Грузовой вернулся! Добавлено: ${_formatLoot(mission.loot)}`,
+                payload: { loot: mission.loot }
+            });
+        }
 
-// ─── Внутренний финализатор миссии ───────────────────────────────────────
-async function _finalizeMission(mission, currentUserId) {
-    // Освобождаем корабль во флоте
-    if (mission.fleet_ship_id) {
-        fleetModule.setShipMissionStatus(mission.fleet_ship_id, false, null);
-    }
-    
-    await supabase.from('missions').update({ status: 'done' }).eq('id', mission.id);
+        if (mission.ship_type === 'scout' && mission.scout_data) {
+            await pushNotification(mission.attacker_id, 'scout_report', {
+                message: `🔭 Разведчик вернулся с данными!`,
+                payload: { scout_data: mission.scout_data, mission_id: mission.id }
+            });
+        }
 
-    // Уведомляем о результате
-    if (mission.ship_type === 'cargo' && mission.loot && window.game) {
-        _applyLootToGame(mission.loot);
-        await pushNotification(mission.attacker_id, 'cargo_returned', {
-            message: `📦 Грузовой вернулся! Добавлено: ${_formatLoot(mission.loot)}`,
-            payload: { loot: mission.loot }
-        });
-    }
-
-    if (mission.ship_type === 'scout' && mission.scout_data) {
-        await pushNotification(mission.attacker_id, 'scout_report', {
-            message: `🔭 Разведчик вернулся с данными!`,
-            payload: { scout_data: mission.scout_data, mission_id: mission.id }
-        });
-    }
-
-    if (mission.ship_type === 'combat') {
-        const stolenText = mission.loot ? _formatLoot(mission.loot) : 'ничего';
-        await pushNotification(mission.attacker_id, 'attack_result', {
-            message: `⚔️ Боевой корабль вернулся. Ресурсы разграблены: ${stolenText}`,
-            payload: { loot: mission.loot, mission_id: mission.id }
-        });
+        if (mission.ship_type === 'combat') {
+            const stolenText = mission.loot ? _formatLoot(mission.loot) : 'ничего';
+            await pushNotification(mission.attacker_id, 'attack_result', {
+                message: `⚔️ Боевой корабль вернулся. Ресурсы разграблены: ${stolenText}`,
+                payload: { loot: mission.loot, mission_id: mission.id }
+            });
+        }
     }
 }
 
@@ -326,12 +292,14 @@ async function _processCargo(mission) {
 function _applyLootToGame(loot) {
     if (!window.game) return;
     try {
+        // Используем существующий метод add_resource
         for (const [res, amt] of Object.entries(loot)) {
             window.game.add_resource(res, amt);
         }
         console.log("✅ Лут применён:", loot);
     } catch(e) {
         console.warn("Не удалось применить лут через add_resource, пробуем pending", e);
+        // Запасной вариант через localStorage
         const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
         for (const [res, amt] of Object.entries(loot)) {
             pending[res] = (pending[res] || 0) + amt;
@@ -355,13 +323,38 @@ export async function getLatestScoutData(attackerId, targetId) {
     return data ?? null;
 }
 
+// ─── Список игроков для атаки ─────────────────────────────────────────────
+export async function getTargetPlayers(currentUserId) {
+    const { data: saves } = await supabase
+        .from('game_saves')
+        .select('user_id, ore, coal, chips, plasma, total_mined, neuro_evolution, last_seen')
+        .neq('user_id', currentUserId)
+        .order('total_mined', { ascending: false })
+        .limit(50);
+
+    const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, username');
+
+    const profileMap = {};
+    (profiles ?? []).forEach(p => { profileMap[p.id] = p.username; });
+
+    return (saves ?? []).map(s => ({
+        ...s,
+        username: profileMap[s.user_id] ?? 'Игрок',
+        isOnline: s.last_seen
+            ? Date.now() - new Date(s.last_seen).getTime() < 5 * 60 * 1000
+            : false,
+    }));
+}
+
 // ─── Активные миссии игрока ────────────────────────────────────────────────
 export async function getActiveMissions(playerId) {
     const { data } = await supabase
         .from('missions')
         .select('*')
         .or(`attacker_id.eq.${playerId},target_id.eq.${playerId}`)
-        .in('status', ['flying','returning'])
+        .in('status', ['flying','returning','arrived'])
         .order('arrives_at');
     return data ?? [];
 }

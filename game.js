@@ -19,7 +19,7 @@ import {
     getUnreadNotifications,
     markAllNotificationsRead,
     subscribeToNotifications,
-} from './multiplayer_combat.js';
+} from './multiplayer_combat.js?v=2';
 
 let game;
 let currentUser = null;
