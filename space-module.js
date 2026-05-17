@@ -1,6 +1,4 @@
-// space-module.js
-// Космическая карта — читает данные напрямую из WASM и Supabase
-// С мультиплеерной боевой системой
+// space-module.js - ИСПРАВЛЕННАЯ ВЕРСИЯ (БАГ #4 - УДАЛЁН ДУБЛИРУЮЩИЙСЯ last_seen UPDATER)
 
 import { supabase } from './supabase.js';
 
@@ -8,7 +6,7 @@ export const spaceModule = {
     game: null,
     currentUser: null,
     multiplayerInterval: null,
-    lastSeenInterval: null,
+    lastSeenInterval: null, // УДАЛЁН — используется только game.js
     initialized: false,
 
     planets: [],
@@ -27,7 +25,6 @@ export const spaceModule = {
     PLANET_NAMES: ['Арктур', 'Сириус', 'Вега', 'Проксима', 'Антарес',
                    'Поллукс', 'Кастор', 'Альтаир', 'Денеб', 'Регул'],
 
-    // ── Инициализация ────────────────────────────────
     init(gameInstance, user) {
         this.game = gameInstance;
         this.currentUser = user;
@@ -36,22 +33,22 @@ export const spaceModule = {
         this.generateStars();
         this.renderPlanets();
         this.setupMultiplayer();
-        this.startLastSeenUpdater();
+        // УДАЛЁН вызов startLastSeenUpdater() — теперь только через game.js
         this.initialized = true;
 
         console.log('🌌 Space module инициализирован');
     },
 
-    // Вызывается при переключении на вкладку "КАРТА"
     onTabActivated() {
         if (!this.initialized) return;
         this.syncFromGame();
         this.renderPlanets();
         this.renderPlayers();
         this.updateStatusBar();
+        // Вызываем game.js функцию обновления last_seen через глобальное событие
+        window.dispatchEvent(new CustomEvent('updateLastSeen'));
     },
 
-    // ── Читаем данные из WASM напрямую ───────────────
     syncFromGame() {
         if (!this.game) return;
         try {
@@ -91,7 +88,6 @@ export const spaceModule = {
         }
     },
 
-    // ── Планеты ──────────────────────────────────────
     loadPlanets() {
         try {
             const saved = localStorage.getItem('corebox_planets');
@@ -173,7 +169,6 @@ export const spaceModule = {
         window.showNotif?.(`🪐 ${planet.name}\nТип: ${cfg.name ?? planet.type}`, false);
     },
 
-    // ── Звёзды ────────────────────────────────────────
     generateStars() {
         const layer = document.getElementById('space-stars-layer');
         if (!layer) return;
@@ -192,7 +187,6 @@ export const spaceModule = {
         }
     },
 
-    // ── Мультиплеер ───────────────────────────────────
     setupMultiplayer() {
         this.loadMultiplayerPlayers();
         if (this.multiplayerInterval) clearInterval(this.multiplayerInterval);
@@ -297,12 +291,10 @@ export const spaceModule = {
         });
     },
 
-    // ── ПОЛНОЦЕННОЕ ОКНО ИГРОКА С КНОПКАМИ АТАКИ ──
     async showPlayerInfo(userId) {
         const player = this.otherPlayers.find(p => p.user_id === userId);
         if (!player) return;
 
-        // Динамически импортируем мультиплеерные функции
         const { getLatestScoutData, sendShip } = await import('./multiplayer_combat.js');
         
         const scout = await getLatestScoutData(this.currentUser.id, player.user_id);
@@ -310,7 +302,6 @@ export const spaceModule = {
         const scoutFresh = scoutAge !== null && scoutAge < 30;
         const isOnline = this.isOnline(player);
 
-        // Закрываем предыдущий попап если есть
         if (this._currentPopup) {
             this._currentPopup.remove();
             this._currentPopup = null;
@@ -409,11 +400,9 @@ export const spaceModule = {
         document.body.appendChild(popup);
         this._currentPopup = popup;
 
-        // Обработчики кнопок
         const doSend = async (shipType) => {
             if (shipType !== 'scout' && !scoutFresh) return;
             
-            // Добавляем визуальный фидбек
             const btn = popup.querySelector(`#space-btn-${shipType}`);
             if (btn) {
                 const originalText = btn.innerHTML;
@@ -446,7 +435,6 @@ export const spaceModule = {
         popup.querySelector('#space-btn-cargo').onclick = (e) => { e.stopPropagation(); doSend('cargo'); };
         popup.querySelector('#space-btn-close').onclick = (e) => { e.stopPropagation(); popup.remove(); this._currentPopup = null; };
         
-        // Закрытие по клику вне попапа
         const closeOnOutside = (e) => {
             if (!popup.contains(e.target)) {
                 popup.remove();
@@ -467,26 +455,9 @@ export const spaceModule = {
         return `${Math.floor(hours / 24)} дн назад`;
     },
 
-    // ── last_seen ─────────────────────────────────────
-    startLastSeenUpdater() {
-        if (this.lastSeenInterval) clearInterval(this.lastSeenInterval);
-        this.lastSeenInterval = setInterval(async () => {
-            if (!this.currentUser) return;
-            try {
-                await supabase.from('game_saves')
-                    .update({ last_seen: new Date().toISOString(), updated_at: new Date().toISOString() })
-                    .eq('user_id', this.currentUser.id);
-            } catch(e) {}
-        }, 30000);
-    },
-
-    stopLastSeenUpdater() {
-        if (this.lastSeenInterval) { clearInterval(this.lastSeenInterval); this.lastSeenInterval = null; }
-    },
-
+    // УДАЛЁН startLastSeenUpdater и stopLastSeenUpdater
     destroy() {
         if (this.multiplayerInterval) clearInterval(this.multiplayerInterval);
-        this.stopLastSeenUpdater();
         if (this._currentPopup) {
             this._currentPopup.remove();
             this._currentPopup = null;

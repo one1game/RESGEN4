@@ -1,4 +1,4 @@
-// game.js - ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ С МУЛЬТИПЛЕЕРОМ И РАБОТАЮЩЕЙ МОБИЛЬНОЙ КНОПКОЙ
+// game.js - ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ (БАГИ #4, #5, #7, #12, #13, #14)
 
 import init, { start_game, apply_config_from_admin } from './pkg/corebox_rs.js';
 import { initStatistics, updateStatisticsDisplay, switchTab, gameStats, loadUserStatistics, resetUserStatistics, updateStatisticsFromRust } from './statistics.js';
@@ -10,7 +10,6 @@ import { Sounds } from './sounds.js';
 import { initAuth, logout, getCurrentUser, login, register } from './auth.js';
 import { saveGameToCloud, loadGameFromCloud, syncStatisticsToCloud } from './save.js';
 import { supabase } from './supabase.js';
-// ИМПОРТ МУЛЬТИПЛЕЕРНЫХ ФУНКЦИЙ
 import {
     sendShip,
     processArrivedMissions,
@@ -19,7 +18,7 @@ import {
     getUnreadNotifications,
     markAllNotificationsRead,
     subscribeToNotifications,
-} from './multiplayer_combat.js?v=2';
+} from './multiplayer_combat.js';
 
 let game;
 let currentUser = null;
@@ -36,6 +35,7 @@ let _lastSeenTimer = null;
 let lastProcessedAttackHash = null;
 let _gameLoopInterval = null;
 let offlineProgressShown = false;
+let lastAlertMode = null; // Кэш для alertMode (#12)
 
 // МУЛЬТИПЛЕЕРНЫЕ ПЕРЕМЕННЫЕ
 let _notifChannel = null;
@@ -75,7 +75,7 @@ function scheduleSave() {
     }, 5000);
 }
 
-// ========== НОВАЯ ФУНКЦИЯ: ОБНОВЛЕНИЕ last_seen ==========
+// ========== ЕДИНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ last_seen (БАГ #4) ==========
 async function updateLastSeen() {
     if (!currentUser) return;
     try {
@@ -266,6 +266,7 @@ function calculateOfflineProgress(saved) {
     };
 }
 
+// ========== ИСПРАВЛЕННЫЙ ОФФЛАЙН ПОПАП (БАГ #14) ==========
 function showOfflineRewardPopup(p) {
     const mins = Math.floor(p.elapsedSeconds / 60);
     const timeStr = mins > 60 ? `${Math.floor(mins / 60)}ч ${mins % 60}м` : `${mins}м`;
@@ -273,9 +274,16 @@ function showOfflineRewardPopup(p) {
     showFloatingText(`⏰ Офлайн ${timeStr}`, window.innerWidth/2, 200);
     const popup = document.createElement('div');
     popup.className = 'offline-popup';
-    popup.innerHTML = `<h3>⏰ ВОЗВРАЩЕНИЕ</h3><p>Прошло: ${timeStr}</p><div class="offline-resources"><div>🪨 +${p.coalGained}</div><div>♻️ +${p.trashGained}</div><div>⛏️ +${p.oreGained}</div></div><button onclick="this.parentElement.remove()">ПРОДОЛЖИТЬ</button>`;
+    popup.innerHTML = `<h3>⏰ ВОЗВРАЩЕНИЕ</h3><p>Прошло: ${timeStr}</p><div class="offline-resources"><div>🪨 +${p.coalGained}</div><div>♻️ +${p.trashGained}</div><div>⛏️ +${p.oreGained}</div></div><button id="offlinePopupClose">ПРОДОЛЖИТЬ</button>`;
     document.body.appendChild(popup);
-    setTimeout(() => popup.remove(), 5000);
+    
+    // Закрытие по кнопке, автозакрытие через 20 секунд (было 5)
+    const closePopup = () => {
+        if (popup.parentNode) popup.remove();
+    };
+    document.getElementById('offlinePopupClose').onclick = closePopup;
+    setTimeout(closePopup, 20000);
+    
     localStorage.setItem('corebox_offline_shown', Date.now().toString());
 }
 
@@ -397,7 +405,6 @@ async function loadFromCloudAndMerge() {
     }
 }
 
-// ========== НОВАЯ ФУНКЦИЯ: ПРИМЕНЕНИЕ PENDING LOOT ==========
 function _applyPendingLoot() {
     try {
         const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
@@ -442,12 +449,11 @@ function _applyPendingLoot() {
     }
 }
 
-// ========== НОВАЯ ФУНКЦИЯ: ПРИМЕНЕНИЕ ОСВОБОЖДЁННЫХ КОРАБЛЕЙ ОТ EDGE FUNCTION ==========
+// ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ПРИМЕНЕНИЯ ОСВОБОЖДЁННЫХ КОРАБЛЕЙ (БАГ #5) ==========
 async function _applyReleasedShips(userId) {
     if (!userId) return;
     
     try {
-        // Читаем корабли которые Edge Function освободила пока игрок был офлайн
         const { data: released, error } = await supabase
             .from('fleet_released')
             .select('*')
@@ -464,7 +470,7 @@ async function _applyReleasedShips(userId) {
         console.log(`🚀 Применяем ${released.length} освобождённых кораблей...`);
         
         for (const entry of released) {
-            // ← НОВОЕ: проверяем что миссия ещё не закрыта processArrivedMissions
+            // Проверяем, не освобождена ли миссия уже через processArrivedMissions
             const { data: mission } = await supabase
                 .from('missions')
                 .select('status')
@@ -474,19 +480,15 @@ async function _applyReleasedShips(userId) {
                 .maybeSingle();
 
             if (!mission) {
-                // Миссия уже done — корабль уже освобождён через processArrivedMissions
-                // Просто помечаем fleet_released как применённое
                 await supabase.from('fleet_released').update({ applied: true }).eq('id', entry.id);
                 console.log(`⏩ Корабль ${entry.ship_id} уже освобождён через processArrivedMissions`);
                 continue;
             }
 
-            // Освобождаем корабль во флоте
             if (fleetModule && fleetModule.setShipMissionStatus) {
                 fleetModule.setShipMissionStatus(entry.ship_id, false);
             }
             
-            // Если грузовой — добавляем loot в pending
             if (entry.ship_type === 'cargo' && entry.loot && Object.keys(entry.loot).length > 0) {
                 const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
                 for (const [res, amt] of Object.entries(entry.loot)) {
@@ -513,14 +515,12 @@ async function _applyReleasedShips(userId) {
                 addToLog(`⚔️ Боевой корабль вернулся пока вас не было.${lootText}`);
             }
             
-            // Помечаем как применённое
             await supabase
                 .from('fleet_released')
                 .update({ applied: true })
                 .eq('id', entry.id);
         }
         
-        // Применяем накопленный loot
         _applyPendingLoot();
         
     } catch(e) {
@@ -528,7 +528,7 @@ async function _applyReleasedShips(userId) {
     }
 }
 
-// ========== МУЛЬТИПЛЕЕРНАЯ ИНИЦИАЛИЗАЦИЯ ==========
+// ========== МУЛЬТИПЛЕЕРНАЯ ИНИЦИАЛИЗАЦИЯ (БАГ #13 - Realtime вместо polling) ==========
 function _initMultiplayer(user) {
     if (!user) return;
 
@@ -538,20 +538,36 @@ function _initMultiplayer(user) {
         _showCombatNotification(notif);
     });
 
-    // Показать непрочитанные при входе
     getUnreadNotifications(user.id).then(notifs => {
         notifs.forEach(n => _showCombatNotification(n, false));
         if (notifs.length > 0) markAllNotificationsRead(user.id);
     });
 
-    // НОВОЕ: при старте проверяем освобождённые корабли от Edge Function
     _applyReleasedShips(user.id);
 
-    // Polling прибывших миссий (запасной вариант, реже — раз в 2 минуты)
+    // БАГ #13: Realtime подписка на миссии вместо polling
     if (_missionPollInterval) clearInterval(_missionPollInterval);
+    
+    // Подписываемся на realtime изменения миссий
+    const missionChannel = supabase
+        .channel(`missions:${user.id}`)
+        .on('postgres_changes', {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'missions',
+            filter: `attacker_id=eq.${user.id}`,
+        }, (payload) => {
+            if (payload.new && (payload.new.status === 'returning' || payload.new.status === 'done')) {
+                console.log('Realtime обновление миссии, вызываем processArrivedMissions');
+                processArrivedMissions(user.id);
+            }
+        })
+        .subscribe();
+    
+    // Резервный polling раз в 5 минут (вместо 2 минут)
     _missionPollInterval = setInterval(() => {
         if (currentUser) processArrivedMissions(currentUser.id);
-    }, 120000);  // 2 минуты вместо 30 секунд
+    }, 300000);
     
     if (currentUser) processArrivedMissions(currentUser.id);
 }
@@ -599,10 +615,12 @@ async function _refreshFleetWithMissions() {
     container.innerHTML = fleetModule.renderFleetUI();
     fleetModule.setupEventListeners(container);
 
+    const missionsPanel = document.getElementById('activeMissionsPanel');
+    if (!missionsPanel) return;
+    
     if (missions.length > 0) {
-        const missionsHtml = document.createElement('div');
-        missionsHtml.className = 'panel';
-        missionsHtml.innerHTML = `
+        missionsPanel.style.display = 'block';
+        missionsPanel.innerHTML = `
             <div class="panel-title">
                 <span>🚀 АКТИВНЫЕ МИССИИ</span>
                 <span class="collapse-icon">▼</span>
@@ -622,11 +640,12 @@ async function _refreshFleetWithMissions() {
                 }).join('')}
             </div>
         `;
-        container.parentNode.insertBefore(missionsHtml, container);
+    } else {
+        missionsPanel.style.display = 'none';
     }
 }
 
-// ========== ИСПРАВЛЕННАЯ ИНИЦИАЛИЗАЦИЯ АВТОРИЗАЦИИ ==========
+// ========== ИСПРАВЛЕННАЯ ИНИЦИАЛИЗАЦИЯ АВТОРИЗАЦИИ (БАГ #4) ==========
 function initializeAuth() {
     setupAuthFormHandlers();
     getKeepAliveChannel();
@@ -655,7 +674,6 @@ function initializeAuth() {
             
             loadUserStatsFromCloud(user);
             
-            // МУЛЬТИПЛЕЕР — ИНИЦИАЛИЗАЦИЯ
             _initMultiplayer(user);
             
             setTimeout(() => {
@@ -904,6 +922,13 @@ function updateNeuroStatus(rustStats = null) {
             updateAttackHistory(rustStats.attack_history || []);
             updateFactionPanel(rustStats.rebel_factions || [], rustStats.last_attacking_faction || '');
             updateUpgradeDisplay(rustStats);
+            
+            // Добавлен блок отображения бонусов престижа (#12)
+            const prestigeBonusEl = document.getElementById('prestigeBonus');
+            if (prestigeBonusEl) {
+                const bonus = getPrestigeBonus();
+                prestigeBonusEl.innerHTML = `✨ Престиж Ур.${prestigeLevel}: +${(bonus.critBonus*100).toFixed(0)}% крит, +${(bonus.comboBonus*100).toFixed(0)}% комбо, +${(bonus.eventBonus*100).toFixed(1)}% события`;
+            }
         }
     } catch(e) {}
 }
@@ -1087,14 +1112,10 @@ function toggleAutoClicking() {
     scheduleCloudSave();
 }
 
-// ========== ИСПРАВЛЕННАЯ ФУНКЦИЯ ДЛЯ МОБИЛЬНЫХ УСТРОЙСТВ ==========
-// Проблема: e.preventDefault() в touchstart убивал click на мобильных
-// Решение: убрали preventDefault из touchstart, добавили обработку в touchend
 function setupLongPressHandlers() {
     const btn = document.getElementById('floatingMineBtn');
     if (!btn) return;
     
-    // Клонируем чтобы удалить старые обработчики
     const newBtn = btn.cloneNode(true);
     btn.parentNode.replaceChild(newBtn, btn);
     const mineBtn = document.getElementById('floatingMineBtn');
@@ -1106,7 +1127,6 @@ function setupLongPressHandlers() {
     const LONG_PRESS_MS = 600;
     const MOVE_THRESHOLD = 10;
     
-    // ========== ДЕСКТОП (мышь) ==========
     mineBtn.addEventListener('mousedown', (e) => {
         e.preventDefault();
         isLongPress = false;
@@ -1129,9 +1149,7 @@ function setupLongPressHandlers() {
         isLongPress = false;
     });
     
-    // ========== МОБИЛЬНЫЕ (touch) — БЕЗ preventDefault в touchstart! ==========
     mineBtn.addEventListener('touchstart', (e) => {
-        // ❌ НЕ ВЫЗЫВАЕМ e.preventDefault() — это убивает click на мобильных!
         const touch = e.touches[0];
         touchStartX = touch.clientX;
         touchStartY = touch.clientY;
@@ -1139,14 +1157,12 @@ function setupLongPressHandlers() {
         
         pressTimer = setTimeout(() => {
             isLongPress = true;
-            // Вибрация при активации автокликера
             if (navigator.vibrate) navigator.vibrate(50);
             toggleAutoClicking();
         }, LONG_PRESS_MS);
-    }, { passive: true }); // passive: true — ключевой момент!
+    }, { passive: true });
     
     mineBtn.addEventListener('touchmove', (e) => {
-        // Если палец сильно сдвинулся — отменяем long-press
         const touch = e.touches[0];
         const deltaX = Math.abs(touch.clientX - touchStartX);
         const deltaY = Math.abs(touch.clientY - touchStartY);
@@ -1158,11 +1174,9 @@ function setupLongPressHandlers() {
     }, { passive: true });
     
     mineBtn.addEventListener('touchend', (e) => {
-        // preventDefault тут БЕЗОПАСЕН — только на touchend
         e.preventDefault();
         clearTimeout(pressTimer);
         
-        // Если это был не long-press — вызываем добычу
         if (!isLongPress) {
             handleClick();
         }
@@ -1434,12 +1448,18 @@ function rollNightDiscount(nightIndex) {
         const idx = Math.floor(Math.random() * BASE_TRADES.length);
         activeDiscount = { tradeId: BASE_TRADES[idx].id, nightIndex };
         addToLog(`🏷️ Ночная скидка 50%: ${RES_ICON[BASE_TRADES[idx].from]}→${RES_ICON[BASE_TRADES[idx].to]}`);
-        renderTradeTab();
+        if (document.getElementById('trade-tab')?.style.display === 'block') renderTradeTab();
     }
 }
 
-function onDayStarted() { if (activeDiscount) { activeDiscount = null; renderTradeTab(); } }
+function onDayStarted() { 
+    if (activeDiscount) { 
+        activeDiscount = null; 
+        if (document.getElementById('trade-tab')?.style.display === 'block') renderTradeTab();
+    } 
+}
 
+// ========== ИСПРАВЛЕННАЯ ТОРГОВЛЯ С ПРОВЕРКОЙ trade_blocked (БАГ #7) ==========
 function renderTradeTab() {
     const container = document.getElementById('buyItemsContainer');
     if (!container || !game) return;
@@ -1451,6 +1471,14 @@ function renderTradeTab() {
         chips: stats?.chips_inventory || 0,
         plasma: stats?.plasma_inventory || 0,
     };
+    
+    const tradeBlocked = stats?.trade_blocked || false;
+    
+    if (tradeBlocked) {
+        container.innerHTML = `<div class="trade-blocked-banner">🔴 ТОРГОВЛЯ ЗАБЛОКИРОВАНА (НОЧЬ ОСАДЫ) 🔴</div>`;
+        return;
+    }
+    
     container.innerHTML = BASE_TRADES.map(t => {
         const hasDisc = activeDiscount?.tradeId === t.id;
         const cost = hasDisc ? Math.max(1, Math.ceil(t.fromAmt * 0.5)) : t.fromAmt;
@@ -1462,6 +1490,15 @@ function renderTradeTab() {
 
 window.executeTrade = function(tradeId) {
     if (!game) return;
+    // Дополнительная проверка блокировки
+    let stats = null;
+    try { const j = game.get_statistics(); if (j) stats = JSON.parse(j); } catch(e) {}
+    if (stats?.trade_blocked) {
+        addToLog('🔴 Торговля заблокирована (ночь осады)');
+        Sounds.error();
+        return;
+    }
+    
     const t = BASE_TRADES.find(x => x.id === tradeId);
     if (!t) return;
     const hasDisc = activeDiscount?.tradeId === tradeId;
@@ -1477,10 +1514,6 @@ window.executeTrade = function(tradeId) {
 };
 
 function setupEventListeners() {
-    // ❌ УБИРАЕМ эту строку — click-обработчик добавляет mobile-patch.js через touchend
-    // const floatingBtn = document.getElementById('floatingMineBtn');
-    // if (floatingBtn) floatingBtn.addEventListener('click', handleClick);
-
     setupLongPressHandlers();
     
     const tabs = [
@@ -1571,6 +1604,7 @@ function saveCurrentUserStatistics() {
     localStorage.setItem('corebox_users', JSON.stringify(users));
 }
 
+// ========== ИСПРАВЛЕННАЯ ИНИЦИАЛИЗАЦИЯ ИГРЫ (БАГ #15 - error boundary) ==========
 async function initializeGame(existingSave = null) {
     if (isGameInitialized) return;
     
@@ -1612,7 +1646,6 @@ async function initializeGame(existingSave = null) {
             }
         }
         
-        // ПРИМЕНЯЕМ PENDING LOOT ПОСЛЕ ЗАГРУЗКИ
         _applyPendingLoot();
         
         if (localStorage.getItem('corebox_autoclicking') === 'true') {
@@ -1692,11 +1725,21 @@ async function initializeGame(existingSave = null) {
                 
                 if (rustStats.current_ai_mode) {
                     const mode = rustStats.current_ai_mode;
+                    let newAlertMode = false;
                     if (mode.includes('Стратегическое отступление') || mode.includes('консервирует')) {
                         if (typeof game.set_temporary_defense_bonus === 'function') game.set_temporary_defense_bonus(40);
-                    } else if (mode.includes('Предсказание') || mode.includes('угроза')) fleetModule.setAlertMode(true);
-                    else { fleetModule.setAlertMode(false); if (typeof game.set_temporary_defense_bonus === 'function') game.set_temporary_defense_bonus(0); }
-                } else fleetModule.setAlertMode(false);
+                    } else if (mode.includes('Предсказание') || mode.includes('угроза')) newAlertMode = true;
+                    else { if (typeof game.set_temporary_defense_bonus === 'function') game.set_temporary_defense_bonus(0); }
+                    
+                    // БАГ #12: кэшируем alertMode
+                    if (newAlertMode !== lastAlertMode) {
+                        fleetModule.setAlertMode(newAlertMode);
+                        lastAlertMode = newAlertMode;
+                    }
+                } else if (lastAlertMode !== false) {
+                    fleetModule.setAlertMode(false);
+                    lastAlertMode = false;
+                }
                 
                 const history = rustStats.attack_history || [];
                 if (history.length > 0) {
@@ -1763,6 +1806,21 @@ async function initializeGame(existingSave = null) {
     } catch(e) { 
         console.error("Ошибка запуска:", e);
         addToLog(`❌ Ошибка инициализации: ${e.message}`, "error");
+        // БАГ #15: UI-fallback при ошибке WASM
+        const errorContainer = document.createElement('div');
+        errorContainer.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a1a1a;border:2px solid #f44;border-radius:16px;padding:20px;z-index:10001;text-align:center;';
+        errorContainer.innerHTML = `
+            <h3 style="color:#f44">⚠️ Ошибка инициализации</h3>
+            <p>Не удалось запустить игру. Попробуйте:</p>
+            <ul style="text-align:left">
+                <li>Очистить кэш браузера</li>
+                <li>Обновить страницу (F5)</li>
+                <li>Проверить соединение с интернетом</li>
+            </ul>
+            <button id="wasmErrorReload" style="padding:8px 16px;background:#4aff9d;border:none;border-radius:8px;cursor:pointer">⟳ ОБНОВИТЬ СТРАНИЦУ</button>
+        `;
+        document.body.appendChild(errorContainer);
+        document.getElementById('wasmErrorReload').onclick = () => location.reload();
     }
 }
 

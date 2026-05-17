@@ -1,5 +1,4 @@
-// design.js - СИСТЕМА ЧЕРТЕЖЕЙ КОРАБЛЕЙ
-// БАГ №3 ИСПРАВЛЕН: стоимости приведены в соответствие с lib.rs
+// design.js - СИСТЕМА ЧЕРТЕЖЕЙ КОРАБЛЕЙ (ИСПРАВЛЕНА СТОИМОСТЬ CARGO)
 
 export const designModule = {
     game: null,
@@ -8,7 +7,7 @@ export const designModule = {
     aiResearchBonus: 0,
     
     blueprints: [
-        { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', designCost: 500, icon: '🚚', unlocked: false },
+        { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', designCost: 200, icon: '🚚', unlocked: false },  // ✅ 500 → 200
         { id: 'scout', name: 'Разведывательный корабль', desc: 'Исследование новых территорий', designCost: 10, icon: '🔭', unlocked: false },
         { id: 'combat', name: 'Боевой корабль', desc: 'Защита флота и атака угроз', designCost: 800, icon: '⚔️', unlocked: false }
     ],

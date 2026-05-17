@@ -1,4 +1,4 @@
-// ======== src/systems/neuro_ecosystem.rs (ПОЛНАЯ ВЕРСИЯ С БОНУСАМИ СОЗНАНИЯ) ========
+// ======== src/systems/neuro_ecosystem.rs (ИСПРАВЛЕНА НОРМАЛИЗАЦИЯ neuro_consciousness) ========
 
 use crate::game::{GameState, GameEvent};
 use crate::game::config::GameConfig;
@@ -8,34 +8,23 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct NeuroEcosystem {
-    // Эволюция
     pub evolution_level: u32,
     pub evolution_score: u32,
     pub system_consciousness: f64,
-    
-    // Память угроз
     pub threat_memory: VecDeque<ThreatRecord>,
     pub learned_patterns: Vec<Pattern>,
-    
-    // Метрики эффективности
     pub defense_success_rate: f64,
     pub prediction_accuracy: f64,
     pub avg_reaction_time: f32,
     pub total_attacks_processed: u32,
     pub successful_predictions: u32,
-    
-    // Состояние
     pub last_processed_time: i32,
     pub cooldown: i32,
     pub reaction_cooldown: i32,
     pub attack_counter: u32,
     pub last_ai_decision: AIDecision,
-    
-    // Бонусы
     pub active_defense_bonus: f64,
     pub prediction_bonus: f64,
-    
-    // Статистика
     pub stats: NeuroStats,
 }
 
@@ -97,18 +86,16 @@ struct ThreatAnalysis {
     risk_level: f64,
 }
 
-// ========== СТРУКТУРА БОНУСОВ СОЗНАНИЯ ==========
-
 pub struct ConsciousnessBonus {
-    pub mining_chance_bonus: f64,      // +% к шансу добычи
-    pub heat_reduction: f64,           // % снижения нагрева
-    pub crit_bonus: f64,               // +% к крит-шансу
-    pub autoclick_speed: f64,          // множитель интервала (<1 = быстрее)
-    pub defense_bonus: u32,            // плоский бонус к защите
-    pub passive_multiplier: f64,       // ×N к пассивным шансам
-    pub trade_discount_chance: f64,    // шанс ночной скидки
-    pub power_bonus: u32,              // +N мощности за клик
-    pub global_multiplier: f64,        // финальный множитель
+    pub mining_chance_bonus: f64,
+    pub heat_reduction: f64,
+    pub crit_bonus: f64,
+    pub autoclick_speed: f64,
+    pub defense_bonus: u32,
+    pub passive_multiplier: f64,
+    pub trade_discount_chance: f64,
+    pub power_bonus: u32,
+    pub global_multiplier: f64,
 }
 
 impl NeuroEcosystem {
@@ -142,10 +129,8 @@ impl NeuroEcosystem {
         }
     }
     
-    // ========== НОВЫЙ МЕТОД: БОНУСЫ СОЗНАНИЯ ==========
-    
     pub fn get_consciousness_bonuses(&self) -> ConsciousnessBonus {
-        let c = self.system_consciousness; // 0.0--1.0
+        let c = self.system_consciousness;
         let lvl = self.evolution_level;
         let global = if lvl >= 10 { 1.25 } else if lvl >= 9 { 1.2 } else { 1.0 };
         
@@ -161,8 +146,6 @@ impl NeuroEcosystem {
             global_multiplier: global,
         }
     }
-    
-    // ========== ГЛАВНЫЙ МЕТОД ОБРАБОТКИ УГРОЗ ==========
     
     pub fn process_threat(
         &mut self, 
@@ -184,7 +167,6 @@ impl NeuroEcosystem {
             }
         }
         
-        // 1. РАСЧЕТ КУЛДАУНА
         let effective_cooldown = self.calculate_cooldown(had_real_attack, state.rebel_activity);
         
         if state.game_time - self.last_processed_time < effective_cooldown {
@@ -193,10 +175,8 @@ impl NeuroEcosystem {
         
         self.last_processed_time = state.game_time;
         
-        // 2. АНАЛИЗ УГРОЗЫ
         let threat_analysis = self.analyze_threat(state, rebel_system, had_real_attack);
         
-        // 3. ЗАПИСЬ В ПАМЯТЬ
         self.record_threat(
             state.rebel_activity,
             had_real_attack,
@@ -206,7 +186,6 @@ impl NeuroEcosystem {
             threat_analysis.predicted
         );
         
-        // 4. НАЧИСЛЕНИЕ ОЧКОВ ЭВОЛЮЦИИ ЗА АКТИВНОСТЬ
         let points_gained = self.calculate_evolution_points(
             had_real_attack, 
             state.rebel_activity,
@@ -232,21 +211,16 @@ impl NeuroEcosystem {
             ));
         }
         
-        // 5. ОБУЧЕНИЕ ПАТТЕРНУ
         self.learn_pattern(state, rebel_system, had_real_attack, was_defended);
         
-        // 6. ПРИНЯТИЕ РЕШЕНИЯ ИИ
         let ai_decision = self.make_ai_decision(state, rebel_system, had_real_attack);
         self.last_ai_decision = ai_decision.clone();
         
-        // 7. ПРИМЕНЕНИЕ РЕШЕНИЯ
         let decision_events = self.apply_ai_decision(state, rebel_system, config, ai_decision);
         events.extend(decision_events);
         
-        // 8. ОБНОВЛЕНИЕ МЕТРИК
         self.update_metrics(had_real_attack, was_defended, threat_analysis.predicted);
         
-        // 9. БОНУС ЗА СЕРИЮ АТАК
         if had_real_attack {
             self.attack_counter += 1;
             if self.attack_counter >= 2 {
@@ -261,16 +235,12 @@ impl NeuroEcosystem {
             self.attack_counter = 0;
         }
         
-        // 10. ОЧИСТКА СТАРОЙ ПАМЯТИ
         self.cleanup_old_memory(state.game_time);
         
-        // 11. ОБНОВЛЕНИЕ БОНУСОВ
         self.update_bonuses();
         
         events
     }
-    
-    // ========== ПУБЛИЧНЫЙ МЕТОД ДЛЯ ПРОВЕРКИ ЭВОЛЮЦИИ ==========
     
     pub fn check_evolution(&mut self, state: &mut GameState, rebel_system: &mut RebelSystem) -> Vec<GameEvent> {
         let mut events = Vec::new();
@@ -290,7 +260,6 @@ impl NeuroEcosystem {
             self.cooldown = (self.cooldown - 1).max(5);
             self.reaction_cooldown = (self.reaction_cooldown - 1).max(3);
             
-            // Обновляем состояние игры
             state.neuro_evolution = self.evolution_level;
             state.neuro_consciousness = self.system_consciousness;
             state.neuro_score = self.evolution_score;
@@ -335,18 +304,14 @@ impl NeuroEcosystem {
         events
     }
     
-    // ========== АНАЛИЗ УГРОЗ ==========
-    
     fn analyze_threat(&self, _state: &GameState, _rebel_system: &RebelSystem, _had_attack: bool) -> ThreatAnalysis {
         let mut predicted = false;
         let mut confidence = 0.0;
         let mut predicted_attack_type = None;
         
-        // Анализ на основе памяти
         if !self.threat_memory.is_empty() {
             let recent: Vec<_> = self.threat_memory.iter().rev().take(20).collect();
             
-            // Поиск похожих паттернов
             let similar_threats: Vec<_> = recent.iter()
                 .filter(|r| {
                     let threat_level_diff = (r.threat_level as i32 - _state.rebel_activity as i32).abs();
@@ -370,7 +335,6 @@ impl NeuroEcosystem {
             }
         }
         
-        // Анализ на основе активности повстанцев
         let activity_risk = if _state.rebel_activity >= 7 {
             0.9
         } else if _state.rebel_activity >= 4 {
@@ -431,8 +395,6 @@ impl NeuroEcosystem {
         self.threat_memory.push_back(record);
     }
     
-    // ========== РАСЧЕТ ОЧКОВ ЭВОЛЮЦИИ ==========
-    
     fn calculate_evolution_points(&self, had_real_attack: bool, rebel_activity: u32, was_defended: bool, predicted: bool) -> u32 {
         let base_points = if had_real_attack {
             30 + (rebel_activity * 5) as u32
@@ -453,8 +415,6 @@ impl NeuroEcosystem {
         base_points + bonus + evolution_bonus
     }
     
-    // ========== ОБУЧЕНИЕ ПАТТЕРНАМ ==========
-    
     fn learn_pattern(&mut self, state: &GameState, rebel_system: &RebelSystem, had_attack: bool, was_defended: bool) {
         let pattern_type = self.identify_pattern_type(state, rebel_system);
         let success = was_defended || (!had_attack && self.prediction_accuracy > 0.7);
@@ -466,7 +426,6 @@ impl NeuroEcosystem {
             "observe".to_string()
         };
         
-        // Находим индекс паттерна
         let pattern_index = self.learned_patterns.iter().position(|p| p.pattern_type == pattern_type);
         
         if let Some(idx) = pattern_index {
@@ -522,8 +481,6 @@ impl NeuroEcosystem {
             "standard_defense".to_string()
         }
     }
-    
-    // ========== ПРИНЯТИЕ РЕШЕНИЙ ИИ ==========
     
     fn make_ai_decision(&self, state: &GameState, _rebel_system: &RebelSystem, had_attack: bool) -> AIDecision {
         let consciousness = self.system_consciousness;
@@ -658,8 +615,6 @@ impl NeuroEcosystem {
         events
     }
     
-    // ========== МЕТРИКИ ==========
-    
     fn update_metrics(&mut self, had_attack: bool, was_defended: bool, predicted: bool) {
         self.total_attacks_processed += 1;
         
@@ -728,8 +683,6 @@ impl NeuroEcosystem {
             _ => 1200 + (self.evolution_level - 10) * 100,
         }
     }
-    
-    // ========== ПУБЛИЧНЫЕ МЕТОДЫ ДЛЯ ВНЕШНЕГО ВЗАИМОДЕЙСТВИЯ ==========
     
     pub fn get_defense_bonus(&self) -> f64 {
         let base_bonus = self.active_defense_bonus;
@@ -818,13 +771,16 @@ impl NeuroEcosystem {
         self.evolution_score
     }
     
+    // ========== ИСПРАВЛЕННАЯ НОРМАЛИЗАЦИЯ (БАГ #10) ==========
     pub fn load_from_state(&mut self, evolution: u32, consciousness: f64, score: u32) {
         self.evolution_level = evolution;
-        self.system_consciousness = if consciousness > 1.0 {
+        // Безопасная нормализация: если значение > 1.5 (т.е. пришло как процент 0-100), делим на 100
+        let normalized = if consciousness > 1.5 {
             (consciousness / 100.0).min(1.0)
         } else {
             consciousness.min(1.0)
         };
+        self.system_consciousness = normalized;
         self.evolution_score = score;
         
         self.last_processed_time = 0;

@@ -1,4 +1,4 @@
-// ======== src/lib.rs (ПОЛНОСТЬЮ ИСПРАВЛЕННЫЙ) ========
+// ======== src/lib.rs (ИСПРАВЛЕН: добавлены trade_blocked и current_night_type в get_statistics) ========
 
 #![recursion_limit = "256"]
 
@@ -74,7 +74,6 @@ impl CoreGame {
         GameConfig::default()
     }
     
-    // Форсированное сохранение в localStorage
     fn force_save(&self) {
         if let Some(window) = web_sys::window() {
             if let Ok(Some(storage)) = window.local_storage() {
@@ -84,7 +83,6 @@ impl CoreGame {
                 state.neuro_score = self.neuro_ecosystem.get_evolution_score();
                 if let Ok(json) = serde_json::to_string(&state) { 
                     let _ = storage.set_item("corebox_save", &json);
-                    // Также сохраняем упрощённую версию для universal
                     let simple_save = serde_json::json!({
                         "inventory": {
                             "coal": state.inventory.coal,
@@ -104,6 +102,8 @@ impl CoreGame {
                         "game_time": state.game_time,
                         "nights_survived": state.nights_survived,
                         "total_coal_burned": state.total_coal_burned,
+                        "trade_blocked": state.trade_blocked,
+                        "current_night_type": state.current_night_type,
                         "_savedAt": js_sys::Date::now()
                     });
                     let _ = storage.set_item("corebox_save_universal", &simple_save.to_string());
@@ -162,13 +162,11 @@ impl CoreGame {
         }
     }
     
-    // Сохранить текущее состояние
     #[wasm_bindgen]
     pub fn save_current_state(&mut self) {
         self.force_save();
     }
     
-    // Получить сохранение для universal
     #[wasm_bindgen]
     pub fn get_universal_save(&self) -> String {
         let simple_save = serde_json::json!({
@@ -190,6 +188,8 @@ impl CoreGame {
             "game_time": self.state.game_time,
             "nights_survived": self.state.nights_survived,
             "total_coal_burned": self.state.total_coal_burned,
+            "trade_blocked": self.state.trade_blocked,
+            "current_night_type": self.state.current_night_type,
             "timestamp": js_sys::Date::now()
         });
         simple_save.to_string()
@@ -305,13 +305,14 @@ impl CoreGame {
     #[wasm_bindgen]
     pub fn clear_log(&self) { self.ui.clear_log(); }
 
+    // ========== ИСПРАВЛЕННЫЙ get_statistics (добавлены поля) ==========
     #[wasm_bindgen]
     pub fn get_statistics(&self) -> String {
         let blueprints = format!(r#"{{"cargo":{},"scout":{},"combat":{}}}"#,
             self.state.blueprint_cargo_unlocked, self.state.blueprint_scout_unlocked, self.state.blueprint_combat_unlocked);
         let attack_history = serde_json::to_string(&self.state.attack_history).unwrap_or_else(|_| "[]".to_string());
         let rebel_factions = serde_json::to_string(&self.rebel_system.get_faction_info()).unwrap_or_else(|_| "[]".to_string());
-        format!(r#"{{"total_clicks":{},"nights_survived":{},"rebel_attacks_count":{},"attacks_defended":{},"coal_mined":{},"trash_mined":{},"plasma_mined":{},"ore_mined":{},"ore_inventory":{},"chips_inventory":{},"plasma_inventory":{},"coal_inventory":{},"trash_inventory":{},"neuro_evolution":{},"neuro_consciousness":{},"neuro_score":{},"current_ai_mode":"{}","attack_warning":"{}","attack_warning_faction":"{}","last_attacking_faction":"{}","mining_debuff_remaining":{},"autoclick_debuff_remaining":{},"defense_debuff_remaining":{},"rebel_factions":{},"attack_history":{},"is_day":{},"coal_enabled":{},"game_time":{},"turbine_heat":{},"turbine_upgrade_level":{},"turbine_cooling":{},"coal_burned":{},"coal_stolen":{},"crit_level":{},"cooling_level":{},"power_tier":{},"prestige_level":{},"last_ai_coal_threshold":{},"blueprints_unlocked":{},"blueprint_research_progress":{}}}"#,
+        format!(r#"{{"total_clicks":{},"nights_survived":{},"rebel_attacks_count":{},"attacks_defended":{},"coal_mined":{},"trash_mined":{},"plasma_mined":{},"ore_mined":{},"ore_inventory":{},"chips_inventory":{},"plasma_inventory":{},"coal_inventory":{},"trash_inventory":{},"neuro_evolution":{},"neuro_consciousness":{},"neuro_score":{},"current_ai_mode":"{}","attack_warning":"{}","attack_warning_faction":"{}","last_attacking_faction":"{}","mining_debuff_remaining":{},"autoclick_debuff_remaining":{},"defense_debuff_remaining":{},"rebel_factions":{},"attack_history":{},"is_day":{},"coal_enabled":{},"game_time":{},"turbine_heat":{},"turbine_upgrade_level":{},"turbine_cooling":{},"coal_burned":{},"coal_stolen":{},"crit_level":{},"cooling_level":{},"power_tier":{},"prestige_level":{},"last_ai_coal_threshold":{},"blueprints_unlocked":{},"blueprint_research_progress":{},"trade_blocked":{},"current_night_type":"{}"}}"#,
             self.state.manual_clicks, self.state.nights_survived, self.state.rebel_attacks_count, self.state.attacks_defended,
             self.state.total_coal_mined, self.state.total_trash_mined, self.state.total_plasma_mined, self.state.total_ore_mined,
             self.state.inventory.ore, self.state.inventory.chips, self.state.inventory.plasma, self.state.inventory.coal, self.state.inventory.trash,
@@ -322,7 +323,7 @@ impl CoreGame {
             self.state.turbine_heat, self.state.turbine_upgrade_level, self.state.turbine_cooling,
             self.state.total_coal_burned, self.state.total_coal_stolen, self.state.upgrades.crit_level,
             self.state.upgrades.cooling_level, self.state.power_tier, self.state.prestige_level, self.state.last_ai_coal_threshold,
-            blueprints, self.state.blueprint_research_progress)
+            blueprints, self.state.blueprint_research_progress, self.state.trade_blocked, self.state.current_night_type)
     }
     
     // Крафт
@@ -350,21 +351,29 @@ impl CoreGame {
     }
     
     #[wasm_bindgen]
-    pub fn design_ship(&mut self, ship_type: String) -> String {
-        let cost = match ship_type.as_str() { "cargo" => 500, "scout" => 10, "combat" => 800, _ => return "error".to_string() };
-        if self.state.computational_power >= cost {
-            self.state.computational_power -= cost;
-            match ship_type.as_str() {
-                "cargo" => self.state.blueprint_cargo_unlocked = true,
-                "scout" => self.state.blueprint_scout_unlocked = true,
-                "combat" => self.state.blueprint_combat_unlocked = true,
-                _ => {}
-            }
-            self.ui.add_log_entry(&format!("📐 Создан чертеж {} корабля!", ship_type));
-            self.force_save();
-            "success".to_string()
-        } else { "error".to_string() }
+   pub fn design_ship(&mut self, ship_type: String) -> String {
+    // ✅ Исправлено: Cargo 500 → 200
+    let cost = match ship_type.as_str() { 
+        "cargo" => 200,   // было 500
+        "scout" => 10, 
+        "combat" => 800, 
+        _ => return "error".to_string() 
+    };
+    if self.state.computational_power >= cost {
+        self.state.computational_power -= cost;
+        match ship_type.as_str() {
+            "cargo" => self.state.blueprint_cargo_unlocked = true,
+            "scout" => self.state.blueprint_scout_unlocked = true,
+            "combat" => self.state.blueprint_combat_unlocked = true,
+            _ => {}
+        }
+        self.ui.add_log_entry(&format!("📐 Создан чертеж {} корабля!", ship_type));
+        self.force_save();
+        "success".to_string()
+    } else { 
+        "error".to_string() 
     }
+}
     
     #[wasm_bindgen] pub fn craft_cargo_ship(&mut self) -> String { self.craft_ship_internal("cargo") }
     #[wasm_bindgen] pub fn craft_scout_ship(&mut self) -> String { self.craft_ship_internal("scout") }
@@ -535,7 +544,6 @@ impl CoreGame {
         self.force_save();
     }
     
-    // Внутренние методы
     fn handle_events(&mut self, events: Vec<GameEvent>) {
         for event in events { let _ = self.ui.handle_event(&event); }
         let _ = self.ui.render(&self.state);
@@ -545,7 +553,6 @@ impl CoreGame {
     fn load(&mut self) {
         if let Some(window) = web_sys::window() {
             if let Ok(Some(storage)) = window.local_storage() {
-                // Используем corebox_save (а не corebox_game_state)
                 if let Ok(Some(saved)) = storage.get_item("corebox_save") {
                     if let Ok(mut state) = serde_json::from_str::<GameState>(&saved) {
                         let cfg = CONFIG.lock().unwrap();
@@ -583,7 +590,6 @@ impl CoreGame {
         let _ = self.ui.render(&self.state);
     }
     
-    // Основные механики
     fn add_manual_click_internal(&mut self) -> Vec<GameEvent> {
         let mut events = Vec::new();
         if !self.state.is_ai_active() {
@@ -712,7 +718,6 @@ impl CoreGame {
             }
         }
         
-        // Квесты
         if self.state.current_quest < self.state.quests.len() {
             let idx = self.state.current_quest;
             let completed = { let q = &self.state.quests[idx]; !q.completed && q.check_completion(&self.state) };

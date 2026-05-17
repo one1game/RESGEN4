@@ -1,4 +1,4 @@
-// fleet.js - ПОЛНАЯ ВЕРСИЯ С ИСПРАВЛЕНИЯМИ
+// fleet.js - ПОЛНАЯ ВЕРСИЯ С ИСПРАВЛЕНИЯМИ (БАГИ #1, #2, #3, #11)
 
 export const fleetModule = {
     game: null,
@@ -8,6 +8,7 @@ export const fleetModule = {
     aiMode: 'normal',
     lastDamageProcessedAttackId: null,
     lastProcessedAttackTime: 0,
+    isInitializing: true, // Флаг для блокировки отправки до загрузки миссий (#11)
     
     shipTypes: {
         cargo: {
@@ -38,6 +39,8 @@ export const fleetModule = {
         this.loadFleet();
         this.lastDamageProcessedAttackId = null;
         this.lastProcessedAttackTime = 0;
+        // Снимаем блокировку после инициализации (через 2 секунды, чтобы processArrivedMissions успел)
+        setTimeout(() => { this.isInitializing = false; }, 2000);
         console.log('🚀 Модуль флота инициализирован');
     },
     
@@ -47,9 +50,7 @@ export const fleetModule = {
         if (saved) {
             try {
                 this.ships = JSON.parse(saved);
-                // ← НОВОЕ: при загрузке страницы сбрасываем onMission.
-                // processArrivedMissions сразу вызывается после и восстановит
-                // реальные активные миссии из Supabase.
+                // При загрузке страницы сбрасываем onMission. processArrivedMissions восстановит статусы.
                 this.ships.forEach(s => {
                     s.onMission = false;
                     s.missionStartedAt = null;
@@ -66,7 +67,6 @@ export const fleetModule = {
         localStorage.setItem('corebox_fleet', JSON.stringify(this.ships));
     },
     
-    // ========== ИСПРАВЛЕНО: добавляем missionStartedAt ==========
     addShip(shipType, name = null) {
         if (this.ships.length >= this.maxFleetSize) {
             return { success: false, error: 'Достигнут максимальный размер флота' };
@@ -92,7 +92,7 @@ export const fleetModule = {
             missions: 0,
             onAlert: false,
             onMission: false,
-            missionStartedAt: null,  // ← НОВОЕ: когда стартовала миссия
+            missionStartedAt: null,
             ...typeConfig
         };
         
@@ -116,7 +116,6 @@ export const fleetModule = {
         return { success: false, error: 'Корабль не найден' };
     },
     
-    // ========== ИСПРАВЛЕНО: сохраняем missionStartedAt ==========
     setShipMissionStatus(shipId, onMission, missionId = null) {
         const ship = this.ships.find(s => s.id === shipId);
         if (!ship) return;
@@ -130,28 +129,26 @@ export const fleetModule = {
         this.saveFleet();
     },
     
-    // ========== ИСПРАВЛЕНО: защитный тайм-аут для зависших кораблей ==========
     getAvailableShip(shipType) {
-        // Максимальное время миссии = travel * 2 + 5 мин запаса
-        // combat: 8*2+5 = 21 мин, scout: 5*2+5 = 15, cargo: 6*2+5 = 17
-        const MAX_MISSION_MS = 25 * 60 * 1000;  // 25 минут с запасом
+        // Если идет инициализация, не даем отправлять корабли (#11)
+        if (this.isInitializing) return null;
+        
+        const MAX_MISSION_MS = 25 * 60 * 1000; // 25 минут
 
         return this.ships.find(s => {
             if (s.type !== shipType) return false;
             if (s.health <= 20) return false;
 
-            // ← НОВОЕ: если корабль "завис" в миссии дольше максимума — освобождаем
             if (s.onMission && s.missionStartedAt) {
                 const elapsed = Date.now() - s.missionStartedAt;
                 if (elapsed > MAX_MISSION_MS) {
-                    console.warn(`⚠️ Корабль ${s.id} завис в миссии ${Math.round(elapsed/60000)} мин — принудительно освобождаем`);
+                    console.warn(`⚠️ Корабль ${s.id} завис в миссии — освобождаем`);
                     s.onMission = false;
                     s.missionStartedAt = null;
                     s.missions = (s.missions || 0) + 1;
                     this.saveFleet();
                 }
             }
-
             return !s.onMission;
         }) || null;
     },
@@ -180,27 +177,50 @@ export const fleetModule = {
         return Math.floor(cargoCapacity / 500);
     },
     
+    // Вспомогательная функция для получения стоимости ремонта
+    getRepairCost(ship) {
+        if (!ship || ship.health >= ship.maxHealth) return null;
+        const damage = ship.maxHealth - ship.health;
+        const oreCost = Math.ceil(damage * 0.2);
+        const chipsCost = Math.ceil(damage * 0.05);
+        return { oreCost, chipsCost };
+    },
+    
+    // Вспомогательная функция для получения стоимости улучшения
+    getUpgradeCost(ship) {
+        if (!ship) return null;
+        const oreCost = ship.level * 80;
+        const chipsCost = ship.level * 30;
+        const plasmaCost = ship.level * 5;
+        return { oreCost, chipsCost, plasmaCost };
+    },
+    
     repairShip(shipId) {
         const ship = this.ships.find(s => s.id === shipId);
         if (!ship) return { success: false, error: 'Корабль не найден' };
         if (ship.health >= ship.maxHealth) return { success: false, error: 'Корабль уже исправен' };
         
-        const damage = ship.maxHealth - ship.health;
-        const oreCost = Math.ceil(damage * 0.2);
-        const chipsCost = Math.ceil(damage * 0.05);
+        const costs = this.getRepairCost(ship);
+        if (!costs) return { success: false, error: 'Ошибка расчета стоимости' };
+        const { oreCost, chipsCost } = costs;
+        
+        // Получаем актуальные ресурсы из Rust
+        let stats = null;
+        try {
+            const statsJson = this.game?.get_statistics();
+            if (statsJson) stats = JSON.parse(statsJson);
+        } catch(e) {}
+        
+        if (!stats) return { success: false, error: 'Не удалось проверить ресурсы' };
+        
+        if (stats.ore_inventory < oreCost || stats.chips_inventory < chipsCost) {
+            return { success: false, error: `Недостаточно ресурсов (нужно: ${oreCost}⛏️, ${chipsCost}🎛️)` };
+        }
         
         let success = false;
         try {
             if (this.game && typeof this.game.apply_fleet_repair === 'function') {
                 success = this.game.apply_fleet_repair(oreCost, chipsCost);
-            } else {
-                const statsJson = this.game?.get_statistics();
-                if (statsJson) {
-                    const stats = JSON.parse(statsJson);
-                    if (stats.ore_inventory >= oreCost && stats.chips_inventory >= chipsCost) {
-                        success = true;
-                    }
-                }
             }
         } catch(e) {
             console.warn('Ошибка при ремонте через Rust:', e);
@@ -210,9 +230,9 @@ export const fleetModule = {
         if (success) {
             ship.health = ship.maxHealth;
             this.saveFleet();
-            return { success: true, message: `✅ "${ship.name}" отремонтирован (-${oreCost} руды, -${chipsCost} чипов)` };
+            return { success: true, message: `✅ "${ship.name}" отремонтирован (-${oreCost}⛏️, -${chipsCost}🎛️)` };
         } else {
-            return { success: false, error: `❌ Нужно ${oreCost} руды и ${chipsCost} чипов` };
+            return { success: false, error: `❌ Ошибка применения ремонта` };
         }
     },
     
@@ -220,22 +240,27 @@ export const fleetModule = {
         const ship = this.ships.find(s => s.id === shipId);
         if (!ship) return { success: false, error: 'Корабль не найден' };
         
-        const oreCost = ship.level * 80;
-        const chipsCost = ship.level * 30;
-        const plasmaCost = ship.level * 5;
+        const costs = this.getUpgradeCost(ship);
+        if (!costs) return { success: false, error: 'Ошибка расчета стоимости' };
+        const { oreCost, chipsCost, plasmaCost } = costs;
+        
+        // Получаем актуальные ресурсы из Rust
+        let stats = null;
+        try {
+            const statsJson = this.game?.get_statistics();
+            if (statsJson) stats = JSON.parse(statsJson);
+        } catch(e) {}
+        
+        if (!stats) return { success: false, error: 'Не удалось проверить ресурсы' };
+        
+        if (stats.ore_inventory < oreCost || stats.chips_inventory < chipsCost || stats.plasma_inventory < plasmaCost) {
+            return { success: false, error: `Недостаточно ресурсов (нужно: ${oreCost}⛏️, ${chipsCost}🎛️, ${plasmaCost}⚡)` };
+        }
         
         let success = false;
         try {
             if (this.game && typeof this.game.apply_fleet_upgrade === 'function') {
                 success = this.game.apply_fleet_upgrade(oreCost, chipsCost, plasmaCost);
-            } else {
-                const statsJson = this.game?.get_statistics();
-                if (statsJson) {
-                    const stats = JSON.parse(statsJson);
-                    if (stats.ore_inventory >= oreCost && stats.chips_inventory >= chipsCost && stats.plasma_inventory >= plasmaCost) {
-                        success = true;
-                    }
-                }
             }
         } catch(e) {
             console.warn('Ошибка при улучшении через Rust:', e);
@@ -256,7 +281,7 @@ export const fleetModule = {
         } else {
             return { 
                 success: false, 
-                error: `❌ Нужно: ${oreCost} руды, ${chipsCost} чипов, ${plasmaCost} плазмы` 
+                error: `❌ Ошибка применения улучшения` 
             };
         }
     },
@@ -307,10 +332,21 @@ export const fleetModule = {
         this.saveFleet();
     },
     
+    // ========== ОБНОВЛЕННЫЙ РЕНДЕР С ОТОБРАЖЕНИЕМ СТОИМОСТИ (БАГИ #1, #2, #3) ==========
     renderFleetUI() {
         const defenseBonus = Math.floor(this.getFleetDefenseContribution() / 50);
         const reconBonus = this.getScoutReconBonus();
         const cargoBonus = this.getCargoMiningBonus();
+        
+        // Получаем актуальные ресурсы для проверки кнопок
+        let currentResources = { ore: 0, chips: 0, plasma: 0 };
+        try {
+            const statsJson = this.game?.get_statistics();
+            if (statsJson) {
+                const stats = JSON.parse(statsJson);
+                currentResources = { ore: stats.ore_inventory || 0, chips: stats.chips_inventory || 0, plasma: stats.plasma_inventory || 0 };
+            }
+        } catch(e) {}
         
         let html = `
             <div class="fleet-container">
@@ -346,13 +382,19 @@ export const fleetModule = {
                 const isDamaged = ship.health < ship.maxHealth;
                 const healthClass = healthPercent > 70 ? 'good' : healthPercent > 30 ? 'damaged' : 'critical';
                 
-                // Показываем статус миссии с учётом missionStartedAt
+                // Расчет стоимости ремонта и улучшения
+                const repairCost = this.getRepairCost(ship);
+                const upgradeCost = this.getUpgradeCost(ship);
+                
+                const canRepair = repairCost && currentResources.ore >= repairCost.oreCost && currentResources.chips >= repairCost.chipsCost;
+                const canUpgrade = upgradeCost && currentResources.ore >= upgradeCost.oreCost && currentResources.chips >= upgradeCost.chipsCost && currentResources.plasma >= upgradeCost.plasmaCost;
+                
                 const missionStatus = ship.onMission && ship.missionStartedAt 
                     ? `🚀 В миссии (${Math.round((Date.now() - ship.missionStartedAt) / 60000)} мин)` 
                     : '✅ Готов';
                 
                 html += `
-                    <div class="ship-card ${ship.onAlert ? 'alert-mode' : ''}" data-ship-id="${ship.id}">
+                    <div class="ship-card ${ship.onAlert ? 'alert-mode' : ''} ${healthPercent < 30 ? 'critical-health' : ''}" data-ship-id="${ship.id}">
                         <div class="ship-header">
                             <div class="ship-icon">${typeConfig.icon || '🚀'}</div>
                             <div class="ship-name">${ship.name}</div>
@@ -368,7 +410,7 @@ export const fleetModule = {
                                 <div class="health-bar">
                                     <div class="health-fill ${healthClass}" style="width: ${healthPercent}%"></div>
                                 </div>
-                                <span>${ship.health}/${ship.maxHealth}</span>
+                                <span>${ship.health}/${ship.maxHealth} (${Math.floor(healthPercent)}%)</span>
                             </div>
                             
                             <div class="stat-row">
@@ -398,11 +440,16 @@ export const fleetModule = {
                             </div>
                         </div>
                         
+                        <div class="ship-costs">
+                            ${repairCost ? `<div class="cost-info repair-cost">🔧 Ремонт: −${repairCost.oreCost}⛏️ −${repairCost.chipsCost}🎛️</div>` : ''}
+                            ${upgradeCost ? `<div class="cost-info upgrade-cost">⬆ Улучшение до ур.${ship.level+1}: −${upgradeCost.oreCost}⛏️ −${upgradeCost.chipsCost}🎛️ −${upgradeCost.plasmaCost}⚡</div>` : ''}
+                        </div>
+                        
                         <div class="ship-actions">
-                            <button class="ship-btn repair-btn" data-action="repair" data-ship="${ship.id}" ${!isDamaged ? 'disabled' : ''}>
+                            <button class="ship-btn repair-btn" data-action="repair" data-ship="${ship.id}" ${!isDamaged || !canRepair ? 'disabled' : ''}>
                                 🔧 Ремонт
                             </button>
-                            <button class="ship-btn upgrade-btn" data-action="upgrade" data-ship="${ship.id}">
+                            <button class="ship-btn upgrade-btn" data-action="upgrade" data-ship="${ship.id}" ${!canUpgrade ? 'disabled' : ''}>
                                 ⬆ Улучшить
                             </button>
                             <button class="ship-btn delete-btn" data-action="delete" data-ship="${ship.id}">

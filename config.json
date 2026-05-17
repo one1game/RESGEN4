@@ -43,10 +43,10 @@
 
   "upgrade_config": {
     "mining_base_cost": 10,
-    "mining_cost_multiplier": 1.8,
+    "mining_cost_multiplier": 2,
     "mining_max_level": 10,
     "defense_activation_cost": 1,
-    "defense_base_power": 40,
+    "defense_base_power": 45,
     "defense_level_bonus": 14,
     "defense_max_level": 5
   },
