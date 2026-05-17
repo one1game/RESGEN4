@@ -1,4 +1,4 @@
-// game.js - ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ (БАГИ #4, #5, #7, #12, #13, #14)
+// game.js - ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ (БАГИ #4, #5, #7, #12, #13, #14) + ВОССТАНОВЛЕНИЕ МИССИЙ
 
 import init, { start_game, apply_config_from_admin } from './pkg/corebox_rs.js';
 import { initStatistics, updateStatisticsDisplay, switchTab, gameStats, loadUserStatistics, resetUserStatistics, updateStatisticsFromRust } from './statistics.js';
@@ -35,11 +35,12 @@ let _lastSeenTimer = null;
 let lastProcessedAttackHash = null;
 let _gameLoopInterval = null;
 let offlineProgressShown = false;
-let lastAlertMode = null; // Кэш для alertMode (#12)
+let lastAlertMode = null;
 
 // МУЛЬТИПЛЕЕРНЫЕ ПЕРЕМЕННЫЕ
 let _notifChannel = null;
 let _missionPollInterval = null;
+let _missionChannel = null;
 
 let _universalChannel = null;
 let _keepAliveChannel = null;
@@ -277,7 +278,6 @@ function showOfflineRewardPopup(p) {
     popup.innerHTML = `<h3>⏰ ВОЗВРАЩЕНИЕ</h3><p>Прошло: ${timeStr}</p><div class="offline-resources"><div>🪨 +${p.coalGained}</div><div>♻️ +${p.trashGained}</div><div>⛏️ +${p.oreGained}</div></div><button id="offlinePopupClose">ПРОДОЛЖИТЬ</button>`;
     document.body.appendChild(popup);
     
-    // Закрытие по кнопке, автозакрытие через 20 секунд (было 5)
     const closePopup = () => {
         if (popup.parentNode) popup.remove();
     };
@@ -470,7 +470,6 @@ async function _applyReleasedShips(userId) {
         console.log(`🚀 Применяем ${released.length} освобождённых кораблей...`);
         
         for (const entry of released) {
-            // Проверяем, не освобождена ли миссия уже через processArrivedMissions
             const { data: mission } = await supabase
                 .from('missions')
                 .select('status')
@@ -528,9 +527,18 @@ async function _applyReleasedShips(userId) {
     }
 }
 
-// ========== МУЛЬТИПЛЕЕРНАЯ ИНИЦИАЛИЗАЦИЯ (БАГ #13 - Realtime вместо polling) ==========
+// ========== МУЛЬТИПЛЕЕРНАЯ ИНИЦИАЛИЗАЦИЯ (С ВОССТАНОВЛЕНИЕМ МИССИЙ) ==========
 function _initMultiplayer(user) {
     if (!user) return;
+
+    // ВАЖНО: Восстанавливаем статусы миссий флота из БД
+    console.log("🔄 Восстановление статусов миссий флота...");
+    fleetModule.restoreMissionsFromDB().then(() => {
+        console.log("✅ Статусы миссий восстановлены");
+        _refreshFleetWithMissions();
+    }).catch(err => {
+        console.error("Ошибка восстановления миссий:", err);
+    });
 
     // Realtime оповещения
     if (_notifChannel) supabase.removeChannel(_notifChannel);
@@ -545,11 +553,14 @@ function _initMultiplayer(user) {
 
     _applyReleasedShips(user.id);
 
-    // БАГ #13: Realtime подписка на миссии вместо polling
-    if (_missionPollInterval) clearInterval(_missionPollInterval);
+    // Закрываем старый канал если есть
+    if (_missionChannel) {
+        supabase.removeChannel(_missionChannel);
+        _missionChannel = null;
+    }
     
     // Подписываемся на realtime изменения миссий
-    const missionChannel = supabase
+    _missionChannel = supabase
         .channel(`missions:${user.id}`)
         .on('postgres_changes', {
             event: 'UPDATE',
@@ -560,20 +571,31 @@ function _initMultiplayer(user) {
             if (payload.new && (payload.new.status === 'returning' || payload.new.status === 'done')) {
                 console.log('Realtime обновление миссии, вызываем processArrivedMissions');
                 processArrivedMissions(user.id);
+                // Также обновляем UI флота
+                setTimeout(() => _refreshFleetWithMissions(), 500);
             }
         })
         .subscribe();
     
-    // Резервный polling раз в 5 минут (вместо 2 минут)
+    // Резервный polling раз в 30 секунд (вместо 5 минут)
+    if (_missionPollInterval) clearInterval(_missionPollInterval);
     _missionPollInterval = setInterval(() => {
-        if (currentUser) processArrivedMissions(currentUser.id);
-    }, 300000);
+        if (currentUser) {
+            processArrivedMissions(currentUser.id);
+            _refreshFleetWithMissions();
+        }
+    }, 30000);
     
-    if (currentUser) processArrivedMissions(currentUser.id);
+    // Первичный вызов
+    if (currentUser) {
+        processArrivedMissions(currentUser.id);
+        setTimeout(() => _refreshFleetWithMissions(), 1000);
+    }
 }
 
 function _cleanupMultiplayer() {
     if (_notifChannel) { supabase.removeChannel(_notifChannel); _notifChannel = null; }
+    if (_missionChannel) { supabase.removeChannel(_missionChannel); _missionChannel = null; }
     if (_missionPollInterval) { clearInterval(_missionPollInterval); _missionPollInterval = null; }
 }
 
@@ -640,7 +662,6 @@ async function _refreshFleetWithMissions() {
             const now = Date.now();
             const missionItems = missions.map(m => {
                 const isOut = m.attacker_id === currentUser.id;
-                // Для исходящих смотрим returns_at, для входящих arrives_at
                 const targetTime = new Date(isOut ? m.returns_at : m.arrives_at);
                 const diffMs = Math.max(0, targetTime.getTime() - now);
                 const diffMin = Math.floor(diffMs / 60000);
@@ -670,7 +691,6 @@ async function _refreshFleetWithMissions() {
                 </div>
             `;
             
-            // Добавляем обработчик сворачивания
             const title = missionsPanel.querySelector('.panel-title');
             if (title) {
                 title.addEventListener('click', (e) => {
@@ -688,7 +708,6 @@ async function _refreshFleetWithMissions() {
     }
 }
 
-// Делаем функцию глобальной для доступа из других модулей
 window._refreshFleetWithMissions = _refreshFleetWithMissions;
 
 // ========== ИСПРАВЛЕННАЯ ИНИЦИАЛИЗАЦИЯ АВТОРИЗАЦИИ (БАГ #4) ==========
@@ -969,7 +988,6 @@ function updateNeuroStatus(rustStats = null) {
             updateFactionPanel(rustStats.rebel_factions || [], rustStats.last_attacking_faction || '');
             updateUpgradeDisplay(rustStats);
             
-            // Добавлен блок отображения бонусов престижа (#12)
             const prestigeBonusEl = document.getElementById('prestigeBonus');
             if (prestigeBonusEl) {
                 const bonus = getPrestigeBonus();
@@ -1505,7 +1523,6 @@ function onDayStarted() {
     } 
 }
 
-// ========== ИСПРАВЛЕННАЯ ТОРГОВЛЯ С ПРОВЕРКОЙ trade_blocked (БАГ #7) ==========
 function renderTradeTab() {
     const container = document.getElementById('buyItemsContainer');
     if (!container || !game) return;
@@ -1536,7 +1553,6 @@ function renderTradeTab() {
 
 window.executeTrade = function(tradeId) {
     if (!game) return;
-    // Дополнительная проверка блокировки
     let stats = null;
     try { const j = game.get_statistics(); if (j) stats = JSON.parse(j); } catch(e) {}
     if (stats?.trade_blocked) {
@@ -1650,7 +1666,6 @@ function saveCurrentUserStatistics() {
     localStorage.setItem('corebox_users', JSON.stringify(users));
 }
 
-// ========== ИСПРАВЛЕННАЯ ИНИЦИАЛИЗАЦИЯ ИГРЫ (БАГ #15 - error boundary) ==========
 async function initializeGame(existingSave = null) {
     if (isGameInitialized) return;
     
@@ -1777,7 +1792,6 @@ async function initializeGame(existingSave = null) {
                     } else if (mode.includes('Предсказание') || mode.includes('угроза')) newAlertMode = true;
                     else { if (typeof game.set_temporary_defense_bonus === 'function') game.set_temporary_defense_bonus(0); }
                     
-                    // БАГ #12: кэшируем alertMode
                     if (newAlertMode !== lastAlertMode) {
                         fleetModule.setAlertMode(newAlertMode);
                         lastAlertMode = newAlertMode;
@@ -1852,7 +1866,6 @@ async function initializeGame(existingSave = null) {
     } catch(e) { 
         console.error("Ошибка запуска:", e);
         addToLog(`❌ Ошибка инициализации: ${e.message}`, "error");
-        // БАГ #15: UI-fallback при ошибке WASM
         const errorContainer = document.createElement('div');
         errorContainer.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a1a1a;border:2px solid #f44;border-radius:16px;padding:20px;z-index:10001;text-align:center;';
         errorContainer.innerHTML = `
