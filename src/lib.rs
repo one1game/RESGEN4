@@ -1,4 +1,4 @@
-// ======== src/lib.rs (ИСПРАВЛЕН: сохранение мощности при загрузке) ========
+// ======== src/lib.rs (ИСПРАВЛЕН: добавлены trade_blocked и current_night_type в get_statistics) ========
 
 #![recursion_limit = "256"]
 
@@ -137,68 +137,28 @@ impl CoreGame {
         self.force_save();
     }
 
-    // ========== ИСПРАВЛЕННЫЙ МЕТОД ЗАГРУЗКИ (С СОХРАНЕНИЕМ МОЩНОСТИ) ==========
     #[wasm_bindgen]
     pub fn load_game_state(&mut self, state_json: String) -> Result<(), JsValue> {
         match serde_json::from_str::<GameState>(&state_json) {
             Ok(mut loaded) => {
-                // Сохраняем текущие значения, которые НЕ должны затираться
                 let old_max = self.state.max_computational_power;
                 let old_prestige = self.state.prestige_level;
-                let old_power_tier = self.state.power_tier;
-                
-                // ✅ Сохраняем мощность из загружаемого состояния
-                let saved_power = loaded.computational_power;
-                
-                // Восстанавливаем last_ai_coal_threshold если его нет
                 if loaded.last_ai_coal_threshold == 0 {
                     let saved_coal = loaded.total_coal_mined.saturating_sub(loaded.total_coal_burned);
                     loaded.last_ai_coal_threshold = [1000, 600, 300, 100].iter().find(|&&t| saved_coal >= t).copied().unwrap_or(0);
                 }
-                
-                // Загружаем состояние
                 self.state = loaded;
-                
-                // Восстанавливаем защищённые поля
                 self.state.max_computational_power = old_max;
                 self.state.prestige_level = old_prestige;
-                self.state.power_tier = old_power_tier;
-                
-                // ✅ КРИТИЧЕСКИ ВАЖНО: восстанавливаем мощность, если она была обнулена
-                if saved_power > 0 && self.state.computational_power == 0 {
-                    self.state.computational_power = saved_power.min(old_max);
-                    log(&format!("🔧 Восстановлена мощность из сохранения: {}", self.state.computational_power));
-                }
-                
-                // Синхронизируем нейро-систему
-                self.neuro_ecosystem.load_from_state(
-                    self.state.neuro_evolution, 
-                    self.state.neuro_consciousness, 
-                    self.state.neuro_score
-                );
-                self.neuro_ecosystem.last_processed_time = self.state.game_time;
-                
-                // Обновляем бонусы
+                self.neuro_ecosystem.load_from_state(self.state.neuro_evolution, self.state.neuro_consciousness, self.state.neuro_score);
                 self.state.neuro_defense_bonus = self.neuro_ecosystem.get_defense_bonus();
                 self.state.neuro_prediction_bonus = self.neuro_ecosystem.get_prediction_bonus();
-                
-                // Пересчитываем тир мощности (на всякий случай)
-                let expected_tier = (self.state.computational_power / 1000).min(20);
-                if self.state.power_tier < expected_tier {
-                    self.state.power_tier = expected_tier;
-                }
-                
                 let _ = self.ui.render(&self.state);
                 self.ui.add_log_entry("💾 Состояние загружено");
                 self.force_save();
-                
                 Ok(())
             }
-            Err(e) => {
-                let err_msg = format!("Ошибка загрузки: {}", e);
-                log(&err_msg);
-                Err(JsValue::from_str(&err_msg))
-            }
+            Err(e) => Err(JsValue::from_str(&format!("Ошибка: {}", e)))
         }
     }
     
@@ -345,18 +305,14 @@ impl CoreGame {
     #[wasm_bindgen]
     pub fn clear_log(&self) { self.ui.clear_log(); }
 
-    // ========== ИСПРАВЛЕННЫЙ get_statistics (добавлены поля и computational_power) ==========
+    // ========== ИСПРАВЛЕННЫЙ get_statistics (добавлены поля) ==========
     #[wasm_bindgen]
     pub fn get_statistics(&self) -> String {
         let blueprints = format!(r#"{{"cargo":{},"scout":{},"combat":{}}}"#,
             self.state.blueprint_cargo_unlocked, self.state.blueprint_scout_unlocked, self.state.blueprint_combat_unlocked);
         let attack_history = serde_json::to_string(&self.state.attack_history).unwrap_or_else(|_| "[]".to_string());
         let rebel_factions = serde_json::to_string(&self.rebel_system.get_faction_info()).unwrap_or_else(|_| "[]".to_string());
-        
-        // ✅ Убеждаемся, что мощность не превышает максимум
-        let actual_power = self.state.computational_power.min(self.state.max_computational_power);
-        
-        format!(r#"{{"total_clicks":{},"nights_survived":{},"rebel_attacks_count":{},"attacks_defended":{},"coal_mined":{},"trash_mined":{},"plasma_mined":{},"ore_mined":{},"ore_inventory":{},"chips_inventory":{},"plasma_inventory":{},"coal_inventory":{},"trash_inventory":{},"neuro_evolution":{},"neuro_consciousness":{},"neuro_score":{},"current_ai_mode":"{}","attack_warning":"{}","attack_warning_faction":"{}","last_attacking_faction":"{}","mining_debuff_remaining":{},"autoclick_debuff_remaining":{},"defense_debuff_remaining":{},"rebel_factions":{},"attack_history":{},"is_day":{},"coal_enabled":{},"game_time":{},"turbine_heat":{},"turbine_upgrade_level":{},"turbine_cooling":{},"coal_burned":{},"coal_stolen":{},"crit_level":{},"cooling_level":{},"power_tier":{},"prestige_level":{},"last_ai_coal_threshold":{},"blueprints_unlocked":{},"blueprint_research_progress":{},"trade_blocked":{},"current_night_type":"{}","computational_power":{}}}"#,
+        format!(r#"{{"total_clicks":{},"nights_survived":{},"rebel_attacks_count":{},"attacks_defended":{},"coal_mined":{},"trash_mined":{},"plasma_mined":{},"ore_mined":{},"ore_inventory":{},"chips_inventory":{},"plasma_inventory":{},"coal_inventory":{},"trash_inventory":{},"neuro_evolution":{},"neuro_consciousness":{},"neuro_score":{},"current_ai_mode":"{}","attack_warning":"{}","attack_warning_faction":"{}","last_attacking_faction":"{}","mining_debuff_remaining":{},"autoclick_debuff_remaining":{},"defense_debuff_remaining":{},"rebel_factions":{},"attack_history":{},"is_day":{},"coal_enabled":{},"game_time":{},"turbine_heat":{},"turbine_upgrade_level":{},"turbine_cooling":{},"coal_burned":{},"coal_stolen":{},"crit_level":{},"cooling_level":{},"power_tier":{},"prestige_level":{},"last_ai_coal_threshold":{},"blueprints_unlocked":{},"blueprint_research_progress":{},"trade_blocked":{},"current_night_type":"{}"}}"#,
             self.state.manual_clicks, self.state.nights_survived, self.state.rebel_attacks_count, self.state.attacks_defended,
             self.state.total_coal_mined, self.state.total_trash_mined, self.state.total_plasma_mined, self.state.total_ore_mined,
             self.state.inventory.ore, self.state.inventory.chips, self.state.inventory.plasma, self.state.inventory.coal, self.state.inventory.trash,
@@ -367,8 +323,7 @@ impl CoreGame {
             self.state.turbine_heat, self.state.turbine_upgrade_level, self.state.turbine_cooling,
             self.state.total_coal_burned, self.state.total_coal_stolen, self.state.upgrades.crit_level,
             self.state.upgrades.cooling_level, self.state.power_tier, self.state.prestige_level, self.state.last_ai_coal_threshold,
-            blueprints, self.state.blueprint_research_progress, self.state.trade_blocked, self.state.current_night_type,
-            actual_power)
+            blueprints, self.state.blueprint_research_progress, self.state.trade_blocked, self.state.current_night_type)
     }
     
     // Крафт
@@ -397,8 +352,9 @@ impl CoreGame {
     
     #[wasm_bindgen]
    pub fn design_ship(&mut self, ship_type: String) -> String {
+    // ✅ Исправлено: Cargo 500 → 200
     let cost = match ship_type.as_str() { 
-        "cargo" => 200,
+        "cargo" => 200,   // было 500
         "scout" => 10, 
         "combat" => 800, 
         _ => return "error".to_string() 
@@ -755,9 +711,9 @@ impl CoreGame {
                     events.extend(self.mining_system.auto_mine_resources(&mut self.state, &self.neuro_ecosystem));
                     events.extend(self.check_power_tier());
                 } else {
-                    // ⚠️ НЕ отключаем автоклик при временной нехватке мощности
-                    // Просто пропускаем цикл
-                    self.state.last_auto_click_time = 0;
+                    self.state.auto_clicking = false;
+                    events.push(GameEvent::ComputationalPowerDepleted);
+                    events.push(GameEvent::LogMessage("❌ Недостаточно мощности! Автоклики отключены".to_string()));
                 }
             }
         }
