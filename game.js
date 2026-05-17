@@ -609,41 +609,87 @@ async function _refreshFleetWithMissions() {
     const container = document.getElementById('fleetContainer');
     if (!container) return;
 
-    const { getActiveMissions } = await import('./multiplayer_combat.js');
-    const missions = await getActiveMissions(currentUser.id);
+    try {
+        const { getActiveMissions } = await import('./multiplayer_combat.js');
+        const missions = await getActiveMissions(currentUser.id);
+        
+        console.log(`🔄 Обновление UI флота: ${missions.length} активных миссий`);
 
-    container.innerHTML = fleetModule.renderFleetUI();
-    fleetModule.setupEventListeners(container);
+        // Рендерим UI флота
+        container.innerHTML = fleetModule.renderFleetUI();
+        fleetModule.setupEventListeners(container);
 
-    const missionsPanel = document.getElementById('activeMissionsPanel');
-    if (!missionsPanel) return;
-    
-    if (missions.length > 0) {
-        missionsPanel.style.display = 'block';
-        missionsPanel.innerHTML = `
-            <div class="panel-title">
-                <span>🚀 АКТИВНЫЕ МИССИИ</span>
-                <span class="collapse-icon">▼</span>
-            </div>
-            <div class="panel-content">
-                ${missions.map(m => {
-                    const isOut  = m.attacker_id === currentUser.id;
-                    const eta    = new Date(isOut ? m.arrives_at : m.arrives_at);
-                    const diff   = Math.max(0, Math.ceil((eta - Date.now()) / 60000));
-                    const icons  = { scout:'🔭', combat:'⚔️', cargo:'📦' };
-                    return `
+        // Находим или создаём панель активных миссий
+        let missionsPanel = document.getElementById('activeMissionsPanel');
+        const fleetTabContent = document.getElementById('fleet-tab');
+        
+        if (fleetTabContent && !missionsPanel) {
+            const panel = document.createElement('div');
+            panel.id = 'activeMissionsPanel';
+            panel.className = 'panel';
+            panel.style.marginTop = '10px';
+            fleetTabContent.appendChild(panel);
+            missionsPanel = panel;
+        }
+        
+        if (!missionsPanel) return;
+        
+        if (missions.length > 0) {
+            missionsPanel.style.display = 'block';
+            
+            const now = Date.now();
+            const missionItems = missions.map(m => {
+                const isOut = m.attacker_id === currentUser.id;
+                // Для исходящих смотрим returns_at, для входящих arrives_at
+                const targetTime = new Date(isOut ? m.returns_at : m.arrives_at);
+                const diffMs = Math.max(0, targetTime.getTime() - now);
+                const diffMin = Math.floor(diffMs / 60000);
+                const diffSec = Math.floor((diffMs % 60000) / 1000);
+                const timeStr = diffMin > 0 ? `${diffMin} мин ${diffSec} сек` : `${diffSec} сек`;
+                
+                const icons = { scout: '🔭', combat: '⚔️', cargo: '📦' };
+                const statusText = m.status === 'flying' 
+                    ? (isOut ? `летит к цели (${timeStr})` : `влетает (${timeStr})`)
+                    : `возвращается (${timeStr})`;
+                
+                return `
                     <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:11px;">
-                        ${icons[m.ship_type] ?? '🚀'}
-                        ${isOut ? 'Отправлен' : 'Входящий'} ${m.ship_type}
-                        · статус: ${m.status === 'flying' ? `прибудет через ${diff} мин` : 'возвращается'}
+                        ${icons[m.ship_type] ?? '🚀'} ${m.ship_type}
+                        · ${isOut ? '📤 Ваш' : '📥 Входящий'}
+                        · ${statusText}
                     </div>`;
-                }).join('')}
-            </div>
-        `;
-    } else {
-        missionsPanel.style.display = 'none';
+            }).join('');
+            
+            missionsPanel.innerHTML = `
+                <div class="panel-title">
+                    <span>🚀 АКТИВНЫЕ МИССИИ</span>
+                    <span class="collapse-icon">▼</span>
+                </div>
+                <div class="panel-content">
+                    ${missionItems}
+                </div>
+            `;
+            
+            // Добавляем обработчик сворачивания
+            const title = missionsPanel.querySelector('.panel-title');
+            if (title) {
+                title.addEventListener('click', (e) => {
+                    if (e.target.closest('button')) return;
+                    missionsPanel.classList.toggle('collapsed');
+                    const icon = title.querySelector('.collapse-icon');
+                    if (icon) icon.textContent = missionsPanel.classList.contains('collapsed') ? '▶' : '▼';
+                });
+            }
+        } else {
+            missionsPanel.style.display = 'none';
+        }
+    } catch(e) {
+        console.error('Ошибка обновления флота:', e);
     }
 }
+
+// Делаем функцию глобальной для доступа из других модулей
+window._refreshFleetWithMissions = _refreshFleetWithMissions;
 
 // ========== ИСПРАВЛЕННАЯ ИНИЦИАЛИЗАЦИЯ АВТОРИЗАЦИИ (БАГ #4) ==========
 function initializeAuth() {
