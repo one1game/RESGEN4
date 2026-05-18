@@ -2271,7 +2271,15 @@ setInterval(() => { if (currentUser && gameStats) scheduleSave(); }, 30000);
 document.addEventListener('DOMContentLoaded', () => {
     console.log("📄 DOMContentLoaded: запуск initializeAuth");
     initializeAuth();
-});
+});if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log("📄 DOMContentLoaded: запуск initializeAuth");
+        initializeAuth();
+    });
+} else {
+    console.log("📄 DOM уже загружен, запуск initializeAuth");
+    initializeAuth();
+}
 
 document.addEventListener('resetUserStats', (e) => { if (e.detail && currentUser) saveCurrentUserStatistics(); });
 document.addEventListener('gameEvent', (e) => {
