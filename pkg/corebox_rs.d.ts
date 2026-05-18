@@ -13,6 +13,7 @@ export class CoreGame {
   get_resource(resource: string): number;
   reload_config(): void;
   sell_resource(resource: string): void;
+  set_max_power(max: number): void;
   get_statistics(): string;
   repair_systems(): void;
   reset_progress(): void;
@@ -99,6 +100,7 @@ export interface InitOutput {
   readonly coregame_save_current_state: (a: number) => void;
   readonly coregame_set_fleet_cargo_bonus: (a: number, b: number) => void;
   readonly coregame_set_fleet_defense_bonus: (a: number, b: number) => void;
+  readonly coregame_set_max_power: (a: number, b: number) => void;
   readonly coregame_start_auto_clicking: (a: number) => void;
   readonly coregame_stop_auto_clicking: (a: number) => void;
   readonly coregame_subtract_power: (a: number, b: number) => void;

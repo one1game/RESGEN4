@@ -114,7 +114,6 @@
         .disc-badge { background: #ffaa00; color: #000; padding: 2px 6px; border-radius: 12px; font-size: 10px; position: absolute; top: -8px; right: 8px; }
         .trade-card { position: relative; }
         
-        /* Стили для карты */
         .space-planet {
             cursor: pointer;
             transition: transform 0.2s;
@@ -195,6 +194,7 @@
             
             <div class="user-info" id="userInfo" style="display: none;">
                 <span id="usernameDisplay"></span>
+                <span id="saveIndicator" style="font-size:11px;color:#4aff9d;opacity:0;transition:opacity 0.5s;margin-left:8px;">💾 Сохранено</span>
                 <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
             </div>
             
@@ -226,6 +226,7 @@
                             <div class="status-line">
                                 <div class="status-label">🔥 ТЭЦ (Уголь):</div>
                                 <div class="status-value" id="coalStatus">ОФФЛАЙН</div>
+                                <span id="coalNightsHint" style="font-size:11px;margin-left:6px;"></span>
                                 <div class="status-indicator offline"></div>
                             </div>
                             <div class="status-line">
@@ -244,7 +245,6 @@
                                 <div class="threat-level low"></div>
                             </div>
 
-                            <!-- ТУРБИНА -->
                             <div class="turbine-container">
                                 <div class="stat-label" id="turbineHeatLabel">🌡️ Перегрев турбины: 0%</div>
                                 <div class="turbine-bar">
@@ -261,16 +261,13 @@
                                 </div>
                             </div>
                             
-                            <!-- Режим ИИ -->
                             <div class="status-line ai-mode-row">
                                 <div class="status-label">🤖 РЕЖИМ ИИ:</div>
                                 <div class="status-value" id="aiMode">⚙️ Обычный</div>
                             </div>
                             
-                            <!-- Предупреждение об атаке -->
                             <div id="attackWarning" class="attack-warning" style="display: none;"></div>
                             
-                            <!-- Активные дебаффы -->
                             <div id="miningDebuff" class="debuff-indicator mining-debuff" style="display: none;"></div>
                             <div id="autoclickDebuff" class="debuff-indicator autoclick-debuff" style="display: none;"></div>
                             <div id="defenseDebuff" class="debuff-indicator defense-debuff" style="display: none;"></div>
@@ -278,7 +275,6 @@
                     </div>
                 </div>
                 
-                <!-- СИСТЕМНЫЙ ЖУРНАЛ -->
                 <div class="panel">
                     <div class="panel-title">
                         <span>📜 СИСТЕМНЫЙ ЖУРНАЛ (Лог)</span>
@@ -295,7 +291,6 @@
 
                 <div class="mining-action">
                     <div class="click-system">
-                        <!-- ШКАЛЫ МОЩНОСТИ -->
                         <div class="power-section">
                             <div class="power-label">
                                 <span>⚡ ВЫЧИСЛИТЕЛЬНАЯ МОЩНОСТЬ:</span>
@@ -320,7 +315,6 @@
                             </div>
                         </div>
                         
-                        <!-- АВТОКЛИКЕР -->
                         <div class="auto-click-section">
                             <div class="auto-click-status">
                                 <span>🤖 АВТОМАТИЧЕСКАЯ ДОБЫЧА:</span>
@@ -451,9 +445,7 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
-                        <div class="upgrade-container" id="upgradesContainer">
-                            <!-- Динамическая загрузка через JS -->
-                        </div>
+                        <div class="upgrade-container" id="upgradesContainer"></div>
                     </div>
                 </div>
             </div>
@@ -557,7 +549,6 @@
                 </div>
             </div>
             
-            <!-- НОВАЯ ВКЛАДКА КАРТА -->
             <div class="tab-content" id="space-tab">
                 <div class="panel">
                     <div class="panel-title">
@@ -566,8 +557,6 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content" style="padding:0;">
-
-                        <!-- Ресурсы и статус -->
                         <div id="space-status-bar" style="display:flex;gap:12px;padding:10px 12px;background:rgba(0,0,0,0.3);flex-wrap:wrap;">
                             <div style="font-size:11px;opacity:0.7;">
                                 ⚡ <span id="space-power-current">0</span>/<span id="space-power-max">1000</span>
@@ -577,50 +566,29 @@
                             <div style="font-size:11px;opacity:0.7;">🚀 <span id="space-ships-count">0</span> кораблей</div>
                         </div>
 
-                        <!-- Звёздная карта -->
-                        <div class="star-map" id="space-star-map" style="
-                            position: relative;
-                            width: 100%;
-                            height: 55vw;
-                            min-height: 260px;
-                            max-height: 400px;
-                        ">
+                        <div class="star-map" id="space-star-map" style="position: relative; width: 100%; height: 55vw; min-height: 260px; max-height: 400px;">
                             <div id="space-stars-layer"></div>
                             <div id="space-objects-layer">
-                                <div style="
-                                    position:absolute;left:50%;top:50%;
-                                    transform:translate(-50%,-50%);
-                                    text-align:center;cursor:pointer;
-                                " id="space-base-planet">
+                                <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;cursor:pointer;" id="space-base-planet">
                                     <span style="font-size:28px;">🏠</span>
                                     <div style="font-size:9px;color:#4aff9d;margin-top:2px;">БАЗА</div>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Кнопка исследования -->
                         <div style="padding:10px 12px;">
-                            <button id="space-research-btn" style="
-                                width:100%;padding:10px;
-                                background:rgba(74,158,255,0.1);
-                                border:1px solid rgba(74,158,255,0.3);
-                                border-radius:8px;color:#4a9eff;
-                                font-family:monospace;font-size:12px;cursor:pointer;
-                            ">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
+                            <button id="space-research-btn" style="width:100%;padding:10px;background:rgba(74,158,255,0.1);border:1px solid rgba(74,158,255,0.3);border-radius:8px;color:#4a9eff;font-family:monospace;font-size:12px;cursor:pointer;">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
                         </div>
 
-                        <!-- Список игроков онлайн -->
                         <div style="padding:0 12px 12px;">
                             <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
                             <div id="space-players-list"></div>
                         </div>
-
                     </div>
                 </div>
             </div>
         </div>
         
-        <!-- ПЛАВАЮЩАЯ КНОПКА ДОБЫЧИ -->
         <div id="floatingMineBtn" class="floating-mine-btn">
             <span class="btn-icon">⚙️</span>
             <span class="btn-text">ДОБЫЧА</span>
@@ -632,32 +600,15 @@
     <!-- ПОДКЛЮЧЕНИЕ СКРИПТОВ                        -->
     <!-- ============================================ -->
     
-    <!-- 1. Supabase библиотека -->
+    <!-- Supabase библиотека - загружается первой -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
-    <!-- 2. Основной файл игры -->
+    <!-- Основной файл игры (type="module" чтобы работали импорты) -->
     <script type="module" src="game.js"></script>
     
-    <!-- ============================================ -->
-    <!-- АУДИО ЭЛЕМЕНТЫ (Фоновые звуки)               -->
-    <!-- ============================================ -->
-    <audio id="clickSound" preload="auto" style="display: none;">
-        <source src="music/click.mp3" type="audio/mpeg">
-    </audio>
-    
-    <audio id="errorSound" preload="auto" style="display: none;">
-        <source src="music/error.mp3" type="audio/mpeg">
-    </audio>
-    
-    <audio id="upgradeSound" preload="auto" style="display: none;">
-        <source src="music/upgrade.mp3" type="audio/mpeg">
-    </audio>
-    
-    <audio id="bgMusic" autoplay loop style="display: none;">
-        <source src="music/game-music.mp3" type="audio/mpeg">
-    </audio>
+    <!-- Мобильный патч (defer - ждёт загрузки DOM) -->
+    <script src="mobile-patch.js" defer></script>
 
-    <!-- Инициализация музыки и совместимости -->
     <script>
     (function() {
         window.onload = function() {
@@ -692,6 +643,5 @@
         };
     })();
     </script>
-    <script src="mobile-patch.js" defer></script>
 </body>
 </html>

@@ -7,7 +7,7 @@ export const designModule = {
     aiResearchBonus: 0,
     
     blueprints: [
-        { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', designCost: 200, icon: '🚚', unlocked: false },  // ✅ 500 → 200
+        { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', designCost: 200, icon: '🚚', unlocked: false },
         { id: 'scout', name: 'Разведывательный корабль', desc: 'Исследование новых территорий', designCost: 10, icon: '🔭', unlocked: false },
         { id: 'combat', name: 'Боевой корабль', desc: 'Защита флота и атака угроз', designCost: 800, icon: '⚔️', unlocked: false }
     ],
@@ -40,6 +40,20 @@ export const designModule = {
                     return savedBp ? { ...bp, unlocked: savedBp.unlocked } : bp;
                 });
             } catch (e) { console.error('Ошибка загрузки чертежей:', e); }
+        }
+    },
+    
+    // ✅ ДОБАВЛЕННЫЙ МЕТОД: загрузка чертежей из облака
+    loadBlueprintsFromCloud(cloudBlueprints) {
+        if (cloudBlueprints && Array.isArray(cloudBlueprints)) {
+            cloudBlueprints.forEach(cb => {
+                const bp = this.blueprints.find(b => b.id === cb.id);
+                if (bp && cb.unlocked !== undefined) {
+                    bp.unlocked = cb.unlocked;
+                }
+            });
+            this.saveBlueprints();
+            console.log('📐 Чертежи загружены из облака');
         }
     },
     

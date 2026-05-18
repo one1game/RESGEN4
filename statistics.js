@@ -1,4 +1,4 @@
-// ======== statistics.js (ОПТИМИЗИРОВАННАЯ ВЕРСИЯ - ИСПРАВЛЕНА) ========
+// ======== statistics.js (ИСПРАВЛЕНА - НОРМАЛИЗАЦИЯ ПРОЦЕНТОВ) ========
 
 export let gameStats = {
     totalClicks: 0, maxPowerReached: 0, nightsSurvived: 0, rebelAttacks: 0,
@@ -53,13 +53,13 @@ export function updateStatisticsFromRust(rustStats) {
     gameStats.coalBurned = rustStats.coal_burned || rustStats.total_coal_burned || gameStats.coalBurned;
     gameStats.coalStolen = rustStats.coal_stolen || rustStats.total_coal_stolen || gameStats.coalStolen;
     gameStats.nightsSurvived = rustStats.nights_survived || gameStats.nightsSurvived;
-    // БАГ №4: правильное поле из Rust — rebel_attacks_count
     gameStats.rebelAttacks = rustStats.rebel_attacks_count || gameStats.rebelAttacks;
     gameStats.attacksDefended = rustStats.attacks_defended || gameStats.attacksDefended;
     gameStats.rebelActivity = rustStats.rebel_activity || 0;
     gameStats.computationalPower = rustStats.computational_power || 0;
     gameStats.currentAiMode = rustStats.current_ai_mode || 'Обычный';
     gameStats.neuroEvolution = rustStats.neuro_evolution || 0;
+    // ИСПРАВЛЕНО: из Rust уже приходит значение 0-100 (проценты)
     gameStats.neuroConsciousness = rustStats.neuro_consciousness || 0;
     gameStats.neuroScore = rustStats.neuro_score || 0;
     gameStats.miningLevel = rustStats.upgrades?.mining || 0;
@@ -98,7 +98,8 @@ export function updateStatisticsDisplay() {
     set('defenseActive', gameStats.defenseActive ? '✅ Активна' : '❌ Неактивна');
     set('blueprintsUnlocked', (gameStats.blueprintsUnlocked || 0) + '/3');
     set('neuroEvolution', gameStats.neuroEvolution || 0);
-    set('neuroConsciousness', ((gameStats.neuroConsciousness || 0) * 100).toFixed(1) + '%');
+    // ИСПРАВЛЕНО: значение уже в процентах (0-100), не умножаем на 100
+    set('neuroConsciousness', (gameStats.neuroConsciousness || 0).toFixed(1) + '%');
     set('neuroScore', gameStats.neuroScore || 0);
     set('sessionsCount', gameStats.sessionsCount || 1);
     set('lastSessionDate', gameStats.lastSessionDate ? new Date(gameStats.lastSessionDate).toLocaleString('ru') : '—');
@@ -128,7 +129,6 @@ function startPlayTimeTracker() {
 function setupStatisticsEventListeners() {
     const refreshBtn = document.getElementById('refreshStatsBtn');
     if (refreshBtn) refreshBtn.addEventListener('click', () => updateStatisticsDisplay());
-    // Обработчик сброса статистики перенесён в game.js
 }
 
 export function switchTab(tabName) {

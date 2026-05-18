@@ -1,4 +1,4 @@
-// ======== src/systems/rebel.rs (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ - С ТИПАМИ НОЧЕЙ) ========
+// ========== src/systems/rebel.rs (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ - С ТИПАМИ НОЧЕЙ И БАЛАНСНЫМИ ИСПРАВЛЕНИЯМИ) ==========
 
 use crate::game::{GameState, GameEvent};
 use crate::game::config::GameConfig;
@@ -419,6 +419,7 @@ impl RebelSystem {
     
     // ========== ОСНОВНЫЕ МЕТОДЫ ==========
     
+    // БАЛАНС #5: замедленный рост активности на ранних стадиях
     pub fn update_rebel_activity(&mut self, state: &mut GameState, config: &GameConfig) -> Vec<GameEvent> {
         let mut events = Vec::new();
         
@@ -434,10 +435,15 @@ impl RebelSystem {
             if state.rebel_activity < 15 {
                 let old_activity = state.rebel_activity;
                 
-                let base_growth = 1.0 + self.aggression * 1.5;
-                let activity_bonus = (state.rebel_activity as f64 / 15.0) * 2.0;
+                // БАЛАНС #5: замедленный рост на ранних стадиях
+                let growth = if state.rebel_activity < 5 {
+                    1u32
+                } else if state.rebel_activity < 10 {
+                    (1.0 + self.aggression * 1.0) as u32
+                } else {
+                    (1.0 + self.aggression * 1.5 + (state.rebel_activity as f64 / 15.0) * 1.5) as u32
+                };
                 
-                let growth = (base_growth + activity_bonus) as u32;
                 let new_activity = (state.rebel_activity + growth).min(15);
                 state.rebel_activity = new_activity;
                 
@@ -511,6 +517,7 @@ impl RebelSystem {
         events
     }
     
+    // БАЛАНС #6: исправление шансов атаки
     pub fn check_rebel_attack(&mut self, state: &mut GameState, config: &GameConfig) -> Vec<GameEvent> {
         let mut events = Vec::new();
         
@@ -683,12 +690,14 @@ impl RebelSystem {
         self.active_operations.len() < 3
     }
     
+    // БАЛАНС #6: исправление шансов атаки
     fn calculate_attack_probability(&self, state: &GameState, config: &GameConfig) -> f64 {
         let mut probability = config.rebels.base_attack_chance;
         
         probability += (state.rebel_activity as f64 * 0.08).min(0.6);
         probability += if !state.is_day { 0.3 } else { 0.0 };
-        probability += if !state.upgrades.defense { 0.25 } else { 0.0 };
+        // БАЛАНС #6: снижен бонус за отсутствие защиты с 0.25 до 0.15
+        probability += if !state.upgrades.defense { 0.15 } else { 0.0 };
         probability += self.aggression * 0.25;
         probability += self.strategic_intelligence * 0.1;
         

@@ -1,4 +1,4 @@
-// ======== craft.js (ОПТИМИЗИРОВАННАЯ ВЕРСИЯ - ИСПРАВЛЕНА) ========
+// ========== craft.js (ИСПРАВЛЕНА - ПРОВЕРКА МЕТОДОВ) ==========
 
 import { designModule } from './design.js';
 
@@ -18,11 +18,11 @@ export const craftModule = {
           result: { type: 'ship', subtype: 'cargo', amount: 1, icon: '🚚' }, action: 'craft_cargo_ship',
           requiresBlueprint: true, blueprintId: 'cargo' },
         { id: 'scout_ship', name: 'Разведывательный корабль', desc: 'Исследование территорий',
-          cost: { type: 'composite', resources: { ore: 100, chips: 100, plasma: 20 }, icon: '🔭' },
+          cost: { type: 'composite', resources: { ore: 150, chips: 80, plasma: 15 }, icon: '🔭' },
           result: { type: 'ship', subtype: 'scout', amount: 1, icon: '🔭' }, action: 'craft_scout_ship',
           requiresBlueprint: true, blueprintId: 'scout' },
         { id: 'combat_ship', name: 'Боевой корабль', desc: 'Защита флота',
-          cost: { type: 'composite', resources: { ore: 300, chips: 150, plasma: 30 }, icon: '⚔️' },
+          cost: { type: 'composite', resources: { ore: 250, chips: 120, plasma: 25 }, icon: '⚔️' },
           result: { type: 'ship', subtype: 'combat', amount: 1, icon: '⚔️' }, action: 'craft_combat_ship',
           requiresBlueprint: true, blueprintId: 'combat' }
     ],
@@ -63,16 +63,26 @@ export const craftModule = {
         return (this.resources[recipe.cost.type] || 0) >= this.getEffectiveCost(recipe);
     },
     
+    // ИСПРАВЛЕНО: проверка существования метода
     executeCraft(recipeId) {
         const recipe = this.recipes.find(r => r.id === recipeId);
         if (!recipe) return { success: false, error: 'Рецепт не найден' };
         if (!this.canCraft(recipe)) return { success: false, error: 'Недостаточно ресурсов или чертежа' };
+        
         try {
+            // Проверяем существование метода
+            if (typeof this.game[recipe.action] !== 'function') {
+                console.error(`Метод ${recipe.action} не найден в game`);
+                return { success: false, error: `Системная ошибка: метод ${recipe.action} не найден` };
+            }
+            
             const result = this.game[recipe.action]();
             if (result === 'success') return { success: true, message: `✅ Создан ${recipe.result.icon} ${recipe.name}`, recipe };
-            // БАГ №8: возвращаем реальную ошибку от Rust
             return { success: false, error: `Ошибка крафта: ${result}` };
-        } catch(e) { return { success: false, error: 'Системная ошибка' }; }
+        } catch(e) { 
+            console.error('Ошибка крафта:', e);
+            return { success: false, error: 'Системная ошибка' }; 
+        }
     },
     
     setupEventListeners(container) {
@@ -83,15 +93,21 @@ export const craftModule = {
             if (!btn) return;
             const recipeId = btn.dataset.recipe;
             if (!recipeId) return;
-            btn.classList.add('processing'); btn.innerHTML = '⏳...';
+            btn.classList.add('processing');
+            btn.innerHTML = '⏳...';
+            
             setTimeout(() => {
-                const result = this.handleCraftClick(recipeId);
-                if (this.game && result.success) {
-                    const j = this.game.get_statistics();
-                    if (j) this.syncFromStats(JSON.parse(j));
+                try {
+                    const result = this.handleCraftClick(recipeId);
+                    if (this.game && result.success) {
+                        const j = this.game.get_statistics();
+                        if (j) this.syncFromStats(JSON.parse(j));
+                    }
+                } catch(e) {
+                    console.error('Ошибка крафта:', e);
+                } finally {
+                    this.refreshUI(container);
                 }
-                // БАГ №14: refreshUI перерисовывает весь контейнер — дальнейшие манипуляции с btn не нужны
-                this.refreshUI(container);
             }, 300);
         };
         return container;

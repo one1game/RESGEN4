@@ -4,7 +4,7 @@ import { supabase } from './supabase.js';
 
 // Константы для версионирования
 const SAVE_VERSION = 3;
-const CONFLICT_RESOLUTION_STRATEGY = 'server_wins'; // или 'client_wins', 'merge'
+const CONFLICT_RESOLUTION_STRATEGY = 'server_wins';
 
 // ========== ГЛАВНАЯ ФУНКЦИЯ СОХРАНЕНИЯ ==========
 export async function saveGameToCloud(gameInstance, force = false) {
@@ -27,10 +27,15 @@ export async function saveGameToCloud(gameInstance, force = false) {
         // 3. Получаем флот
         const fleet = getFleet();
         
+        // БАГ #1 ИСПРАВЛЕНИЕ: читаем мощность через gameInstance
+        const computationalPower = gameInstance.get_computational_power?.() ?? rustState?.computational_power ?? 0;
+        const maxComputationalPower = gameInstance.get_max_computational_power?.() ?? rustState?.max_computational_power ?? 1000;
+        
         // 4. Формируем ЕДИНЫЙ формат сохранения
         const saveData = {
             version: SAVE_VERSION,
             timestamp: Date.now(),
+            last_game_change: rustState?.last_modified || Date.now(),
             
             // Основные ресурсы (из Rust)
             inventory: {
@@ -51,8 +56,8 @@ export async function saveGameToCloud(gameInstance, force = false) {
             },
             
             // Прогресс
-            computational_power: rustState?.computational_power || 0,
-            max_computational_power: rustState?.max_computational_power || 1000,
+            computational_power: computationalPower,
+            max_computational_power: maxComputationalPower,
             nights_survived: rustState?.nights_survived || 0,
             total_mined: rustState?.total_clicks || 0,
             
@@ -101,10 +106,14 @@ export async function saveGameToCloud(gameInstance, force = false) {
             current_night_type: rustState?.current_night_type || ""
         };
         
-        // 5. Проверяем конфликт (если не force)
+        // БАГ #8 ИСПРАВЛЕНИЕ: записываем локальный бэкап ДО отправки в облако
+        localStorage.setItem('corebox_save_backup', JSON.stringify(saveData));
+        
+        // 5. Проверяем конфликт (если не force) - ИСПРАВЛЕНА логика сравнения
         if (!force) {
             const existing = await getLatestCloudSave(user.id);
-            if (existing && existing.timestamp > saveData.timestamp) {
+            // Сравниваем время последнего изменения игры, а не timestamp сохранения
+            if (existing && existing.last_game_change > saveData.last_game_change) {
                 console.warn("Облачное сохранение новее, пропускаем");
                 return { 
                     success: false, 
@@ -118,7 +127,6 @@ export async function saveGameToCloud(gameInstance, force = false) {
         const { error } = await supabase.from('game_saves').upsert({
             user_id: user.id,
             full_state: saveData,
-            // Дублируем основные поля для быстрых запросов (лидерборд и т.д.)
             coal: saveData.inventory.coal,
             ore: saveData.inventory.ore,
             chips: saveData.inventory.chips,
@@ -134,9 +142,6 @@ export async function saveGameToCloud(gameInstance, force = false) {
         }, { onConflict: 'user_id' });
         
         if (error) throw error;
-        
-        // 7. Сохраняем локальную резервную копию
-        localStorage.setItem('corebox_save_backup', JSON.stringify(saveData));
         
         console.log("✅ Облачное сохранение успешно");
         return { success: true, timestamp: saveData.timestamp };
@@ -165,20 +170,23 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
             return null;
         }
         
-        const cloudSave = data.full_state;
+        let cloudSave = data.full_state;
         
         // 2. Проверяем версию
         if (cloudSave.version !== SAVE_VERSION) {
             console.warn(`Версия сохранения не совпадает: ${cloudSave.version} vs ${SAVE_VERSION}`);
-            // Пытаемся мигрировать
             const migrated = migrateSave(cloudSave);
-            if (migrated) return migrated;
+            if (!migrated) {
+                console.error('Миграция невозможна, используем пустое состояние');
+                return null;
+            }
+            cloudSave = migrated;
         }
         
         // 3. Если нужно смержить с локальным
         if (mergeWithLocal) {
             const localSave = getLocalSave();
-            if (localSave && localSave.timestamp > cloudSave.timestamp) {
+            if (localSave && localSave.last_game_change > cloudSave.last_game_change) {
                 console.log("Локальное сохранение новее, используем его");
                 return localSave;
             }
@@ -230,7 +238,6 @@ export async function syncStatisticsToCloud(statistics) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
         
-        // Обновляем лидерборд
         await supabase.from('leaderboard').upsert({
             user_id: user.id,
             username: user.user_metadata?.username || user.email?.split('@')[0] || 'Игрок',
@@ -322,12 +329,19 @@ function getLocalSave() {
     return null;
 }
 
+// БАГ #5 ИСПРАВЛЕНИЕ: улучшенная миграция с поддержкой старых версий
 function migrateSave(oldSave) {
+    // Если версия уже актуальная, возвращаем как есть
+    if (oldSave.version === SAVE_VERSION) {
+        return oldSave;
+    }
+    
     // Миграция с версии 2 на 3
     if (oldSave.version === 2) {
         const migrated = {
             version: 3,
             timestamp: oldSave.timestamp || Date.now(),
+            last_game_change: oldSave.last_game_change || Date.now(),
             inventory: oldSave.inventory || {},
             upgrades: oldSave.upgrades || {},
             computational_power: oldSave.computational_power || 0,
@@ -340,9 +354,90 @@ function migrateSave(oldSave) {
             coal_enabled: oldSave.coal_enabled || false,
             blueprints: oldSave.blueprints || [],
             fleet: oldSave.fleet || [],
-            prestige_level: oldSave.prestige_level || 0
+            prestige_level: oldSave.prestige_level || 0,
+            rebel_activity: oldSave.rebel_activity || 0,
+            turbine_heat: oldSave.turbine_heat || 0,
+            turbine_upgrade_level: oldSave.turbine_upgrade_level || 0,
+            statistics: oldSave.statistics || {},
+            passive_rates: oldSave.passive_rates || { coal: 0.004, trash: 0.008, ore: 0.003 },
+            last_ai_coal_threshold: oldSave.last_ai_coal_threshold || 0,
+            current_night_type: oldSave.current_night_type || ""
         };
         return migrated;
     }
-    return null;
+    
+    // Миграция с версии 1
+    if (oldSave.version === 1) {
+        const migrated = {
+            version: 3,
+            timestamp: Date.now(),
+            last_game_change: Date.now(),
+            inventory: {
+                coal: oldSave.coal || 0,
+                ore: oldSave.ore || 0,
+                chips: oldSave.chips || 0,
+                plasma: oldSave.plasma || 0,
+                trash: oldSave.trash || 0
+            },
+            upgrades: {
+                mining: oldSave.mining_level || 0,
+                defense: oldSave.defense_active || false,
+                defense_level: oldSave.defense_level || 0,
+                crit_level: 0,
+                cooling_level: 0
+            },
+            computational_power: oldSave.computational_power || 0,
+            max_computational_power: oldSave.max_computational_power || 1000,
+            nights_survived: oldSave.nights_survived || 0,
+            total_mined: oldSave.total_mined || 0,
+            neuro: {
+                evolution: oldSave.neuro_evolution || 0,
+                consciousness: oldSave.neuro_consciousness || 0,
+                score: oldSave.neuro_score || 0,
+                ai_mode: "Обычный"
+            },
+            game_time: oldSave.game_time || 24,
+            is_day: oldSave.is_day !== undefined ? oldSave.is_day : true,
+            coal_enabled: oldSave.coal_enabled || false,
+            blueprints: [],
+            fleet: [],
+            prestige_level: 0,
+            rebel_activity: 0,
+            turbine_heat: 0,
+            turbine_upgrade_level: 0,
+            statistics: {},
+            passive_rates: { coal: 0.004, trash: 0.008, ore: 0.003 },
+            last_ai_coal_threshold: 0,
+            current_night_type: ""
+        };
+        return migrated;
+    }
+    
+    // Неизвестная версия - пытаемся спасти хоть что-то
+    console.error(`Неизвестная версия сохранения: ${oldSave.version}. Попытка частичного восстановления.`);
+    return {
+        version: SAVE_VERSION,
+        timestamp: Date.now(),
+        last_game_change: Date.now(),
+        inventory: oldSave.inventory || { coal: 0, ore: 0, chips: 0, plasma: 0, trash: 0 },
+        upgrades: { mining: 0, defense: false, defense_level: 0, crit_level: 0, cooling_level: 0 },
+        computational_power: oldSave.computational_power || 0,
+        max_computational_power: oldSave.max_computational_power || 1000,
+        nights_survived: 0,
+        total_mined: 0,
+        neuro: { evolution: 0, consciousness: 0, score: 0, ai_mode: "Обычный" },
+        game_time: 24,
+        is_day: true,
+        coal_enabled: false,
+        blueprints: [],
+        fleet: [],
+        prestige_level: 0,
+        rebel_activity: 0,
+        turbine_heat: 0,
+        turbine_upgrade_level: 0,
+        statistics: {},
+        passive_rates: { coal: 0.004, trash: 0.008, ore: 0.003 },
+        last_ai_coal_threshold: 0,
+        current_night_type: ""
+    };
 }

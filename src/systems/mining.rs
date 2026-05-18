@@ -1,4 +1,6 @@
-// ======== src/systems/mining.rs (С БОНУСАМИ СОЗНАНИЯ) ========
+// ========== src/systems/mining.rs (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+
+// src/systems/mining.rs (БАЛАНС #2 - потолок критов)
 
 use rand::Rng;
 use crate::game::{GameState, GameEvent};
@@ -41,17 +43,13 @@ impl MiningSystem {
 
         let mut rng = rand::thread_rng();
         
-        // Бонусы от сознания ИИ
         let bonuses = neuro.get_consciousness_bonuses();
 
-        // Расчёт нагрева
         let base_heat: f64 = if is_auto { 0.8 } else { 1.8 };
         let overheat_multiplier = 1.0 + (state.turbine_heat as f64 / 120.0);
         let upgrade_reduction = 1.0 - (state.turbine_upgrade_level as f64 * 0.10).min(0.50);
         
-        // Бонус охлаждения от модуля
         let cooling_module_reduction = 1.0 - (state.upgrades.cooling_level as f64 * 0.15).min(0.75);
-        // Бонус охлаждения от сознания ИИ
         let consciousness_cooling = 1.0 - bonuses.heat_reduction;
         
         let jitter = 0.88 + rng.gen::<f64>() * 0.24;
@@ -90,7 +88,6 @@ impl MiningSystem {
         let mut ore_chance =
             (self.config.base_chances.ore + mining_lvl * 0.003) * heat_penalty;
 
-        // Применяем бонус сознания к шансам добычи
         coal_chance = (coal_chance + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
         trash_chance = (trash_chance + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
         ore_chance = (ore_chance + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
@@ -111,13 +108,19 @@ impl MiningSystem {
         trash_chance *= mining_debuff * auto_debuff;
         ore_chance *= mining_debuff * auto_debuff;
 
-        // Крит-шанс с бонусами
         let crit_module_bonus = state.upgrades.crit_level as f64 * 0.02;
         let consciousness_crit_bonus = bonuses.crit_bonus;
-        let critical_chance = (self.config.critical_chance 
+        
+        // БАЛАНС #2: расчёт критического шанса с потолком 25%
+        let mut critical_chance = (self.config.critical_chance 
             + crit_module_bonus 
             + consciousness_crit_bonus) 
             * (1.0 - new_heat as f64 / 200.0);
+        
+        // ЖЁСТКИЙ ПОТОЛОК 25% (максимум 1/4 кликов)
+        if critical_chance > 0.25 {
+            critical_chance = 0.25;
+        }
         
         let is_critical = rng.gen::<f64>() < critical_chance;
         let multiplier = if is_critical { self.config.critical_multiplier } else { 1 };
@@ -187,7 +190,6 @@ impl MiningSystem {
 
         let mut rng = rand::thread_rng();
         
-        // Бонус от сознания ИИ для пассивной добычи
         let bonuses = neuro.get_consciousness_bonuses();
         let passive_multiplier = bonuses.passive_multiplier;
 

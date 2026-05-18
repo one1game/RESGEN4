@@ -238,6 +238,12 @@ export class CoreGame {
         wasm.coregame_buy_resource(this.__wbg_ptr, ptr0, len0);
     }
     /**
+     * @param {number} max
+     */
+    set_max_power(max) {
+        wasm.coregame_set_max_power(this.__wbg_ptr, max);
+    }
+    /**
      * @returns {string}
      */
     get_statistics() {

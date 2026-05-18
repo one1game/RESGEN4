@@ -1,4 +1,4 @@
-// ======== src/game/state.rs (ОПТИМИЗИРОВАННАЯ ВЕРСИЯ) ========
+// ======== src/game/state.rs (ДОБАВЛЕН restore_power) ========
 
 use serde::{Serialize, Deserialize};
 use super::config::GameConfig;
@@ -134,13 +134,24 @@ impl GameState {
                 t if t.starts_with("Mine") => QuestType::MineResource(t[4..].to_lowercase()),
                 _ => QuestType::MineAny,
             };
-            self.quests.push(Quest { id: q.id.clone(), title: q.title.clone(), description: q.description.clone(),
-                quest_type: qtype, target: q.target, reward: q.reward, enabled: q.enabled, order: q.order,
-                completed: false, unlocks: q.unlocks.clone() });
+            self.quests.push(Quest { 
+                id: q.id.clone(), 
+                title: q.title.clone(), 
+                description: q.description.clone(),
+                quest_type: qtype, 
+                target: q.target, 
+                reward: q.reward, 
+                enabled: q.enabled, 
+                order: q.order,
+                completed: false, 
+                unlocks: q.unlocks.clone() 
+            });
         }
         self.quests.sort_by(|a, b| a.order.cmp(&b.order));
         self.current_quest = 0;
-        while self.current_quest < self.quests.len() && self.quests[self.current_quest].completed { self.current_quest += 1; }
+        while self.current_quest < self.quests.len() && self.quests[self.current_quest].completed { 
+            self.current_quest += 1; 
+        }
     }
 
     pub fn update_time(&mut self, delta: i32, config: &GameConfig) -> Vec<super::events::GameEvent> {
@@ -149,7 +160,10 @@ impl GameState {
         let cooling = 2 + self.turbine_upgrade_level;
         if self.turbine_heat > 0 {
             self.turbine_heat = self.turbine_heat.saturating_sub(cooling);
-            if self.turbine_heat == 0 && self.turbine_cooling { self.turbine_cooling = false; events.push(GameEvent::LogMessage("🌡️ Турбина остыла".to_string())); }
+            if self.turbine_heat == 0 && self.turbine_cooling { 
+                self.turbine_cooling = false; 
+                events.push(GameEvent::LogMessage("🌡️ Турбина остыла".to_string())); 
+            }
         }
         let was_day = self.is_day;
         self.time_changed = false;
@@ -157,23 +171,34 @@ impl GameState {
         
         if self.mining_debuff_remaining > 0 {
             self.mining_debuff_remaining -= 1;
-            if self.mining_debuff_remaining == 0 { self.mining_debuff_percent = 0.0; events.push(GameEvent::LogMessage("🔧 Саботаж устранён".to_string())); }
+            if self.mining_debuff_remaining == 0 { 
+                self.mining_debuff_percent = 0.0; 
+                events.push(GameEvent::LogMessage("🔧 Саботаж устранён".to_string())); 
+            }
         }
         if self.autoclick_debuff_remaining > 0 {
             self.autoclick_debuff_remaining -= 1;
-            if self.autoclick_debuff_remaining == 0 { self.autoclick_debuff_percent = 0.0; events.push(GameEvent::LogMessage("🧠 Воздействие ослабло".to_string())); }
+            if self.autoclick_debuff_remaining == 0 { 
+                self.autoclick_debuff_percent = 0.0; 
+                events.push(GameEvent::LogMessage("🧠 Воздействие ослабло".to_string())); 
+            }
         }
         
         if self.game_time <= 0 {
             self.is_day = !self.is_day;
             self.game_time = if self.is_day { config.time_config.day_duration } else { config.time_config.night_duration };
             self.time_changed = true;
-            if self.defense_debuff_remaining > 0 && self.is_day && !was_day { self.defense_debuff_remaining -= 1; }
+            if self.defense_debuff_remaining > 0 && self.is_day && !was_day { 
+                self.defense_debuff_remaining -= 1; 
+            }
             
             if self.coal_enabled && self.inventory.coal > 0 {
                 let mut rng = rand::thread_rng();
-                let cost = if self.is_day { rng.gen_range(config.coal_consumption_config.day_coal_min..=config.coal_consumption_config.day_coal_max) }
-                    else { rng.gen_range(config.coal_consumption_config.night_coal_min..=config.coal_consumption_config.night_coal_max) };
+                let cost = if self.is_day { 
+                    rng.gen_range(config.coal_consumption_config.day_coal_min..=config.coal_consumption_config.day_coal_max) 
+                } else { 
+                    rng.gen_range(config.coal_consumption_config.night_coal_min..=config.coal_consumption_config.night_coal_max) 
+                };
                 let actual = cost.min(self.inventory.coal);
                 if actual > 0 {
                     self.inventory.coal -= actual;
@@ -184,10 +209,20 @@ impl GameState {
                         self.inventory.plasma += new;
                         self.plasma_from_coal = plasma_gen;
                         self.total_plasma_mined += new;
-                        events.push(GameEvent::ResourceMined { resource: "plasma".to_string(), amount: new, critical: false });
+                        events.push(GameEvent::ResourceMined { 
+                            resource: "plasma".to_string(), 
+                            amount: new, 
+                            critical: false 
+                        });
                     }
-                    if self.inventory.coal == 0 { self.coal_enabled = false; events.push(GameEvent::CoalDepleted); }
-                } else { self.coal_enabled = false; events.push(GameEvent::CoalDepleted); }
+                    if self.inventory.coal == 0 { 
+                        self.coal_enabled = false; 
+                        events.push(GameEvent::CoalDepleted); 
+                    }
+                } else { 
+                    self.coal_enabled = false; 
+                    events.push(GameEvent::CoalDepleted); 
+                }
             }
             
             if !self.is_day && was_day {
@@ -195,25 +230,56 @@ impl GameState {
                 events.push(GameEvent::NightStarted);
                 if self.rebel_protection_active && self.rebel_protection_nights > 0 {
                     self.rebel_protection_nights -= 1;
-                    if self.rebel_protection_nights == 0 { self.rebel_protection_active = false; }
+                    if self.rebel_protection_nights == 0 { 
+                        self.rebel_protection_active = false; 
+                    }
                 }
-            } else if self.is_day && !was_day { events.push(GameEvent::DayStarted); self.trade_blocked = false; }
+            } else if self.is_day && !was_day { 
+                events.push(GameEvent::DayStarted); 
+                self.trade_blocked = false; 
+            }
         }
         events
     }
 
-    pub fn is_ai_active(&self) -> bool { self.is_day || (self.coal_enabled && self.inventory.coal > 0) }
-    pub fn is_passive_mining_active(&self) -> bool { (self.coal_enabled && self.inventory.coal > 0) || self.is_day }
-    pub fn can_auto_click(&self) -> bool { self.computational_power > 0 && self.is_ai_active() }
-    pub fn get_power_percentage(&self) -> f32 { (self.computational_power as f32 / self.max_computational_power as f32) * 100.0 }
+    pub fn is_ai_active(&self) -> bool { 
+        self.is_day || (self.coal_enabled && self.inventory.coal > 0) 
+    }
+    
+    pub fn is_passive_mining_active(&self) -> bool { 
+        (self.coal_enabled && self.inventory.coal > 0) || self.is_day 
+    }
+    
+    pub fn can_auto_click(&self) -> bool { 
+        self.computational_power > 0 && self.is_ai_active() 
+    }
+    
+    pub fn get_power_percentage(&self) -> f32 { 
+        (self.computational_power as f32 / self.max_computational_power as f32) * 100.0 
+    }
+    
+    // ========== НОВЫЙ МЕТОД: восстановление мощности ==========
+    pub fn restore_power(&mut self, saved_power: u32, saved_max_power: u32) {
+        self.computational_power = saved_power;
+        if saved_max_power > self.max_computational_power {
+            self.max_computational_power = saved_max_power;
+        }
+    }
     
     pub fn buy_rebel_protection(&mut self) -> Vec<super::events::GameEvent> {
         use super::events::GameEvent;
         if self.inventory.trash >= 100 {
             self.inventory.trash -= 100;
             self.rebel_protection_nights += 1;
+            // БАГ #6 ЛОГИКА ИСПРАВЛЕНИЕ: автоматически активируем защиту при покупке
+            if !self.rebel_protection_active {
+                self.rebel_protection_active = true;
+                return vec![GameEvent::LogMessage(format!("🛡️ Защита куплена и АКТИВИРОВАНА на 1 ночь! Осталось: {}", self.rebel_protection_nights))];
+            }
             vec![GameEvent::LogMessage(format!("🛡️ Куплена защита на 1 ночь! Осталось: {}", self.rebel_protection_nights))]
-        } else { vec![GameEvent::LogMessage("❌ Недостаточно мусора (нужно 100)".to_string())] }
+        } else { 
+            vec![GameEvent::LogMessage("❌ Недостаточно мусора (нужно 100)".to_string())] 
+        }
     }
     
     pub fn toggle_rebel_protection(&mut self) -> Vec<super::events::GameEvent> {
@@ -224,7 +290,9 @@ impl GameState {
         } else if self.rebel_protection_nights > 0 {
             self.rebel_protection_active = true;
             vec![GameEvent::LogMessage(format!("🛡️ Защита активирована! Осталось ночей: {}", self.rebel_protection_nights))]
-        } else { vec![GameEvent::LogMessage("❌ Нет доступных ночей защиты".to_string())] }
+        } else { 
+            vec![GameEvent::LogMessage("❌ Нет доступных ночей защиты".to_string())] 
+        }
     }
     
     pub fn toggle_coal(&mut self) -> Vec<super::events::GameEvent> {
@@ -234,15 +302,26 @@ impl GameState {
             vec![GameEvent::LogMessage("ТЭЦ отключена".to_string())]
         } else if self.inventory.coal >= 1 {
             self.coal_enabled = true;
-            self.inventory.coal -= 1;
-            vec![GameEvent::LogMessage("ТЭЦ активирована (-1 уголь)".to_string())]
-        } else { vec![GameEvent::LogMessage("Нет угля для активации".to_string())] }
+            // БАГ #1 ЛОГИКА: убираем списание угля при включении (расход уже идёт в update_time)
+            // self.inventory.coal -= 1; ← КОММЕНТАРИЙ: не списываем!
+            vec![GameEvent::LogMessage("ТЭЦ активирована".to_string())]
+        } else { 
+            vec![GameEvent::LogMessage("Нет угля для активации".to_string())] 
+        }
     }
     
     pub fn record_defense_result(&mut self, was_successful: bool) {
-        if was_successful { self.consecutive_successful_defenses += 1; self.consecutive_failed_defenses = 0; self.attacks_defended += 1;
-            if self.consecutive_successful_defenses > self.longest_defense_streak { self.longest_defense_streak = self.consecutive_successful_defenses; }
-        } else { self.consecutive_successful_defenses = 0; self.consecutive_failed_defenses += 1; }
+        if was_successful { 
+            self.consecutive_successful_defenses += 1; 
+            self.consecutive_failed_defenses = 0; 
+            self.attacks_defended += 1;
+            if self.consecutive_successful_defenses > self.longest_defense_streak { 
+                self.longest_defense_streak = self.consecutive_successful_defenses; 
+            }
+        } else { 
+            self.consecutive_successful_defenses = 0; 
+            self.consecutive_failed_defenses += 1; 
+        }
     }
 }
 
@@ -252,16 +331,21 @@ impl Quest {
             QuestType::MineAny => state.total_mined >= self.target,
             QuestType::SurviveNight => state.nights_survived >= self.target,
             QuestType::MineResource(r) => match r.as_str() {
-                "coal" => state.total_coal_mined >= self.target, "chips" => state.inventory.chips >= self.target,
-                "plasma" => state.total_plasma_mined >= self.target, "ore" => state.total_ore_mined >= self.target,
+                "coal" => state.total_coal_mined >= self.target,
+                "chips" => state.inventory.chips >= self.target,
+                "plasma" => state.total_plasma_mined >= self.target,
+                "ore" => state.total_ore_mined >= self.target,
                 _ => false,
             },
             QuestType::ActivateDefense => state.upgrades.defense,
             QuestType::SurviveAttack => state.rebel_attacks_count >= self.target,
             QuestType::ReachEvolutionLevel => state.neuro_evolution >= self.target,
+            // БАГ #4 ЛОГИКА ИСПРАВЛЕНИЕ: CollectResource проверяет текущий инвентарь
             QuestType::CollectResource(r) => match r.as_str() {
-                "coal" => state.total_coal_mined >= self.target, "ore" => state.total_ore_mined >= self.target,
-                "plasma" => state.total_plasma_mined >= self.target, _ => false,
+                "coal" => state.inventory.coal >= self.target,
+                "ore" => state.inventory.ore >= self.target,
+                "plasma" => state.inventory.plasma >= self.target,
+                _ => false,
             },
         }
     }

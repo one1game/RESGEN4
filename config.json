@@ -1,5 +1,6 @@
+
 {
-  "version": "3.2-night-types",
+  "version": "3.2-night-types-balanced",
   "cycle_duration": 32,
   "max_slots": 18,
 
@@ -12,14 +13,14 @@
 
   "mining_config": {
     "base_chances": {
-      "coal": 0.32,
-      "trash": 0.30,
-      "ore": 0.22
+      "coal": 0.28,
+      "trash": 0.25,
+      "ore": 0.18
     },
     "upgrade_bonus": 0.015,
     "coal_bonus": 0.025,
     "critical_chance": 0.09,
-    "critical_multiplier": 2.5,
+    "critical_multiplier": 2,
     "passive_chances": {
       "coal": 0.008,
       "trash": 0.006,
@@ -42,8 +43,8 @@
   },
 
   "upgrade_config": {
-    "mining_base_cost": 10,
-    "mining_cost_multiplier": 2,
+    "mining_base_cost": 8,
+    "mining_cost_multiplier": 3,
     "mining_max_level": 10,
     "defense_activation_cost": 1,
     "defense_base_power": 45,
@@ -52,7 +53,7 @@
   },
 
   "rebels": {
-    "base_attack_chance": 0.035,
+    "base_attack_chance": 0.03,
     "activity_increase": 2,
     "activity_decrease": 1,
     "max_activity": 15,
@@ -155,10 +156,10 @@
 
   "coal_consumption_config": {
     "day_coal_min": 1,
-    "day_coal_max": 2,
-    "night_coal_min": 2,
-    "night_coal_max": 4,
-    "plasma_conversion_rate": 45
+    "day_coal_max": 1,
+    "night_coal_min": 1,
+    "night_coal_max": 3,
+    "plasma_conversion_rate": 40
   },
 
   "ui_config": {

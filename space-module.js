@@ -1,4 +1,6 @@
-// space-module.js - ИСПРАВЛЕННАЯ ВЕРСИЯ (БАГ #4 - УДАЛЁН ДУБЛИРУЮЩИЙСЯ last_seen UPDATER)
+// ========== space-module.js (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+
+// space-module.js - ИСПРАВЛЕННАЯ ВЕРСИЯ (НЕДОРАБОТКА #3 - детерминированные позиции игроков)
 
 import { supabase } from './supabase.js';
 
@@ -6,12 +8,14 @@ export const spaceModule = {
     game: null,
     currentUser: null,
     multiplayerInterval: null,
-    lastSeenInterval: null, // УДАЛЁН — используется только game.js
     initialized: false,
 
     planets: [],
     otherPlayers: [],
     isResearching: false,
+    
+    // НЕДОРАБОТКА #3: кэш позиций игроков
+    _playerPositions: {},
 
     PLANET_TYPES: {
         'earth':   { icon: '🌍', name: 'Землеподобная',  color: '#4aff9d' },
@@ -28,12 +32,12 @@ export const spaceModule = {
     init(gameInstance, user) {
         this.game = gameInstance;
         this.currentUser = user;
+        this._playerPositions = {};
 
         this.loadPlanets();
         this.generateStars();
         this.renderPlanets();
         this.setupMultiplayer();
-        // УДАЛЁН вызов startLastSeenUpdater() — теперь только через game.js
         this.initialized = true;
 
         console.log('🌌 Space module инициализирован');
@@ -45,7 +49,6 @@ export const spaceModule = {
         this.renderPlanets();
         this.renderPlayers();
         this.updateStatusBar();
-        // Вызываем game.js функцию обновления last_seen через глобальное событие
         window.dispatchEvent(new CustomEvent('updateLastSeen'));
     },
 
@@ -261,17 +264,26 @@ export const spaceModule = {
         `).join('');
     },
 
+    // НЕДОРАБОТКА #3 ИСПРАВЛЕНИЕ: детерминированные позиции игроков
     renderPlayersOnMap() {
         const layer = document.getElementById('space-objects-layer');
         if (!layer) return;
         layer.querySelectorAll('.other-player-marker').forEach(el => el.remove());
 
         this.otherPlayers.slice(0, 15).forEach((player, i) => {
-            const angle = (i / Math.max(this.otherPlayers.length, 1)) * Math.PI * 2;
-            const r = 30 + Math.random() * 15;
-            const x = 50 + Math.cos(angle) * r;
-            const y = 50 + Math.sin(angle) * r;
-
+            // Кэшируем позицию
+            if (!this._playerPositions[player.user_id]) {
+                // Используем детерминированное значение на основе ID игрока
+                const hash = this._hashString(player.user_id);
+                const angle = (hash % 360) * Math.PI / 180;
+                const r = 30 + (hash % 20);
+                this._playerPositions[player.user_id] = {
+                    x: 50 + Math.cos(angle) * r,
+                    y: 50 + Math.sin(angle) * r
+                };
+            }
+            const { x, y } = this._playerPositions[player.user_id];
+            
             const el = document.createElement('div');
             el.className = 'other-player-marker';
             el.style.cssText = `
@@ -289,6 +301,15 @@ export const spaceModule = {
             el.onclick = () => this.showPlayerInfo(player.user_id);
             layer.appendChild(el);
         });
+    },
+    
+    _hashString(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) - hash) + str.charCodeAt(i);
+            hash |= 0;
+        }
+        return Math.abs(hash);
     },
 
     async showPlayerInfo(userId) {
@@ -455,7 +476,6 @@ export const spaceModule = {
         return `${Math.floor(hours / 24)} дн назад`;
     },
 
-    // УДАЛЁН startLastSeenUpdater и stopLastSeenUpdater
     destroy() {
         if (this.multiplayerInterval) clearInterval(this.multiplayerInterval);
         if (this._currentPopup) {

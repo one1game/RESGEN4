@@ -1,25 +1,22 @@
+// ========== auth.js (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+
 // auth.js
 // Модуль авторизации - регистрация, вход, выход
 
 import { supabase } from './supabase.js';
 
-// ─────────────────────────────────────────────
-// 📝 РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ
-// ─────────────────────────────────────────────
 export async function register(email, password, username) {
     try {
-        // 1. Регистрируем пользователя в Supabase Auth
         const { data, error } = await supabase.auth.signUp({
             email: email,
             password: password,
             options: {
-                data: { username: username }  // Сохраняем имя в метаданных
+                data: { username: username }
             }
         });
 
         if (error) throw error;
 
-        // 2. Обновляем username в таблице profiles (на случай, если триггер не сработал)
         if (data.user) {
             const { error: updateError } = await supabase
                 .from('profiles')
@@ -38,9 +35,6 @@ export async function register(email, password, username) {
     }
 }
 
-// ─────────────────────────────────────────────
-// 🔑 ВХОД В СИСТЕМУ
-// ─────────────────────────────────────────────
 export async function login(email, password) {
     try {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -50,7 +44,6 @@ export async function login(email, password) {
 
         if (error) throw error;
 
-        // Обновляем last_login в профиле
         if (data.user) {
             await supabase
                 .from('profiles')
@@ -67,17 +60,16 @@ export async function login(email, password) {
     }
 }
 
-// ─────────────────────────────────────────────
-// 🚪 ВЫХОД ИЗ СИСТЕМЫ
-// ─────────────────────────────────────────────
+// ========== ИСПРАВЛЕННЫЙ logout (БАГ #4 SAVE) ==========
 export async function logout() {
     try {
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
         
-        // Очищаем локальные данные игры
+        // БАГ #4 SAVE ИСПРАВЛЕНИЕ: НЕ удаляем corebox_save
+        // Удаляем только сессионные данные
         localStorage.removeItem('corebox_current_user');
-        localStorage.removeItem('corebox_save');
+        // localStorage.removeItem('corebox_save'); // ← КОММЕНТАРИЙ: не удаляем!
         
         console.log("✅ Выход выполнен");
         return { success: true };
@@ -88,14 +80,10 @@ export async function logout() {
     }
 }
 
-// ─────────────────────────────────────────────
-// 👤 ПОЛУЧИТЬ ТЕКУЩЕГО ПОЛЬЗОВАТЕЛЯ
-// ─────────────────────────────────────────────
 export async function getCurrentUser() {
     try {
         const { data: { user }, error } = await supabase.auth.getUser();
         if (error) throw error;
-        
         return user;
     } catch (error) {
         console.error("❌ Ошибка получения пользователя:", error.message);
@@ -103,17 +91,13 @@ export async function getCurrentUser() {
     }
 }
 
-// ─────────────────────────────────────────────
-// 🔄 ИНИЦИАЛИЗАЦИЯ АВТОРИЗАЦИИ (слушаем изменения)
-// ✅ ИСПРАВЛЕНИЕ БАГА 3: игнорируем повторные INITIAL_SESSION
-// ─────────────────────────────────────────────
+// БАГ #3 ИСПРАВЛЕНИЕ: правильная обработка INITIAL_SESSION
 export function initAuth(onLogin, onLogout) {
-    let initialSessionHandled = false;  // ← новый флаг для предотвращения дублей
+    let initialSessionHandled = false;
     
     supabase.auth.onAuthStateChange((event, session) => {
         console.log("🔔 Auth state changed:", event);
         
-        // ✅ ИСПРАВЛЕНИЕ: обрабатываем INITIAL_SESSION только один раз
         if (event === 'INITIAL_SESSION') {
             if (initialSessionHandled) {
                 console.log("⏭️ Пропускаем повторный INITIAL_SESSION");
@@ -129,15 +113,16 @@ export function initAuth(onLogin, onLogout) {
                 onLogout();
             }
         } else if (event === 'SIGNED_OUT') {
-            initialSessionHandled = false;  // Сбрасываем при выходе
+            initialSessionHandled = false;
             onLogout();
+        } else if (event === 'TOKEN_REFRESHED') {
+            if (session?.user) {
+                console.log("🔄 Токен обновлён, пользователь:", session.user.email);
+            }
         }
     });
 }
 
-// ─────────────────────────────────────────────
-// 🔐 СБРОС ПАРОЛЯ (если нужно)
-// ─────────────────────────────────────────────
 export async function resetPassword(email) {
     try {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {

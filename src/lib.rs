@@ -1,4 +1,4 @@
-// ======== src/lib.rs (ИСПРАВЛЕН: добавлены trade_blocked и current_night_type в get_statistics) ========
+// ======== src/lib.rs (ИСПРАВЛЕН: мощность в get_statistics + update_config не сбрасывает + throttle) ========
 
 #![recursion_limit = "256"]
 
@@ -43,6 +43,7 @@ pub struct CoreGame {
     rebel_system: RebelSystem,
     neuro_ecosystem: NeuroEcosystem,
     ui: GameUI,
+    last_save_time: u64,
 }
 
 #[wasm_bindgen]
@@ -72,6 +73,15 @@ impl CoreGame {
             }
         }
         GameConfig::default()
+    }
+    
+    // ========== THROTTLE SAVE (БАГ #10) ==========
+    fn force_save_throttled(&mut self) {
+        let now = js_sys::Date::now() as u64;
+        if now - self.last_save_time > 5000 {
+            self.last_save_time = now;
+            self.force_save();
+        }
     }
     
     fn force_save(&self) {
@@ -104,6 +114,7 @@ impl CoreGame {
                         "total_coal_burned": state.total_coal_burned,
                         "trade_blocked": state.trade_blocked,
                         "current_night_type": state.current_night_type,
+                        "power_tier": state.power_tier,
                         "_savedAt": js_sys::Date::now()
                     });
                     let _ = storage.set_item("corebox_save_universal", &simple_save.to_string());
@@ -128,6 +139,7 @@ impl CoreGame {
             rebel_system: RebelSystem::new(),
             neuro_ecosystem: NeuroEcosystem::new(),
             ui: GameUI::new(),
+            last_save_time: 0,
         }
     }
 
@@ -138,33 +150,71 @@ impl CoreGame {
     }
 
     #[wasm_bindgen]
-    pub fn load_game_state(&mut self, state_json: String) -> Result<(), JsValue> {
-        match serde_json::from_str::<GameState>(&state_json) {
-            Ok(mut loaded) => {
-                let old_max = self.state.max_computational_power;
-                let old_prestige = self.state.prestige_level;
-                if loaded.last_ai_coal_threshold == 0 {
-                    let saved_coal = loaded.total_coal_mined.saturating_sub(loaded.total_coal_burned);
-                    loaded.last_ai_coal_threshold = [1000, 600, 300, 100].iter().find(|&&t| saved_coal >= t).copied().unwrap_or(0);
-                }
-                self.state = loaded;
-                self.state.max_computational_power = old_max;
-                self.state.prestige_level = old_prestige;
-                self.neuro_ecosystem.load_from_state(self.state.neuro_evolution, self.state.neuro_consciousness, self.state.neuro_score);
-                self.state.neuro_defense_bonus = self.neuro_ecosystem.get_defense_bonus();
-                self.state.neuro_prediction_bonus = self.neuro_ecosystem.get_prediction_bonus();
-                let _ = self.ui.render(&self.state);
-                self.ui.add_log_entry("💾 Состояние загружено");
-                self.force_save();
-                Ok(())
+    #[wasm_bindgen]
+pub fn load_game_state(&mut self, state_json: String) -> Result<(), JsValue> {
+    match serde_json::from_str::<GameState>(&state_json) {
+        Ok(mut loaded) => {
+            let old_max = self.state.max_computational_power;
+            let old_prestige = self.state.prestige_level;
+            let old_power_tier = self.state.power_tier;
+            
+            let saved_power = loaded.computational_power;
+            let saved_max_power = loaded.max_computational_power;
+            let saved_power_tier = loaded.power_tier;
+            
+            // БАГ #7: сохраняем значения ДО перемещения loaded
+            let loaded_prestige = loaded.prestige_level;
+            let loaded_neuro_evolution = loaded.neuro_evolution;
+            let loaded_neuro_consciousness = loaded.neuro_consciousness;
+            let loaded_neuro_score = loaded.neuro_score;
+            
+            if loaded.last_ai_coal_threshold == 0 {
+                let saved_coal = loaded.total_coal_mined.saturating_sub(loaded.total_coal_burned);
+                loaded.last_ai_coal_threshold = [1000, 600, 300, 100].iter()
+                    .find(|&&t| saved_coal >= t).copied().unwrap_or(0);
             }
-            Err(e) => Err(JsValue::from_str(&format!("Ошибка: {}", e)))
+            
+            self.state = loaded;
+            self.state.max_computational_power = old_max.max(saved_max_power);
+            // БАГ #7: используем сохранённое значение
+            self.state.prestige_level = loaded_prestige.max(old_prestige);
+            self.state.power_tier = saved_power_tier.max(old_power_tier);
+            
+            if saved_power > 0 {
+                self.state.computational_power = saved_power.min(self.state.max_computational_power);
+            }
+            if saved_max_power > self.state.max_computational_power {
+                self.state.max_computational_power = saved_max_power;
+            }
+            
+            self.neuro_ecosystem.load_from_state(
+                loaded_neuro_evolution, 
+                loaded_neuro_consciousness, 
+                loaded_neuro_score
+            );
+            self.state.neuro_defense_bonus = self.neuro_ecosystem.get_defense_bonus();
+            self.state.neuro_prediction_bonus = self.neuro_ecosystem.get_prediction_bonus();
+            
+            let _ = self.ui.render(&self.state);
+            self.ui.add_log_entry(&format!("💾 Состояние загружено (мощность: {}/{})", 
+                self.state.computational_power, self.state.max_computational_power));
+            self.force_save();
+            Ok(())
         }
+        Err(e) => Err(JsValue::from_str(&format!("Ошибка: {}", e)))
     }
+}
     
     #[wasm_bindgen]
     pub fn save_current_state(&mut self) {
         self.force_save();
+    }
+    
+    // БАГ #1 ИСПРАВЛЕНИЕ: метод установки максимальной мощности
+    #[wasm_bindgen]
+    pub fn set_max_power(&mut self, max: u32) {
+        self.state.max_computational_power = max;
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
@@ -190,6 +240,7 @@ impl CoreGame {
             "total_coal_burned": self.state.total_coal_burned,
             "trade_blocked": self.state.trade_blocked,
             "current_night_type": self.state.current_night_type,
+            "power_tier": self.state.power_tier,
             "timestamp": js_sys::Date::now()
         });
         simple_save.to_string()
@@ -199,21 +250,21 @@ impl CoreGame {
     pub fn add_manual_click(&mut self) { 
         let events = self.add_manual_click_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn start_auto_clicking(&mut self) { 
         let events = self.start_auto_clicking_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn stop_auto_clicking(&mut self) { 
         let events = self.stop_auto_clicking_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
@@ -229,90 +280,92 @@ impl CoreGame {
     pub fn toggle_coal(&mut self) { 
         let events = self.toggle_coal_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn upgrade_mining(&mut self) { 
         let events = self.upgrade_mining_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn activate_defense(&mut self) { 
         let events = self.activate_defense_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn upgrade_defense(&mut self) { 
         let events = self.upgrade_defense_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn upgrade_crit_module(&mut self) { 
         let events = self.upgrade_system.upgrade_crit_module(&mut self.state);
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn upgrade_cooling_module(&mut self) { 
         let events = self.upgrade_system.upgrade_cooling_module(&mut self.state);
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn buy_resource(&mut self, resource: String) { 
         let events = self.buy_resource_internal(&resource);
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn sell_resource(&mut self, resource: String) { 
         let events = self.sell_resource_internal(&resource);
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn buy_rebel_protection(&mut self) { 
         let events = self.buy_rebel_protection_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn toggle_rebel_protection(&mut self) { 
         let events = self.toggle_rebel_protection_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn reload_config(&mut self) {
         let config = Self::load_config_from_storage();
         self.update_config(config);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn clear_log(&self) { self.ui.clear_log(); }
 
-    // ========== ИСПРАВЛЕННЫЙ get_statistics (добавлены поля) ==========
+    // ========== ИСПРАВЛЕННАЯ get_statistics (БАГ #1) ==========
     #[wasm_bindgen]
     pub fn get_statistics(&self) -> String {
         let blueprints = format!(r#"{{"cargo":{},"scout":{},"combat":{}}}"#,
             self.state.blueprint_cargo_unlocked, self.state.blueprint_scout_unlocked, self.state.blueprint_combat_unlocked);
         let attack_history = serde_json::to_string(&self.state.attack_history).unwrap_or_else(|_| "[]".to_string());
         let rebel_factions = serde_json::to_string(&self.rebel_system.get_faction_info()).unwrap_or_else(|_| "[]".to_string());
-        format!(r#"{{"total_clicks":{},"nights_survived":{},"rebel_attacks_count":{},"attacks_defended":{},"coal_mined":{},"trash_mined":{},"plasma_mined":{},"ore_mined":{},"ore_inventory":{},"chips_inventory":{},"plasma_inventory":{},"coal_inventory":{},"trash_inventory":{},"neuro_evolution":{},"neuro_consciousness":{},"neuro_score":{},"current_ai_mode":"{}","attack_warning":"{}","attack_warning_faction":"{}","last_attacking_faction":"{}","mining_debuff_remaining":{},"autoclick_debuff_remaining":{},"defense_debuff_remaining":{},"rebel_factions":{},"attack_history":{},"is_day":{},"coal_enabled":{},"game_time":{},"turbine_heat":{},"turbine_upgrade_level":{},"turbine_cooling":{},"coal_burned":{},"coal_stolen":{},"crit_level":{},"cooling_level":{},"power_tier":{},"prestige_level":{},"last_ai_coal_threshold":{},"blueprints_unlocked":{},"blueprint_research_progress":{},"trade_blocked":{},"current_night_type":"{}"}}"#,
+        
+        // БАГ #1: ДОБАВЛЕНЫ computational_power и max_computational_power
+        format!(r#"{{"total_clicks":{},"nights_survived":{},"rebel_attacks_count":{},"attacks_defended":{},"coal_mined":{},"trash_mined":{},"plasma_mined":{},"ore_mined":{},"ore_inventory":{},"chips_inventory":{},"plasma_inventory":{},"coal_inventory":{},"trash_inventory":{},"neuro_evolution":{},"neuro_consciousness":{},"neuro_score":{},"current_ai_mode":"{}","attack_warning":"{}","attack_warning_faction":"{}","last_attacking_faction":"{}","mining_debuff_remaining":{},"autoclick_debuff_remaining":{},"defense_debuff_remaining":{},"rebel_factions":{},"attack_history":{},"is_day":{},"coal_enabled":{},"game_time":{},"turbine_heat":{},"turbine_upgrade_level":{},"turbine_cooling":{},"coal_burned":{},"coal_stolen":{},"crit_level":{},"cooling_level":{},"power_tier":{},"prestige_level":{},"last_ai_coal_threshold":{},"blueprints_unlocked":{},"blueprint_research_progress":{},"trade_blocked":{},"current_night_type":"{}","auto_clicking":{},"computational_power":{},"max_computational_power":{}}}"#,
             self.state.manual_clicks, self.state.nights_survived, self.state.rebel_attacks_count, self.state.attacks_defended,
             self.state.total_coal_mined, self.state.total_trash_mined, self.state.total_plasma_mined, self.state.total_ore_mined,
             self.state.inventory.ore, self.state.inventory.chips, self.state.inventory.plasma, self.state.inventory.coal, self.state.inventory.trash,
@@ -323,7 +376,10 @@ impl CoreGame {
             self.state.turbine_heat, self.state.turbine_upgrade_level, self.state.turbine_cooling,
             self.state.total_coal_burned, self.state.total_coal_stolen, self.state.upgrades.crit_level,
             self.state.upgrades.cooling_level, self.state.power_tier, self.state.prestige_level, self.state.last_ai_coal_threshold,
-            blueprints, self.state.blueprint_research_progress, self.state.trade_blocked, self.state.current_night_type)
+            blueprints, self.state.blueprint_research_progress, self.state.trade_blocked, self.state.current_night_type,
+            self.state.auto_clicking,
+            self.state.computational_power,      // ДОБАВЛЕНО
+            self.state.max_computational_power)  // ДОБАВЛЕНО
     }
     
     // Крафт
@@ -333,7 +389,7 @@ impl CoreGame {
             self.state.inventory.ore -= 100;
             self.state.inventory.chips += 1;
             self.ui.add_log_entry("⚙️ Крафт: создан 1 чип из 100 руды!");
-            self.force_save();
+            self.force_save_throttled();
             "success".to_string()
         } else { "error".to_string() }
     }
@@ -345,35 +401,35 @@ impl CoreGame {
             self.state.inventory.plasma += 1;
             self.state.total_plasma_mined += 1;
             self.ui.add_log_entry("⚡ Крафт: создана плазма из 50 угля!");
-            self.force_save();
+            self.force_save_throttled();
             "success".to_string()
         } else { "error".to_string() }
     }
     
     #[wasm_bindgen]
-   pub fn design_ship(&mut self, ship_type: String) -> String {
-    // ✅ Исправлено: Cargo 500 → 200
-    let cost = match ship_type.as_str() { 
-        "cargo" => 200,   // было 500
-        "scout" => 10, 
-        "combat" => 800, 
-        _ => return "error".to_string() 
-    };
-    if self.state.computational_power >= cost {
-        self.state.computational_power -= cost;
-        match ship_type.as_str() {
-            "cargo" => self.state.blueprint_cargo_unlocked = true,
-            "scout" => self.state.blueprint_scout_unlocked = true,
-            "combat" => self.state.blueprint_combat_unlocked = true,
-            _ => {}
+    pub fn design_ship(&mut self, ship_type: String) -> String {
+        let cost = match ship_type.as_str() { 
+            "cargo" => 200,
+            "scout" => 50,
+            "combat" => 800, 
+            _ => return "error".to_string() 
+        };
+        
+        if self.state.computational_power >= cost {
+            self.state.computational_power -= cost;
+            match ship_type.as_str() {
+                "cargo" => self.state.blueprint_cargo_unlocked = true,
+                "scout" => self.state.blueprint_scout_unlocked = true,
+                "combat" => self.state.blueprint_combat_unlocked = true,
+                _ => {}
+            }
+            self.ui.add_log_entry(&format!("📐 Создан чертеж {} корабля!", ship_type));
+            self.force_save_throttled();
+            "success".to_string()
+        } else { 
+            "error".to_string() 
         }
-        self.ui.add_log_entry(&format!("📐 Создан чертеж {} корабля!", ship_type));
-        self.force_save();
-        "success".to_string()
-    } else { 
-        "error".to_string() 
     }
-}
     
     #[wasm_bindgen] pub fn craft_cargo_ship(&mut self) -> String { self.craft_ship_internal("cargo") }
     #[wasm_bindgen] pub fn craft_scout_ship(&mut self) -> String { self.craft_ship_internal("scout") }
@@ -395,7 +451,7 @@ impl CoreGame {
             self.state.inventory.chips -= chips; 
             self.state.inventory.plasma -= plasma;
             self.ui.add_log_entry(&format!("🚀 Создан {} корабль!", ship_type));
-            self.force_save();
+            self.force_save_throttled();
             "success".to_string()
         } else { "error".to_string() }
     }
@@ -412,7 +468,7 @@ impl CoreGame {
         self.state.blueprint_cargo_unlocked = cargo;
         self.state.blueprint_scout_unlocked = scout;
         self.state.blueprint_combat_unlocked = combat;
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
@@ -421,7 +477,7 @@ impl CoreGame {
             self.state.inventory.ore -= ore_cost; 
             self.state.inventory.chips -= chips_cost;
             self.ui.add_log_entry(&format!("🔧 Флот отремонтирован (-{} руды, -{} чипов)", ore_cost, chips_cost));
-            self.force_save();
+            self.force_save_throttled();
             true
         } else { false }
     }
@@ -433,7 +489,7 @@ impl CoreGame {
             self.state.inventory.chips -= chips; 
             self.state.inventory.plasma -= plasma;
             self.ui.add_log_entry(&format!("⬆️ Корабль улучшен (-{} руды, -{} чипов, -{} плазмы)", ore, chips, plasma));
-            self.force_save();
+            self.force_save_throttled();
             true
         } else { false }
     }
@@ -457,7 +513,7 @@ impl CoreGame {
             self.state.inventory.chips -= cost_chips;
             self.state.turbine_upgrade_level += 1;
             self.ui.add_log_entry(&format!("⚙️ Турбина улучшена до уровня {}!", self.state.turbine_upgrade_level));
-            self.force_save();
+            self.force_save_throttled();
             true
         } else { false }
     }
@@ -477,7 +533,7 @@ impl CoreGame {
             _ => {}
         }
         let _ = self.ui.render(&self.state);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
@@ -491,26 +547,30 @@ impl CoreGame {
             _ => {}
         }
         let _ = self.ui.render(&self.state);
-        self.force_save();
+        self.force_save_throttled();
     }
     
-    #[wasm_bindgen] pub fn add_power(&mut self, amount: u32) {
+    #[wasm_bindgen] 
+    pub fn add_power(&mut self, amount: u32) {
         self.state.computational_power = (self.state.computational_power + amount).min(self.state.max_computational_power);
-        self.force_save();
+        self.force_save_throttled();
     }
     
-    #[wasm_bindgen] pub fn subtract_power(&mut self, amount: u32) {
+    #[wasm_bindgen] 
+    pub fn subtract_power(&mut self, amount: u32) {
         self.state.computational_power = self.state.computational_power.saturating_sub(amount);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
     pub fn repair_systems(&mut self) {
-        self.state.mining_debuff_remaining = 0; self.state.mining_debuff_percent = 0.0;
-        self.state.autoclick_debuff_remaining = 0; self.state.autoclick_debuff_percent = 0.0;
+        self.state.mining_debuff_remaining = 0; 
+        self.state.mining_debuff_percent = 0.0;
+        self.state.autoclick_debuff_remaining = 0; 
+        self.state.autoclick_debuff_percent = 0.0;
         self.state.defense_debuff_remaining = 0;
         self.ui.add_log_entry("🔧 Все системы восстановлены!");
-        self.force_save();
+        self.force_save_throttled();
     }
     
     #[wasm_bindgen]
@@ -525,15 +585,21 @@ impl CoreGame {
         self.neuro_ecosystem = NeuroEcosystem::new();
         self.rebel_system = RebelSystem::new();
         self.ui.add_log_entry("🔄 Прогресс сброшен!");
-        self.force_save();
+        self.force_save_throttled();
     }
     
-    #[wasm_bindgen] pub fn get_neuro_evolution(&self) -> u32 { self.neuro_ecosystem.evolution_level }
-    #[wasm_bindgen] pub fn get_resource(&self, resource: String) -> u32 {
+    #[wasm_bindgen] 
+    pub fn get_neuro_evolution(&self) -> u32 { self.neuro_ecosystem.evolution_level }
+    
+    #[wasm_bindgen] 
+    pub fn get_resource(&self, resource: String) -> u32 {
         match resource.as_str() {
-            "coal" => self.state.inventory.coal, "ore" => self.state.inventory.ore,
-            "chips" => self.state.inventory.chips, "plasma" => self.state.inventory.plasma,
-            "trash" => self.state.inventory.trash, _ => 0
+            "coal" => self.state.inventory.coal, 
+            "ore" => self.state.inventory.ore,
+            "chips" => self.state.inventory.chips, 
+            "plasma" => self.state.inventory.plasma,
+            "trash" => self.state.inventory.trash, 
+            _ => 0
         }
     }
     
@@ -541,13 +607,13 @@ impl CoreGame {
     pub fn game_loop(&mut self) { 
         let events = self.game_loop_internal();
         self.handle_events(events);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     fn handle_events(&mut self, events: Vec<GameEvent>) {
         for event in events { let _ = self.ui.handle_event(&event); }
         let _ = self.ui.render(&self.state);
-        self.force_save();
+        self.force_save_throttled();
     }
     
     fn load(&mut self) {
@@ -556,7 +622,10 @@ impl CoreGame {
                 if let Ok(Some(saved)) = storage.get_item("corebox_save") {
                     if let Ok(mut state) = serde_json::from_str::<GameState>(&saved) {
                         let cfg = CONFIG.lock().unwrap();
-                        state.max_computational_power = cfg.auto_click_config.max_computational_power;
+                        let saved_power = state.computational_power;
+                        let saved_max_power = state.max_computational_power;
+                        
+                        state.max_computational_power = cfg.auto_click_config.max_computational_power.max(saved_max_power);
                         self.neuro_ecosystem.load_from_state(state.neuro_evolution, state.neuro_consciousness, state.neuro_score);
                         self.neuro_ecosystem.last_processed_time = state.game_time;
                         state.neuro_defense_bonus = self.neuro_ecosystem.get_defense_bonus();
@@ -565,7 +634,14 @@ impl CoreGame {
                         if state.game_time <= 0 {
                             state.game_time = if state.is_day { cfg.time_config.day_duration } else { cfg.time_config.night_duration };
                         }
+                        
                         self.state = state;
+                        if saved_power > 0 {
+                            self.state.computational_power = saved_power.min(self.state.max_computational_power);
+                        }
+                        if saved_max_power > self.state.max_computational_power {
+                            self.state.max_computational_power = saved_max_power;
+                        }
                     }
                 }
             }
@@ -576,11 +652,24 @@ impl CoreGame {
         self.force_save();
     }
     
+    // ========== ИСПРАВЛЕННАЯ update_config (БАГ #1) ==========
     fn update_config(&mut self, new_config: GameConfig) {
+        // Сохраняем мощность и тир ДО изменений
+        let saved_power = self.state.computational_power;
+        let saved_max = self.state.max_computational_power;
+        let saved_tier = self.state.power_tier;
+        
         self.mining_system = MiningSystem::new(new_config.mining_config.clone());
         self.economy_system = EconomySystem::new(new_config.economy_config.clone());
         self.upgrade_system = UpgradeSystem::new(new_config.upgrade_config.clone());
-        self.state.max_computational_power = new_config.auto_click_config.max_computational_power;
+        
+        // Берём конфиг только как базу, никогда не уменьшаем максимальную мощность
+        let config_max = new_config.auto_click_config.max_computational_power;
+        let real_max = config_max.max(saved_max);
+        self.state.max_computational_power = real_max;
+        self.state.computational_power = saved_power.min(real_max);
+        self.state.power_tier = saved_tier;
+        
         let old_quests = std::mem::take(&mut self.state.quests);
         self.state.load_quests(&new_config);
         for old in old_quests {
