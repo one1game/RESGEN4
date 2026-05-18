@@ -888,74 +888,92 @@ window._refreshFleetWithMissions = _refreshFleetWithMissions;
 function initializeAuth() {
     console.log("🔧 initializeAuth: начало");
     
-    // Проверяем, что DOM элементы существуют
-    const authOverlay = document.getElementById('authOverlay');
-    const loginBtn = document.getElementById('btn-login');
-    const registerBtn = document.getElementById('btn-register');
-    const toggleModeBtn = document.getElementById('btn-toggle-mode');
-    
-    console.log("🔧 Элементы DOM:", { 
-        authOverlay: !!authOverlay, 
-        loginBtn: !!loginBtn, 
-        registerBtn: !!registerBtn, 
-        toggleModeBtn: !!toggleModeBtn 
-    });
-    
-    if (!loginBtn) {
-        console.error("❌ btn-login не найден! DOM ещё не готов или ID не совпадает.");
-        return;
+    // Функция для фактической инициализации
+    function setupAuth() {
+        const loginBtn = document.getElementById('btn-login');
+        const registerBtn = document.getElementById('btn-register');
+        const toggleModeBtn = document.getElementById('btn-toggle-mode');
+        
+        console.log("🔧 setupAuth: кнопки найдены, привязываем обработчики");
+        
+        setupAuthFormHandlers();
+        getKeepAliveChannel();
+        
+        initAuth(
+            async (user) => {
+                console.log("🔐 Пользователь вошёл:", user.email);
+                currentUser = user;
+                showGameUI();
+                updateUserDisplay(user);
+                document.getElementById('userInfo').style.display = 'block';
+                
+                await updateLastSeen();
+                startLastSeenUpdater();
+                
+                addToLog("🔄 Синхронизация с облаком...");
+                
+                const cloudSave = await loadGameFromCloud(true);
+                
+                if (cloudSave) {
+                    addToLog(`✅ Загружено облачное сохранение (уровень нейро: ${cloudSave.neuro?.evolution || 0})`);
+                }
+                
+                if (!isGameInitialized) {
+                    await initializeGame(cloudSave);
+                } else {
+                    _initMultiplayer(user);
+                }
+                
+                loadUserStatsFromCloud(user);
+                
+                setTimeout(() => {
+                    if (game && currentUser) {
+                        cloudSaveNow(true);
+                    }
+                }, 5000);
+            },
+            () => {
+                console.log("🔐 Пользователь вышел");
+                stopLastSeenUpdater();
+                cleanupGameTimers();
+                _cleanupMultiplayer();
+                if (_missionTimerInterval) {
+                    clearInterval(_missionTimerInterval);
+                    _missionTimerInterval = null;
+                }
+                currentUser = null;
+                showAuthUI();
+                isGameInitialized = false;
+            }
+        );
     }
     
-    setupAuthFormHandlers();
-    getKeepAliveChannel();
+    // Проверяем, готова ли уже кнопка
+    const loginBtn = document.getElementById('btn-login');
     
-    initAuth(
-        async (user) => {
-            console.log("🔐 Пользователь вошёл:", user.email);
-            currentUser = user;
-            showGameUI();
-            updateUserDisplay(user);
-            document.getElementById('userInfo').style.display = 'block';
-            
-            await updateLastSeen();
-            startLastSeenUpdater();
-            
-            addToLog("🔄 Синхронизация с облаком...");
-            
-            const cloudSave = await loadGameFromCloud(true);
-            
-            if (cloudSave) {
-                addToLog(`✅ Загружено облачное сохранение (уровень нейро: ${cloudSave.neuro?.evolution || 0})`);
+    if (loginBtn) {
+        console.log("✅ btn-login уже существует, инициализация сразу");
+        setupAuth();
+    } else {
+        console.log("⏳ btn-login не найден, ждём появления...");
+        
+        // Ждём появления кнопок в DOM
+        const checkInterval = setInterval(() => {
+            const btn = document.getElementById('btn-login');
+            if (btn) {
+                clearInterval(checkInterval);
+                clearTimeout(timeout);
+                console.log("✅ btn-login появился, инициализация");
+                setupAuth();
             }
-            
-            if (!isGameInitialized) {
-                await initializeGame(cloudSave);
-            } else {
-                _initMultiplayer(user);
-            }
-            
-            loadUserStatsFromCloud(user);
-            
-            setTimeout(() => {
-                if (game && currentUser) {
-                    cloudSaveNow(true);
-                }
-            }, 5000);
-        },
-        () => {
-            console.log("🔐 Пользователь вышел");
-            stopLastSeenUpdater();
-            cleanupGameTimers();
-            _cleanupMultiplayer();
-            if (_missionTimerInterval) {
-                clearInterval(_missionTimerInterval);
-                _missionTimerInterval = null;
-            }
-            currentUser = null;
-            showAuthUI();
-            isGameInitialized = false;
-        }
-    );
+        }, 50);
+        
+        // Таймаут на всякий случай (5 секунд)
+        const timeout = setTimeout(() => {
+            clearInterval(checkInterval);
+            console.error("❌ Таймаут: btn-login не появился через 5 секунд");
+        }, 5000);
+    }
 }
 
 async function loadUserStatsFromCloud(user) {
