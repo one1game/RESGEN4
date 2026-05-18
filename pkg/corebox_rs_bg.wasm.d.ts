@@ -39,7 +39,6 @@ export const coregame_reset_progress: (a: number) => void;
 export const coregame_save_current_state: (a: number) => void;
 export const coregame_set_fleet_cargo_bonus: (a: number, b: number) => void;
 export const coregame_set_fleet_defense_bonus: (a: number, b: number) => void;
-export const coregame_set_max_power: (a: number, b: number) => void;
 export const coregame_start_auto_clicking: (a: number) => void;
 export const coregame_stop_auto_clicking: (a: number) => void;
 export const coregame_subtract_power: (a: number, b: number) => void;

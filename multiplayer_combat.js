@@ -1,0 +1,443 @@
+// ========== multiplayer_combat.js (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+
+import { supabase } from './supabase.js';
+import { fleetModule } from './fleet.js';
+
+// Конфиг кораблей (время в СЕКУНДАХ для точности)
+const SHIP_CONFIG = {
+    scout:  { travel_seconds: 300,  label: 'Разведчик',  icon: '🔭' }, // 5 минут
+    combat: { travel_seconds: 480,  label: 'Боевой',     icon: '⚔️' }, // 8 минут
+    cargo:  { travel_seconds: 360,  label: 'Грузовой',   icon: '🚚' }, // 6 минут
+};
+
+// ─── Отправить корабль ────────────────────────────────────────────────
+export async function sendShip(attackerId, targetId, shipType) {
+    const cfg = SHIP_CONFIG[shipType];
+    if (!cfg) return { success: false, error: 'Неизвестный тип корабля' };
+
+    const ship = fleetModule.getAvailableShip(shipType);
+    if (!ship) {
+        return {
+            success: false,
+            error: `Нет свободного ${cfg.icon} ${cfg.label} во флоте. Постройте его во вкладке КРАФТ.`
+        };
+    }
+
+    if (attackerId === targetId) {
+        return { success: false, error: 'Нельзя атаковать собственную базу' };
+    }
+
+    if (shipType !== 'scout') {
+        const scout = await getLatestScoutData(attackerId, targetId);
+        if (!scout) {
+            return { success: false, error: 'Сначала проведите разведку базы' };
+        }
+        const age = Date.now() - new Date(scout.scouted_at || scout.created_at).getTime();
+        if (age > 30 * 60 * 1000) {
+            return { success: false, error: 'Данные разведки устарели (>30 мин). Повторите разведку' };
+        }
+    }
+
+    if (shipType === 'combat') {
+        const { data: recent } = await supabase
+            .from('missions')
+            .select('created_at')
+            .eq('attacker_id', attackerId)
+            .eq('target_id', targetId)
+            .eq('ship_type', 'combat')
+            .gte('created_at', new Date(Date.now() - 20 * 60 * 1000).toISOString())
+            .limit(1);
+        if (recent && recent.length > 0) {
+            return { success: false, error: 'Повторная атака доступна только через 20 минут' };
+        }
+    }
+
+    const now = Date.now();
+    const travelTimeMs = cfg.travel_seconds * 1000;
+    const arrivesAt = new Date(now + travelTimeMs);
+    const returnsAt = new Date(now + travelTimeMs * 2);
+
+    console.log(`🚀 Отправка ${shipType}: сейчас=${new Date(now).toISOString()}, прибытие=${arrivesAt.toISOString()}, возврат=${returnsAt.toISOString()}`);
+
+    let combatMissionId = null;
+    if (shipType === 'cargo') {
+        const { data: latestCombat } = await supabase
+            .from('missions')
+            .select('id')
+            .eq('attacker_id', attackerId)
+            .eq('target_id', targetId)
+            .eq('ship_type', 'combat')
+            .in('status', ['returning', 'done'])
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+        combatMissionId = latestCombat?.id || null;
+    }
+
+    const { data: mission, error } = await supabase
+        .from('missions')
+        .insert({
+            attacker_id:  attackerId,
+            target_id:    targetId,
+            ship_type:    shipType,
+            status:       'flying',
+            fleet_ship_id: ship.id,
+            arrives_at:   arrivesAt.toISOString(),
+            returns_at:   returnsAt.toISOString(),
+            created_at:   new Date(now).toISOString(),
+            combat_mission_id: combatMissionId,
+        })
+        .select()
+        .single();
+
+    if (error) {
+        console.error('Ошибка создания миссии:', error);
+        return { success: false, error: 'Ошибка сервера. Попробуйте ещё раз' };
+    }
+
+    fleetModule.setShipMissionStatus(ship.id, true, mission.id, mission);
+
+    await pushNotification(targetId, 'incoming_ship', {
+        message: `⚠️ К вашей планете летит ${cfg.icon} ${cfg.label}! Прибудет через ${Math.floor(cfg.travel_seconds / 60)} мин.`,
+        payload: { arrives_at: arrivesAt.toISOString(), mission_id: mission.id, ship_type: shipType }
+    });
+
+    return { success: true, mission, ship };
+}
+
+// ─── Обработка прибытия ─────────────────────────────────────────────────────
+export async function processArrivedMissions(currentUserId) {
+    const now = new Date();
+    console.log(`🔄 processArrivedMissions вызван в ${now.toISOString()}`);
+    
+    try {
+        const { data: arrived, error: err1 } = await supabase
+            .from('missions')
+            .select('*')
+            .eq('target_id', currentUserId)
+            .eq('status', 'flying')
+            .lte('arrives_at', now.toISOString());
+
+        if (err1) console.error('Ошибка запроса arrived:', err1);
+        
+        console.log(`📥 Найдено входящих миссий для обработки: ${arrived?.length || 0}`);
+
+        for (const mission of arrived ?? []) {
+            console.log(`📦 Обработка входящей миссии ${mission.id}, тип=${mission.ship_type}`);
+            
+            if (mission.ship_type === 'scout')  await _processScout(mission);
+            if (mission.ship_type === 'combat') await _processCombat(mission);
+            if (mission.ship_type === 'cargo')  await _processCargo(mission);
+        }
+
+        const { data: returning, error: err2 } = await supabase
+            .from('missions')
+            .select('*')
+            .eq('attacker_id', currentUserId)
+            .in('status', ['returning', 'arrived'])
+            .lte('returns_at', now.toISOString());
+
+        if (err2) console.error('Ошибка запроса returning:', err2);
+        
+        console.log(`📤 Найдено возвращающихся миссий: ${returning?.length || 0}`);
+
+        for (const mission of returning ?? []) {
+            console.log(`🏁 Завершение миссии ${mission.id}, статус=${mission.status}`);
+            
+            if (mission.fleet_ship_id) {
+                fleetModule.setShipMissionStatus(mission.fleet_ship_id, false);
+            }
+            
+            await supabase.from('missions').update({ 
+                status: 'done',
+                completed_at: now.toISOString()
+            }).eq('id', mission.id);
+
+            if (typeof window.showNotif === 'function') {
+                const cfg = SHIP_CONFIG[mission.ship_type];
+                window.showNotif(`✅ ${cfg?.icon || '🚀'} ${cfg?.label || 'Корабль'} вернулся!`, false);
+            }
+
+            if (mission.ship_type === 'cargo' && mission.loot) {
+                await pushNotification(mission.attacker_id, 'cargo_returned', {
+                    message: `📦 Грузовой вернулся! Добавлено: ${_formatLoot(mission.loot)}`,
+                    payload: { loot: mission.loot }
+                });
+            }
+
+            if (mission.ship_type === 'scout' && mission.scout_data) {
+                await pushNotification(mission.attacker_id, 'scout_report', {
+                    message: `🔭 Разведчик вернулся с данными!`,
+                    payload: { scout_data: mission.scout_data, mission_id: mission.id }
+                });
+            }
+
+            if (mission.ship_type === 'combat' && mission.loot) {
+                await pushNotification(mission.attacker_id, 'attack_result', {
+                    message: `⚔️ Боевой корабль вернулся. Добыча: ${_formatLoot(mission.loot)}`,
+                    payload: { loot: mission.loot, mission_id: mission.id }
+                });
+            }
+        }
+        
+        if (window.fleetModule && typeof window._refreshFleetWithMissions === 'function') {
+            await window._refreshFleetWithMissions();
+        }
+        
+    } catch(e) {
+        console.error('Ошибка в processArrivedMissions:', e);
+    }
+}
+
+// ─── Внутренние обработчики ────────────────────────────────────────────────
+async function _processScout(mission) {
+    const { data: targetSave } = await supabase
+        .from('game_saves')
+        .select('ore, coal, chips, plasma, trash, full_state')
+        .eq('user_id', mission.target_id)
+        .single();
+
+    const fs = targetSave?.full_state ?? {};
+    const hasDefense = fs.upgrades?.defense ?? false;
+
+    const scoutData = {
+        ore:          targetSave?.ore   ?? 0,
+        coal:         targetSave?.coal  ?? 0,
+        chips:        targetSave?.chips ?? 0,
+        plasma:       targetSave?.plasma ?? 0,
+        trash:        targetSave?.trash ?? 0,
+        has_defense:  hasDefense,
+        scouted_at:   new Date().toISOString(),
+        data_freshness: targetSave?.updated_at || new Date().toISOString(),
+    };
+
+    if (hasDefense) {
+        scoutData.chips  = Math.floor(scoutData.chips  * (0.5 + Math.random() * 0.5));
+        scoutData.plasma = Math.floor(scoutData.plasma * (0.5 + Math.random() * 0.5));
+        scoutData._obscured = true;
+    }
+
+    await supabase.from('missions').update({
+        status:     'returning',
+        scout_data: scoutData,
+    }).eq('id', mission.id);
+
+    await pushNotification(mission.target_id, 'scout_passed', {
+        message: `👁 ${mission.ship_type === 'scout' ? 'Разведчик' : 'Неизвестный объект'} пролетел мимо вашей планеты.`,
+        payload: {}
+    });
+}
+
+// ========== ИСПРАВЛЕННЫЙ _processCombat (БАГ #6 - не трогать full_state) ==========
+async function _processCombat(mission) {
+    const { data: targetSave } = await supabase
+        .from('game_saves')
+        .select('ore, coal, chips, plasma, trash')
+        .eq('user_id', mission.target_id)
+        .single();
+
+    if (!targetSave) {
+        await supabase.from('missions').update({ status: 'returning' }).eq('id', mission.id);
+        return;
+    }
+
+    const fs = targetSave.full_state ?? {};
+    const hasDefense = fs.upgrades?.defense ?? false;
+
+    let pct = 0.10 + Math.random() * 0.40;
+    if (hasDefense) pct *= 0.5;
+
+    const inventory = {
+        ore:   targetSave.ore   ?? 0,
+        coal:  targetSave.coal  ?? 0,
+        chips: targetSave.chips ?? 0,
+        plasma: targetSave.plasma ?? 0,
+        trash:  targetSave.trash ?? 0,
+    };
+    const loot = _calcLoot(inventory, pct);
+
+    const newInventory = {};
+    for (const [res, val] of Object.entries(inventory)) {
+        newInventory[res] = Math.max(0, val - (loot[res] ?? 0));
+    }
+
+    // БАГ #6 ИСПРАВЛЕНИЕ: обновляем ТОЛЬКО flat-поля, не трогаем full_state
+    await supabase.from('game_saves').update({
+        ore:   newInventory.ore,
+        coal:  newInventory.coal,
+        chips: newInventory.chips,
+        plasma: newInventory.plasma,
+        trash:  newInventory.trash,
+        updated_at: new Date().toISOString(),
+    }).eq('user_id', mission.target_id);
+
+    await supabase.from('missions').update({
+        status: 'returning',
+        loot:   loot,
+    }).eq('id', mission.id);
+
+    await supabase.from('battle_log').insert({
+        attacker_id:      mission.attacker_id,
+        defender_id:      mission.target_id,
+        ship_type:        'combat',
+        outcome:          hasDefense ? 'partial' : 'success',
+        resources_stolen: loot,
+    });
+
+    // БАГ #9 ИСПРАВЛЕНИЕ: только ОДНО уведомление жертве (без дубля от cargo)
+    await pushNotification(mission.target_id, 'under_attack', {
+        message: `💥 Ваша планета атакована! Потери: ${_formatLoot(loot)}`,
+        payload: { stolen: loot, had_defense: hasDefense }
+    });
+}
+
+async function _processCargo(mission) {
+    let loot = {};
+    
+    if (mission.combat_mission_id) {
+        const { data: combatMission } = await supabase
+            .from('missions')
+            .select('loot')
+            .eq('id', mission.combat_mission_id)
+            .single();
+        loot = combatMission?.loot ?? {};
+    } else {
+        const { data: combatMission } = await supabase
+            .from('missions')
+            .select('loot')
+            .eq('attacker_id', mission.attacker_id)
+            .eq('target_id', mission.target_id)
+            .eq('ship_type', 'combat')
+            .in('status', ['returning', 'done'])
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+        loot = combatMission?.loot ?? {};
+    }
+
+    await supabase.from('missions').update({
+        status: 'returning',
+        loot:   loot,
+    }).eq('id', mission.id);
+
+    // БАГ #9 ИСПРАВЛЕНИЕ: cargo НЕ отправляет уведомление жертве
+    // Только атакующий получит уведомление при возврате
+}
+
+// ─── Вспомогательные функции ──────────────────────────────────────────────
+function _calcLoot(inventory, pct) {
+    const result = {};
+    const resources = ['ore', 'coal', 'chips', 'plasma', 'trash'];
+    for (const res of resources) {
+        const amt = Math.floor((inventory[res] ?? 0) * pct);
+        if (amt > 0) result[res] = amt;
+    }
+    return result;
+}
+
+function _formatLoot(loot) {
+    if (!loot || Object.keys(loot).length === 0) return 'ничего';
+    const icons = { ore:'⛏️', coal:'🪨', chips:'🎛️', plasma:'⚡', trash:'♻️' };
+    return Object.entries(loot)
+        .map(([r, a]) => `${icons[r] ?? '📦'}${a} ${r}`)
+        .join(', ');
+}
+
+async function pushNotification(playerId, type, { message, payload }) {
+    try {
+        await supabase.from('notifications').insert({ 
+            player_id: playerId, 
+            type, 
+            message, 
+            payload: payload || {},
+            created_at: new Date().toISOString()
+        });
+    } catch(e) {
+        console.warn('Ошибка отправки уведомления:', e);
+    }
+}
+
+export async function getLatestScoutData(attackerId, targetId) {
+    const { data } = await supabase
+        .from('missions')
+        .select('scout_data, created_at')
+        .eq('attacker_id', attackerId)
+        .eq('target_id',   targetId)
+        .eq('ship_type',   'scout')
+        .in('status',      ['returning', 'done'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+    return data ?? null;
+}
+
+export async function getTargetPlayers(currentUserId) {
+    const { data: saves } = await supabase
+        .from('game_saves')
+        .select('user_id, ore, coal, chips, plasma, total_mined, neuro_evolution, last_seen')
+        .neq('user_id', currentUserId)
+        .order('total_mined', { ascending: false })
+        .limit(50);
+
+    const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, username');
+
+    const profileMap = {};
+    (profiles ?? []).forEach(p => { profileMap[p.id] = p.username; });
+
+    return (saves ?? []).map(s => ({
+        ...s,
+        username: profileMap[s.user_id] ?? 'Игрок',
+        isOnline: s.last_seen
+            ? Date.now() - new Date(s.last_seen).getTime() < 5 * 60 * 1000
+            : false,
+    }));
+}
+
+export async function getActiveMissions(playerId) {
+    if (!playerId) {
+        console.warn('getActiveMissions: playerId не указан');
+        return [];
+    }
+    
+    const { data } = await supabase
+        .from('missions')
+        .select('*')
+        .or(`attacker_id.eq.${playerId},target_id.eq.${playerId}`)
+        .in('status', ['flying', 'returning', 'arrived'])
+        .order('arrives_at');
+    
+    return data ?? [];
+}
+
+export async function getUnreadNotifications(playerId) {
+    const { data } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('player_id', playerId)
+        .eq('is_read', false)
+        .order('created_at', { ascending: false })
+        .limit(30);
+    return data ?? [];
+}
+
+export async function markAllNotificationsRead(playerId) {
+    await supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('player_id', playerId)
+        .eq('is_read', false);
+}
+
+export function subscribeToNotifications(playerId, onNew) {
+    return supabase
+        .channel(`notif:${playerId}`)
+        .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `player_id=eq.${playerId}`,
+        }, payload => onNew(payload.new))
+        .subscribe();
+}

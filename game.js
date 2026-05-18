@@ -888,92 +888,74 @@ window._refreshFleetWithMissions = _refreshFleetWithMissions;
 function initializeAuth() {
     console.log("🔧 initializeAuth: начало");
     
-    // Функция для фактической инициализации
-    function setupAuth() {
-        const loginBtn = document.getElementById('btn-login');
-        const registerBtn = document.getElementById('btn-register');
-        const toggleModeBtn = document.getElementById('btn-toggle-mode');
-        
-        console.log("🔧 setupAuth: кнопки найдены, привязываем обработчики");
-        
-        setupAuthFormHandlers();
-        getKeepAliveChannel();
-        
-        initAuth(
-            async (user) => {
-                console.log("🔐 Пользователь вошёл:", user.email);
-                currentUser = user;
-                showGameUI();
-                updateUserDisplay(user);
-                document.getElementById('userInfo').style.display = 'block';
-                
-                await updateLastSeen();
-                startLastSeenUpdater();
-                
-                addToLog("🔄 Синхронизация с облаком...");
-                
-                const cloudSave = await loadGameFromCloud(true);
-                
-                if (cloudSave) {
-                    addToLog(`✅ Загружено облачное сохранение (уровень нейро: ${cloudSave.neuro?.evolution || 0})`);
-                }
-                
-                if (!isGameInitialized) {
-                    await initializeGame(cloudSave);
-                } else {
-                    _initMultiplayer(user);
-                }
-                
-                loadUserStatsFromCloud(user);
-                
-                setTimeout(() => {
-                    if (game && currentUser) {
-                        cloudSaveNow(true);
-                    }
-                }, 5000);
-            },
-            () => {
-                console.log("🔐 Пользователь вышел");
-                stopLastSeenUpdater();
-                cleanupGameTimers();
-                _cleanupMultiplayer();
-                if (_missionTimerInterval) {
-                    clearInterval(_missionTimerInterval);
-                    _missionTimerInterval = null;
-                }
-                currentUser = null;
-                showAuthUI();
-                isGameInitialized = false;
-            }
-        );
-    }
-    
-    // Проверяем, готова ли уже кнопка
+    // Проверяем, что DOM элементы существуют
+    const authOverlay = document.getElementById('authOverlay');
     const loginBtn = document.getElementById('btn-login');
+    const registerBtn = document.getElementById('btn-register');
+    const toggleModeBtn = document.getElementById('btn-toggle-mode');
     
-    if (loginBtn) {
-        console.log("✅ btn-login уже существует, инициализация сразу");
-        setupAuth();
-    } else {
-        console.log("⏳ btn-login не найден, ждём появления...");
-        
-        // Ждём появления кнопок в DOM
-        const checkInterval = setInterval(() => {
-            const btn = document.getElementById('btn-login');
-            if (btn) {
-                clearInterval(checkInterval);
-                clearTimeout(timeout);
-                console.log("✅ btn-login появился, инициализация");
-                setupAuth();
-            }
-        }, 50);
-        
-        // Таймаут на всякий случай (5 секунд)
-        const timeout = setTimeout(() => {
-            clearInterval(checkInterval);
-            console.error("❌ Таймаут: btn-login не появился через 5 секунд");
-        }, 5000);
+    console.log("🔧 Элементы DOM:", { 
+        authOverlay: !!authOverlay, 
+        loginBtn: !!loginBtn, 
+        registerBtn: !!registerBtn, 
+        toggleModeBtn: !!toggleModeBtn 
+    });
+    
+    if (!loginBtn) {
+        console.error("❌ btn-login не найден! DOM ещё не готов или ID не совпадает.");
+        return;
     }
+    
+    setupAuthFormHandlers();
+    getKeepAliveChannel();
+    
+    initAuth(
+        async (user) => {
+            console.log("🔐 Пользователь вошёл:", user.email);
+            currentUser = user;
+            showGameUI();
+            updateUserDisplay(user);
+            document.getElementById('userInfo').style.display = 'block';
+            
+            await updateLastSeen();
+            startLastSeenUpdater();
+            
+            addToLog("🔄 Синхронизация с облаком...");
+            
+            const cloudSave = await loadGameFromCloud(true);
+            
+            if (cloudSave) {
+                addToLog(`✅ Загружено облачное сохранение (уровень нейро: ${cloudSave.neuro?.evolution || 0})`);
+            }
+            
+            if (!isGameInitialized) {
+                await initializeGame(cloudSave);
+            } else {
+                _initMultiplayer(user);
+            }
+            
+            loadUserStatsFromCloud(user);
+            
+            setTimeout(() => {
+                if (game && currentUser) {
+                    cloudSaveNow(true);
+                }
+            }, 5000);
+        },
+        () => {
+            console.log("🔐 Пользователь вышел");
+            stopLastSeenUpdater();
+            cleanupGameTimers();
+            _cleanupMultiplayer();
+            if (_missionTimerInterval) {
+                clearInterval(_missionTimerInterval);
+                _missionTimerInterval = null;
+            }
+            currentUser = null;
+            showAuthUI();
+            isGameInitialized = false;
+        }
+    );
 }
 
 async function loadUserStatsFromCloud(user) {
@@ -2286,15 +2268,10 @@ window.addEventListener('beforeunload', () => {
 });
 setInterval(() => { if (currentUser && gameStats) scheduleSave(); }, 30000);
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        console.log("📄 DOMContentLoaded: запуск initializeAuth");
-        initializeAuth();
-    });
-} else {
-    console.log("📄 DOM уже загружен, запуск initializeAuth");
+document.addEventListener('DOMContentLoaded', () => {
+    console.log("📄 DOMContentLoaded: запуск initializeAuth");
     initializeAuth();
-}
+});
 
 document.addEventListener('resetUserStats', (e) => { if (e.detail && currentUser) saveCurrentUserStatistics(); });
 document.addEventListener('gameEvent', (e) => {
