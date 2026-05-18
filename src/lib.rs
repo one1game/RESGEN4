@@ -162,7 +162,7 @@ pub fn load_game_state(&mut self, state_json: String) -> Result<(), JsValue> {
             let saved_max_power = loaded.max_computational_power;
             let saved_power_tier = loaded.power_tier;
             
-            // БАГ #7: сохраняем значения ДО перемещения loaded
+            // ✅ СОХРАНЯЕМ ЗНАЧЕНИЯ ДО ПЕРЕМЕЩЕНИЯ
             let loaded_prestige = loaded.prestige_level;
             let loaded_neuro_evolution = loaded.neuro_evolution;
             let loaded_neuro_consciousness = loaded.neuro_consciousness;
@@ -174,9 +174,11 @@ pub fn load_game_state(&mut self, state_json: String) -> Result<(), JsValue> {
                     .find(|&&t| saved_coal >= t).copied().unwrap_or(0);
             }
             
+            // ПЕРЕМЕЩАЕМ loaded В self.state
             self.state = loaded;
+            
             self.state.max_computational_power = old_max.max(saved_max_power);
-            // БАГ #7: используем сохранённое значение
+            // ✅ ИСПОЛЬЗУЕМ СОХРАНЁННОЕ ЗНАЧЕНИЕ
             self.state.prestige_level = loaded_prestige.max(old_prestige);
             self.state.power_tier = saved_power_tier.max(old_power_tier);
             
@@ -187,6 +189,7 @@ pub fn load_game_state(&mut self, state_json: String) -> Result<(), JsValue> {
                 self.state.max_computational_power = saved_max_power;
             }
             
+            // ✅ ИСПОЛЬЗУЕМ СОХРАНЁННЫЕ ЗНАЧЕНИЯ
             self.neuro_ecosystem.load_from_state(
                 loaded_neuro_evolution, 
                 loaded_neuro_consciousness, 
