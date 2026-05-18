@@ -2268,10 +2268,7 @@ window.addEventListener('beforeunload', () => {
 });
 setInterval(() => { if (currentUser && gameStats) scheduleSave(); }, 30000);
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("📄 DOMContentLoaded: запуск initializeAuth");
-    initializeAuth();
-});if (document.readyState === 'loading') {
+if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         console.log("📄 DOMContentLoaded: запуск initializeAuth");
         initializeAuth();
