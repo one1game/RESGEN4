@@ -774,13 +774,30 @@ impl NeuroEcosystem {
     // ========== ИСПРАВЛЕННАЯ НОРМАЛИЗАЦИЯ (БАГ #10) ==========
     pub fn load_from_state(&mut self, evolution: u32, consciousness: f64, score: u32) {
         self.evolution_level = evolution;
-        // Безопасная нормализация: если значение > 1.5 (т.е. пришло как процент 0-100), делим на 100
-        let normalized = if consciousness > 1.5 {
-            (consciousness / 100.0).min(1.0)
+        
+        // НОРМАЛИЗАЦИЯ: если значение > 1.0, считаем что это проценты (0-100) и делим на 100
+        // Если значение <= 1.0, оставляем как есть (уже в долях)
+        let normalized = if consciousness > 1.0 {
+            (consciousness / 100.0).clamp(0.0, 1.0)
         } else {
-            consciousness.min(1.0)
+            consciousness.clamp(0.0, 1.0)
         };
-        self.system_consciousness = normalized;
+        
+        // ДОПОЛНИТЕЛЬНАЯ ЗАЩИТА: если значение подозрительно маленькое 
+        // и эволюция >= 3, возможно это ошибка нормализации
+        let min_expected = (evolution as f64 * 0.03).clamp(0.05, 0.8);
+        let final_value = if normalized < 0.01 && evolution >= 3 {
+            // Восстанавливаем минимальное значение для этого уровня эволюции
+            web_sys::console::warn_1(&format!(
+                "⚠️ Neuro consciousness anomaly detected: raw={}, normalized={}, evolution={}. Restoring to {}",
+                consciousness, normalized, evolution, min_expected
+            ).into());
+            min_expected
+        } else {
+            normalized
+        };
+        
+        self.system_consciousness = final_value;
         self.evolution_score = score;
         
         self.last_processed_time = 0;
@@ -789,6 +806,12 @@ impl NeuroEcosystem {
         self.attack_counter = 0;
         
         self.update_bonuses();
+        
+        // Логируем для отладки
+        web_sys::console::log_1(&format!(
+            "Neuro loaded: evolution={}, consciousness={:.2}% (raw={})", 
+            evolution, final_value * 100.0, consciousness
+        ).into());
     }
 }
 

@@ -59,8 +59,15 @@ export function updateStatisticsFromRust(rustStats) {
     gameStats.computationalPower = rustStats.computational_power || 0;
     gameStats.currentAiMode = rustStats.current_ai_mode || 'Обычный';
     gameStats.neuroEvolution = rustStats.neuro_evolution || 0;
-    // ИСПРАВЛЕНО: из Rust уже приходит значение 0-100 (проценты)
-    gameStats.neuroConsciousness = rustStats.neuro_consciousness || 0;
+    
+    // ИСПРАВЛЕНО: Rust возвращает значение 0.0-1.0 (доли)
+    // Если значение > 1.0, значит пришло как проценты - нормализуем
+    let neuroConsciousnessValue = rustStats.neuro_consciousness || 0;
+    if (neuroConsciousnessValue > 1.0) {
+        neuroConsciousnessValue = neuroConsciousnessValue / 100.0;
+    }
+    gameStats.neuroConsciousness = neuroConsciousnessValue;
+    
     gameStats.neuroScore = rustStats.neuro_score || 0;
     gameStats.miningLevel = rustStats.upgrades?.mining || 0;
     gameStats.defenseLevel = rustStats.upgrades?.defense_level || 0;
@@ -98,8 +105,10 @@ export function updateStatisticsDisplay() {
     set('defenseActive', gameStats.defenseActive ? '✅ Активна' : '❌ Неактивна');
     set('blueprintsUnlocked', (gameStats.blueprintsUnlocked || 0) + '/3');
     set('neuroEvolution', gameStats.neuroEvolution || 0);
-    // ИСПРАВЛЕНО: значение уже в процентах (0-100), не умножаем на 100
-    set('neuroConsciousness', (gameStats.neuroConsciousness || 0).toFixed(1) + '%');
+    
+    // ИСПРАВЛЕНО: преобразуем доли (0.0-1.0) в проценты для отображения
+    set('neuroConsciousness', ((gameStats.neuroConsciousness || 0) * 100).toFixed(1) + '%');
+    
     set('neuroScore', gameStats.neuroScore || 0);
     set('sessionsCount', gameStats.sessionsCount || 1);
     set('lastSessionDate', gameStats.lastSessionDate ? new Date(gameStats.lastSessionDate).toLocaleString('ru') : '—');

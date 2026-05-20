@@ -342,11 +342,12 @@ impl Quest {
             QuestType::ReachEvolutionLevel => state.neuro_evolution >= self.target,
             // БАГ #4 ЛОГИКА ИСПРАВЛЕНИЕ: CollectResource проверяет текущий инвентарь
             QuestType::CollectResource(r) => match r.as_str() {
-                "coal" => state.inventory.coal >= self.target,
-                "ore" => state.inventory.ore >= self.target,
-                "plasma" => state.inventory.plasma >= self.target,
-                _ => false,
-            },
+    "coal" => state.inventory.coal >= self.target,
+    "ore" => state.inventory.ore >= self.target,
+    "plasma" => state.inventory.plasma >= self.target,
+    "chips" => state.inventory.chips >= self.target,  // ← ДОБАВИТЬ ЭТУ СТРОКУ
+    _ => false,
+},
         }
     }
 }

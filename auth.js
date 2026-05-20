@@ -1,5 +1,3 @@
-// ========== auth.js (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
-
 // auth.js
 // Модуль авторизации - регистрация, вход, выход
 
@@ -26,11 +24,10 @@ export async function register(email, password, username) {
             if (updateError) console.warn("Не удалось обновить username:", updateError);
         }
 
-        console.log("✅ Регистрация успешна:", data.user?.email);
         return { success: true, user: data.user };
         
     } catch (error) {
-        console.error("❌ Ошибка регистрации:", error.message);
+        console.error("Ошибка регистрации:", error.message);
         return { success: false, error: error.message };
     }
 }
@@ -51,31 +48,25 @@ export async function login(email, password) {
                 .eq('id', data.user.id);
         }
 
-        console.log("✅ Вход выполнен:", data.user?.email);
         return { success: true, user: data.user };
         
     } catch (error) {
-        console.error("❌ Ошибка входа:", error.message);
+        console.error("Ошибка входа:", error.message);
         return { success: false, error: error.message };
     }
 }
 
-// ========== ИСПРАВЛЕННЫЙ logout (БАГ #4 SAVE) ==========
 export async function logout() {
     try {
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
         
-        // БАГ #4 SAVE ИСПРАВЛЕНИЕ: НЕ удаляем corebox_save
-        // Удаляем только сессионные данные
         localStorage.removeItem('corebox_current_user');
-        // localStorage.removeItem('corebox_save'); // ← КОММЕНТАРИЙ: не удаляем!
         
-        console.log("✅ Выход выполнен");
         return { success: true };
         
     } catch (error) {
-        console.error("❌ Ошибка выхода:", error.message);
+        console.error("Ошибка выхода:", error.message);
         return { success: false, error: error.message };
     }
 }
@@ -86,23 +77,17 @@ export async function getCurrentUser() {
         if (error) throw error;
         return user;
     } catch (error) {
-        console.error("❌ Ошибка получения пользователя:", error.message);
+        console.error("Ошибка получения пользователя:", error.message);
         return null;
     }
 }
 
-// БАГ #3 ИСПРАВЛЕНИЕ: правильная обработка INITIAL_SESSION
 export function initAuth(onLogin, onLogout) {
     let initialSessionHandled = false;
     
     supabase.auth.onAuthStateChange((event, session) => {
-        console.log("🔔 Auth state changed:", event);
-        
         if (event === 'INITIAL_SESSION') {
-            if (initialSessionHandled) {
-                console.log("⏭️ Пропускаем повторный INITIAL_SESSION");
-                return;
-            }
+            if (initialSessionHandled) return;
             initialSessionHandled = true;
         }
         
@@ -115,10 +100,6 @@ export function initAuth(onLogin, onLogout) {
         } else if (event === 'SIGNED_OUT') {
             initialSessionHandled = false;
             onLogout();
-        } else if (event === 'TOKEN_REFRESHED') {
-            if (session?.user) {
-                console.log("🔄 Токен обновлён, пользователь:", session.user.email);
-            }
         }
     });
 }
@@ -131,11 +112,10 @@ export async function resetPassword(email) {
         
         if (error) throw error;
         
-        console.log("✅ Инструкция по сбросу пароля отправлена на", email);
         return { success: true };
         
     } catch (error) {
-        console.error("❌ Ошибка сброса пароля:", error.message);
+        console.error("Ошибка сброса пароля:", error.message);
         return { success: false, error: error.message };
     }
 }

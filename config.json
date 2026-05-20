@@ -1,4 +1,3 @@
-
 {
   "version": "3.2-night-types-balanced",
   "cycle_duration": 32,
@@ -183,10 +182,35 @@
     "ore_mining_bonus": 2
   },
 
-  "debug_config": {
-    "enable_debug_commands": true,
-    "log_level": "info",
-    "show_fps": false,
-    "enable_cheats": false
+  "fleet_config": {
+    "scout": {
+      "travel_time_sec": 30,
+      "upgrade_levels": 5,
+      "base_cost": { "ore": 100, "chips": 100, "plasma": 20 }
+    },
+    "combat": {
+      "travel_time_sec": 45,
+      "upgrade_levels": 5,
+      "base_cost": { "ore": 300, "chips": 150, "plasma": 30 }
+    },
+    "cargo": {
+      "travel_time_sec": 40,
+      "upgrade_levels": 5,
+      "base_cost": { "ore": 200, "chips": 50, "plasma": 10 },
+      "capacity": 0.50
+    },
+    "loot_chance_min": 0.20,
+    "loot_chance_max": 0.60,
+    "compensation_min": 0.10,
+    "compensation_max": 0.60,
+    "max_fleet_log_entries": 10,
+    "combat_chances": {
+      "equal_levels_defense_win": 0.70,
+      "diff_1_strong_win": 0.50,
+      "diff_2_strong_win": 0.95,
+      "diff_3_strong_win": 0.97,
+      "diff_4_strong_win": 0.995,
+      "diff_5plus_strong_win": 1.0
+    }
   }
 }

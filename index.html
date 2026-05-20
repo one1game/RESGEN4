@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>CoreBox 3.2 - Neural Cyberpunk Incremental</title>
     <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="mobile-patch.css">
+    <link rel="stylesheet" href="low-perf.css">
     <style>
         /* Быстрые фиксы для мобильной версии и уведомлений */
         @media (max-width: 768px) {
@@ -112,8 +112,10 @@
         .attack-record.defended { color: #8f8; }
         .attack-record.failed { color: #f88; }
         .disc-badge { background: #ffaa00; color: #000; padding: 2px 6px; border-radius: 12px; font-size: 10px; position: absolute; top: -8px; right: 8px; }
+        .night-badge { background: #4a4aff; color: #fff; padding: 2px 6px; border-radius: 12px; font-size: 10px; position: absolute; top: -8px; left: 8px; }
         .trade-card { position: relative; }
         
+        /* Стили для карты */
         .space-planet {
             cursor: pointer;
             transition: transform 0.2s;
@@ -132,6 +134,71 @@
             background: radial-gradient(ellipse at center, #0a0a1a 0%, #000005 100%);
             overflow: hidden;
             position: relative;
+        }
+        
+        /* Стили для флота и командного пункта */
+        .fleet-log-entry { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .fleet-log-entry:last-child { border-bottom: none; }
+        
+        .cmd-log-entry { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        .cmd-warning { color: #ff8844; }
+        .cmd-result  { color: #4aff9d; }
+        .cmd-loot    { color: #ffaa44; }
+        .cmd-scout   { color: #4a9eff; }
+        .cmd-info    { color: #88aaff; }
+        .cmd-empty   { color: #555; font-style: italic; }
+        .cmd-defense-ship    { color: #4aff9d; font-size: 12px; margin-bottom: 8px; padding: 4px; background: rgba(74,255,157,0.05); border-radius: 4px; }
+        .cmd-no-defense      { color: #ff4a4a !important; }
+        
+        .flight-line { z-index: 2; }
+        .flight-ship-icon { z-index: 3; text-shadow: 0 0 3px black; }
+        
+        .defense-badge {
+            background: rgba(74,255,157,0.2);
+            color: #4aff9d;
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-left: 6px;
+        }
+        
+        .defense-mode {
+            border-left: 2px solid #4aff9d !important;
+        }
+        
+        .defense-active {
+            background: rgba(74,255,157,0.15);
+            color: #4aff9d;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        
+        .defense-inactive {
+            background: rgba(255,74,74,0.1);
+            color: #ff6a6a;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        
+        #floatingMineBtn.turbine-critical {
+            background: radial-gradient(circle at center, rgba(255,34,68,0.3) 0%, rgba(8,13,24,0.98) 72%);
+            border-color: #ff2244;
+            animation: critical-pulse 0.8s infinite;
+        }
+        
+        @keyframes critical-pulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 15px #ff2244; }
+            50% { transform: scale(0.98); box-shadow: 0 0 30px rgba(255,34,68,0.5); }
+        }
+        
+        .prestige-bonus {
+            font-size: 10px;
+            color: #ffaa44;
+            margin-top: 8px;
+            padding: 4px;
+            background: rgba(255,170,68,0.1);
+            border-radius: 4px;
+            text-align: center;
         }
     </style>
 </head>
@@ -194,7 +261,6 @@
             
             <div class="user-info" id="userInfo" style="display: none;">
                 <span id="usernameDisplay"></span>
-                <span id="saveIndicator" style="font-size:11px;color:#4aff9d;opacity:0;transition:opacity 0.5s;margin-left:8px;">💾 Сохранено</span>
                 <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
             </div>
             
@@ -226,7 +292,6 @@
                             <div class="status-line">
                                 <div class="status-label">🔥 ТЭЦ (Уголь):</div>
                                 <div class="status-value" id="coalStatus">ОФФЛАЙН</div>
-                                <span id="coalNightsHint" style="font-size:11px;margin-left:6px;"></span>
                                 <div class="status-indicator offline"></div>
                             </div>
                             <div class="status-line">
@@ -245,6 +310,7 @@
                                 <div class="threat-level low"></div>
                             </div>
 
+                            <!-- ТУРБИНА -->
                             <div class="turbine-container">
                                 <div class="stat-label" id="turbineHeatLabel">🌡️ Перегрев турбины: 0%</div>
                                 <div class="turbine-bar">
@@ -261,20 +327,27 @@
                                 </div>
                             </div>
                             
+                            <!-- Режим ИИ -->
                             <div class="status-line ai-mode-row">
                                 <div class="status-label">🤖 РЕЖИМ ИИ:</div>
                                 <div class="status-value" id="aiMode">⚙️ Обычный</div>
                             </div>
                             
+                            <!-- Предупреждение об атаке -->
                             <div id="attackWarning" class="attack-warning" style="display: none;"></div>
                             
+                            <!-- Активные дебаффы -->
                             <div id="miningDebuff" class="debuff-indicator mining-debuff" style="display: none;"></div>
                             <div id="autoclickDebuff" class="debuff-indicator autoclick-debuff" style="display: none;"></div>
                             <div id="defenseDebuff" class="debuff-indicator defense-debuff" style="display: none;"></div>
+                            
+                            <!-- Престиж бонус -->
+                            <div id="prestigeBonus" class="prestige-bonus"></div>
                         </div>
                     </div>
                 </div>
                 
+                <!-- СИСТЕМНЫЙ ЖУРНАЛ -->
                 <div class="panel">
                     <div class="panel-title">
                         <span>📜 СИСТЕМНЫЙ ЖУРНАЛ (Лог)</span>
@@ -291,6 +364,7 @@
 
                 <div class="mining-action">
                     <div class="click-system">
+                        <!-- ШКАЛЫ МОЩНОСТИ -->
                         <div class="power-section">
                             <div class="power-label">
                                 <span>⚡ ВЫЧИСЛИТЕЛЬНАЯ МОЩНОСТЬ:</span>
@@ -315,6 +389,7 @@
                             </div>
                         </div>
                         
+                        <!-- АВТОКЛИКЕР -->
                         <div class="auto-click-section">
                             <div class="auto-click-status">
                                 <span>🤖 АВТОМАТИЧЕСКАЯ ДОБЫЧА:</span>
@@ -362,6 +437,15 @@
                                 <div class="stat-line"><span class="stat-label">Макс. мощность:</span><span class="stat-value" id="maxPowerReached">0</span></div>
                                 <div class="stat-line"><span class="stat-label">Ночей пережито:</span><span class="stat-value" id="nightsSurvived">0</span></div>
                                 <div class="stat-line"><span class="stat-label">Всего добыто:</span><span class="stat-value" id="totalMined">0</span></div>
+                                <div class="stat-line"><span class="stat-label">🔁 ПРЕСТИЖ:</span><span class="stat-value" id="prestige">0</span></div>
+                            </div>
+                            
+                            <div class="stat-card-large">
+                                <div class="stat-title">🧠 НЕЙРО-ЭВОЛЮЦИЯ</div>
+                                <div class="stat-line"><span class="stat-label">🧬 Ур. эволюции:</span><span class="stat-value" id="neuroEvolution">0</span></div>
+                                <div class="stat-line"><span class="stat-label">🧠 Нейро-сознание:</span><span class="stat-value" id="neuroConsciousness">0%</span></div>
+                                <div class="stat-line"><span class="stat-label">🎯 Очки эволюции:</span><span class="stat-value" id="neuroScore">0</span></div>
+                                <div class="stat-line"><span class="stat-label">🤖 Текущий режим ИИ:</span><span class="stat-value" id="currentAiMode">Обычный</span></div>
                             </div>
                             
                             <div class="stat-card-large">
@@ -370,6 +454,7 @@
                                 <div class="stat-line"><span class="stat-label">Отражено атак:</span><span class="stat-value" id="attacksDefended">0</span></div>
                                 <div class="stat-line"><span class="stat-label">Текущ. активность:</span><span class="stat-value" id="rebelActivity">0</span></div>
                                 <div class="stat-line"><span class="stat-label">Заметность:</span><span class="stat-value" id="visibility">0%</span></div>
+                                <div class="stat-line"><span class="stat-label">Подряд защит:</span><span class="stat-value" id="consecutiveDefenses">0</span></div>
                             </div>
                             
                             <div class="stat-card-large">
@@ -386,6 +471,14 @@
                                 <div class="stat-line"><span class="stat-label">Украдено угля:</span><span class="stat-value" id="coalStolen">0</span></div>
                                 <div class="stat-line"><span class="stat-label">Время игры:</span><span class="stat-value" id="playTime">0 сек</span></div>
                                 <div class="stat-line"><span class="stat-label">Сессий:</span><span class="stat-value" id="sessionsCount">1</span></div>
+                            </div>
+                            
+                            <div class="stat-card-large">
+                                <div class="stat-title">🚀 ФЛОТ И РАЗРАБОТКИ</div>
+                                <div class="stat-line"><span class="stat-label">🚀 Кораблей:</span><span class="stat-value" id="fleetShips">0/20</span></div>
+                                <div class="stat-line"><span class="stat-label">⚔️ Мощь флота:</span><span class="stat-value" id="fleetCombatPower">0</span></div>
+                                <div class="stat-line"><span class="stat-label">📐 Чертежей:</span><span class="stat-value" id="blueprintsUnlocked">0/3</span></div>
+                                <div class="stat-line"><span class="stat-label">🔧 Ур. добычи:</span><span class="stat-value" id="miningLevel">0</span></div>
                             </div>
                         </div>
                         
@@ -445,7 +538,9 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
-                        <div class="upgrade-container" id="upgradesContainer"></div>
+                        <div class="upgrade-container" id="upgradesContainer">
+                            <!-- Динамическая загрузка через JS -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -511,6 +606,25 @@
                         <div id="attackHistory" class="attack-history"></div>
                     </div>
                 </div>
+
+                <!-- БЛОК КОМАНДНОГО ПУНКТА -->
+                <div class="command-center-section" style="margin-top: 16px;">
+                    <div style="font-size: 12px; color: #4aff9d; font-family: monospace; margin-bottom: 8px; font-weight: bold;">
+                        🖥️ КОМАНДНЫЙ ПУНКТ
+                    </div>
+                    <div id="commandCenterLog" style="
+                        background: rgba(0,0,0,0.4);
+                        border: 1px solid rgba(255,74,74,0.3);
+                        border-radius: 8px;
+                        padding: 10px;
+                        max-height: 250px;
+                        overflow-y: auto;
+                        font-family: monospace;
+                        font-size: 11px;
+                    ">
+                        <div style="color: #888;">Ожидание данных...</div>
+                    </div>
+                </div>
             </div>
             
             <div class="tab-content" id="craft-tab">
@@ -547,8 +661,27 @@
                         <div class="fleet-container" id="fleetContainer"></div>
                     </div>
                 </div>
+                
+                <!-- БЛОК ЛОГА ФЛОТА -->
+                <div class="fleet-log-section" style="margin-top: 16px;">
+                    <div style="font-size: 11px; color: #888; margin-bottom: 6px; font-family: monospace;">
+                        📋 ПОСЛЕДНИЕ ДЕЙСТВИЯ ФЛОТА
+                    </div>
+                    <div id="fleetLogBox" style="
+                        background: rgba(0,0,0,0.3);
+                        border: 1px solid rgba(74,255,157,0.2);
+                        border-radius: 8px;
+                        padding: 8px;
+                        max-height: 200px;
+                        overflow-y: auto;
+                        font-family: monospace;
+                        font-size: 10px;
+                        color: #ccc;
+                    "></div>
+                </div>
             </div>
             
+            <!-- ВКЛАДКА КАРТА -->
             <div class="tab-content" id="space-tab">
                 <div class="panel">
                     <div class="panel-title">
@@ -557,6 +690,8 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content" style="padding:0;">
+
+                        <!-- Ресурсы и статус -->
                         <div id="space-status-bar" style="display:flex;gap:12px;padding:10px 12px;background:rgba(0,0,0,0.3);flex-wrap:wrap;">
                             <div style="font-size:11px;opacity:0.7;">
                                 ⚡ <span id="space-power-current">0</span>/<span id="space-power-max">1000</span>
@@ -566,30 +701,51 @@
                             <div style="font-size:11px;opacity:0.7;">🚀 <span id="space-ships-count">0</span> кораблей</div>
                         </div>
 
-                        <div class="star-map" id="space-star-map" style="position: relative; width: 100%; height: 55vw; min-height: 260px; max-height: 400px;">
+                        <!-- Звёздная карта -->
+                        <div class="star-map" id="space-star-map" style="
+                            position: relative;
+                            width: 100%;
+                            height: 55vw;
+                            min-height: 260px;
+                            max-height: 400px;
+                        ">
                             <div id="space-stars-layer"></div>
                             <div id="space-objects-layer">
-                                <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;cursor:pointer;" id="space-base-planet">
+                                <div style="
+                                    position:absolute;left:50%;top:50%;
+                                    transform:translate(-50%,-50%);
+                                    text-align:center;cursor:pointer;
+                                " id="space-base-planet">
                                     <span style="font-size:28px;">🏠</span>
                                     <div style="font-size:9px;color:#4aff9d;margin-top:2px;">БАЗА</div>
                                 </div>
                             </div>
                         </div>
 
+                        <!-- Кнопка исследования -->
                         <div style="padding:10px 12px;">
-                            <button id="space-research-btn" style="width:100%;padding:10px;background:rgba(74,158,255,0.1);border:1px solid rgba(74,158,255,0.3);border-radius:8px;color:#4a9eff;font-family:monospace;font-size:12px;cursor:pointer;">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
+                            <button id="space-research-btn" style="
+                                width:100%;padding:10px;
+                                background:rgba(74,158,255,0.1);
+                                border:1px solid rgba(74,158,255,0.3);
+                                border-radius:8px;color:#4a9eff;
+                                font-family:monospace;font-size:12px;cursor:pointer;
+                            ">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
                         </div>
 
+                        <!-- Список игроков онлайн -->
                         <div style="padding:0 12px 12px;">
                             <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
                             <div id="space-players-list"></div>
                         </div>
+
                     </div>
                 </div>
             </div>
         </div>
         
-        <div id="floatingMineBtn" class="floating-mine-btn">
+        <!-- ПЛАВАЮЩАЯ КНОПКА ДОБЫЧИ -->
+        <div id="floatingMineBtn" class="floating-mine-btn" onclick="window.handleClick && window.handleClick()">
             <span class="btn-icon">⚙️</span>
             <span class="btn-text">ДОБЫЧА</span>
             <span id="miningBonusFloat" class="mining-bonus">+0%</span>
@@ -600,15 +756,32 @@
     <!-- ПОДКЛЮЧЕНИЕ СКРИПТОВ                        -->
     <!-- ============================================ -->
     
-    <!-- Supabase библиотека - загружается первой -->
+    <!-- 1. Supabase библиотека -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
-    <!-- Основной файл игры (type="module" чтобы работали импорты) -->
-    <script type="module" src="game.js"></script>
+    <!-- 2. Основной файл игры -->
+    <script type="module" src="./game.js"></script>
     
-    <!-- Мобильный патч (defer - ждёт загрузки DOM) -->
-    <script src="mobile-patch.js" defer></script>
+    <!-- ============================================ -->
+    <!-- АУДИО ЭЛЕМЕНТЫ (Фоновые звуки)               -->
+    <!-- ============================================ -->
+    <audio id="clickSound" preload="none" style="display: none;">
+        <source src="music/click.mp3" type="audio/mpeg">
+    </audio>
+    
+    <audio id="errorSound" preload="none" style="display: none;">
+        <source src="music/error.mp3" type="audio/mpeg">
+    </audio>
+    
+    <audio id="upgradeSound" preload="none" style="display: none;">
+        <source src="music/upgrade.mp3" type="audio/mpeg">
+    </audio>
+    
+    <audio id="bgMusic" autoplay loop preload="none" style="display: none;">
+        <source src="music/game-music.mp3" type="audio/mpeg">
+    </audio>
 
+    <!-- Инициализация музыки и совместимости -->
     <script>
     (function() {
         window.onload = function() {
@@ -629,7 +802,6 @@
                 const sound = document.getElementById(soundId);
                 if (sound) {
                     sound.load();
-                    console.log(`🔊 Звук ${soundId} предзагружен`);
                 }
             });
         };

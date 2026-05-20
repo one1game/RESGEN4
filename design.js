@@ -1,4 +1,4 @@
-// design.js - СИСТЕМА ЧЕРТЕЖЕЙ КОРАБЛЕЙ (ИСПРАВЛЕНА СТОИМОСТЬ CARGO)
+// design.js - СИСТЕМА ЧЕРТЕЖЕЙ КОРАБЛЕЙ (ИСПРАВЛЕНА - ЕДИНЫЙ ИСТОЧНИК ИСТИНЫ)
 
 export const designModule = {
     game: null,
@@ -8,26 +8,57 @@ export const designModule = {
     
     blueprints: [
         { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', designCost: 200, icon: '🚚', unlocked: false },
-        { id: 'scout', name: 'Разведывательный корабль', desc: 'Исследование новых территорий', designCost: 10, icon: '🔭', unlocked: false },
+        { id: 'scout', name: 'Разведывательный корабль', desc: 'Исследование новых территорий', designCost: 50, icon: '🔭', unlocked: false },
         { id: 'combat', name: 'Боевой корабль', desc: 'Защита флота и атака угроз', designCost: 800, icon: '⚔️', unlocked: false }
     ],
     
     init(game) {
         this.game = game;
         this.loadBlueprints();
+        if (game && typeof game.get_computational_power === 'function') {
+            this.computationalPower = game.get_computational_power() || 0;
+        }
+        this.syncBlueprintsFromRust();
+        console.log('📐 Модуль дизайна инициализирован, мощность:', this.computationalPower);
+    },
+    
+    // ИСПРАВЛЕНИЕ БАГ #1: единый метод синхронизации из Rust
+    syncBlueprintsFromRust() {
         try {
-            const status = JSON.parse(game.get_blueprint_status());
+            const statsJson = this.game.get_statistics();
+            const stats = JSON.parse(statsJson);
+            
             this.blueprints.forEach(bp => {
-                if (status.blueprints_unlocked?.[bp.id] === true) {
-                    bp.unlocked = true;
-                }
+                if (bp.id === 'cargo') bp.unlocked = stats.blueprint_cargo_unlocked === true;
+                else if (bp.id === 'scout') bp.unlocked = stats.blueprint_scout_unlocked === true;
+                else if (bp.id === 'combat') bp.unlocked = stats.blueprint_combat_unlocked === true;
             });
-            this.aiResearchBonus = status.ai_research_bonus || 0;
+            
+            this.aiResearchBonus = stats.ai_research_bonus || 0;
+            this.computationalPower = stats.computational_power || 0;
+            
+            this.saveBlueprints();
+            console.log('📐 Чертежи синхронизированы из Rust:', this.blueprints.map(b => `${b.id}:${b.unlocked}`).join(', '));
         } catch(e) {
             console.warn('Не удалось синхронизировать чертежи с Rust:', e);
         }
-        this.saveBlueprints();
-        console.log('📐 Модуль дизайна инициализирован');
+    },
+    
+    // ИСПРАВЛЕНИЕ БАГ #1: публичный метод проверки статуса чертежа
+    isBlueprintUnlocked(blueprintId) {
+        const bp = this.blueprints.find(b => b.id === blueprintId);
+        if (bp) return bp.unlocked === true;
+        
+        // Fallback: пробуем из Rust напрямую
+        try {
+            const statsJson = this.game.get_statistics();
+            const stats = JSON.parse(statsJson);
+            if (blueprintId === 'cargo') return stats.blueprint_cargo_unlocked === true;
+            if (blueprintId === 'scout') return stats.blueprint_scout_unlocked === true;
+            if (blueprintId === 'combat') return stats.blueprint_combat_unlocked === true;
+        } catch(e) {}
+        
+        return false;
     },
     
     loadBlueprints() {
@@ -43,7 +74,6 @@ export const designModule = {
         }
     },
     
-    // ✅ ДОБАВЛЕННЫЙ МЕТОД: загрузка чертежей из облака
     loadBlueprintsFromCloud(cloudBlueprints) {
         if (cloudBlueprints && Array.isArray(cloudBlueprints)) {
             cloudBlueprints.forEach(cb => {
@@ -53,6 +83,7 @@ export const designModule = {
                 }
             });
             this.saveBlueprints();
+            this.syncBlueprintsToRust();
             console.log('📐 Чертежи загружены из облака');
         }
     },
@@ -60,6 +91,11 @@ export const designModule = {
     saveBlueprints() {
         const toSave = this.blueprints.map(bp => ({ id: bp.id, unlocked: bp.unlocked }));
         localStorage.setItem('corebox_ship_blueprints', JSON.stringify(toSave));
+        this.syncBlueprintsToRust();
+    },
+    
+    // ИСПРАВЛЕНИЕ: единый метод синхронизации в Rust
+    syncBlueprintsToRust() {
         try {
             if (this.game && typeof this.game.sync_blueprints === 'function') {
                 this.game.sync_blueprints(
@@ -68,12 +104,17 @@ export const designModule = {
                     this.blueprints.find(b => b.id === 'combat')?.unlocked || false
                 );
             }
-        } catch(e) {}
+        } catch(e) {
+            console.warn('Ошибка синхронизации чертежей в Rust:', e);
+        }
     },
     
     updateComputationalPower(power) {
         if (typeof power === 'object' && power !== null) this.computationalPower = power.power || 0;
         else this.computationalPower = parseInt(power) || 0;
+        if (this.computationalPower === 0) {
+            console.warn('⚠️ computationalPower = 0 в designModule, возможно проблема загрузки');
+        }
     },
     
     getEffectiveCost(blueprintId) {
@@ -90,6 +131,7 @@ export const designModule = {
         return this.computationalPower >= effectiveCost;
     },
     
+    // ИСПРАВЛЕНИЕ БАГ #3: полная синхронизация после создания чертежа
     designBlueprint(blueprintId) {
         const blueprint = this.blueprints.find(bp => bp.id === blueprintId);
         if (!blueprint) return { success: false, error: 'Чертеж не найден' };
@@ -105,7 +147,30 @@ export const designModule = {
             if (result === 'success') {
                 blueprint.unlocked = true;
                 this.saveBlueprints();
-                if (this.game) this.computationalPower = this.game.get_computational_power();
+                
+                // ИСПРАВЛЕНИЕ БАГ #3: принудительная синхронизация ВСЕХ систем
+                this.syncBlueprintsToRust();
+                
+                // Обновляем мощность
+                this.computationalPower = this.game.get_computational_power();
+                
+                // ИСПРАВЛЕНИЕ БАГ #3: обновляем craftModule
+                if (window.craftModule) {
+                    const stats = JSON.parse(this.game.get_statistics());
+                    window.craftModule.syncFromStats(stats);
+                    
+                    // Перерисовываем вкладку крафта, если она открыта
+                    const craftContainer = document.getElementById('craftContainer');
+                    if (craftContainer && craftContainer.style.display !== 'none') {
+                        if (window.updateCraftTab) window.updateCraftTab();
+                    }
+                }
+                
+                // ИСПРАВЛЕНИЕ БАГ #3: обновляем fleetModule (на случай если корабли уже есть)
+                if (window.fleetModule && window._refreshFleetWithMissions) {
+                    window._refreshFleetWithMissions();
+                }
+                
                 return { success: true, message: `✅ Чертеж "${blueprint.name}" создан!`, blueprint: blueprint };
             } else {
                 return { success: false, error: 'Ошибка при создании чертежа' };
@@ -128,7 +193,11 @@ export const designModule = {
             btn.innerHTML = '⏳ РАЗРАБОТКА...';
             setTimeout(() => {
                 const result = this.handleDesignClick(blueprintId);
-                if (this.game && result.success) this.computationalPower = this.game.get_computational_power();
+                if (this.game && result.success) {
+                    this.computationalPower = this.game.get_computational_power();
+                    // ИСПРАВЛЕНИЕ: обновляем вкладку крафта после успешной разработки
+                    if (window.updateCraftTab) window.updateCraftTab();
+                }
                 this.refreshUI(container);
             }, 300);
         };
@@ -150,6 +219,13 @@ export const designModule = {
     },
     
     renderDesignUI() {
+        if (this.game && typeof this.game.get_computational_power === 'function') {
+            const livePower = this.game.get_computational_power();
+            if (livePower > 0 || this.computationalPower === 0) {
+                this.computationalPower = livePower;
+            }
+        }
+        
         const aiBonusText = this.aiResearchBonus > 0 
             ? `<div class="ai-bonus-design">🧠 ИИ ускоряет разработку: -${this.aiResearchBonus} мощности к стоимости</div>` 
             : '';
@@ -159,7 +235,7 @@ export const designModule = {
                 <span>📐 РАЗРАБОТКА ЧЕРТЕЖЕЙ</span>
                 <div class="power-display">
                     <span>⚡ Вычислительная мощность:</span>
-                    <span class="power-value">${this.computationalPower}</span>
+                    <span class="power-value ${this.computationalPower === 0 ? 'power-zero' : ''}">${this.computationalPower}</span>
                 </div>
             </div>
             ${aiBonusText}

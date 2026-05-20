@@ -1,7 +1,10 @@
-// ========== multiplayer_combat.js (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+// ========== multiplayer_combat.js (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ - БАГ #4 ДВОЙНОЙ ЛУТ, БАГ #6 ФИЛЬТРАЦИЯ) ==========
 
 import { supabase } from './supabase.js';
 import { fleetModule } from './fleet.js';
+
+// БАГ #4: флаг для предотвращения двойной обработки
+let isProcessingMissions = false;
 
 // Конфиг кораблей (время в СЕКУНДАХ для точности)
 const SHIP_CONFIG = {
@@ -74,6 +77,8 @@ export async function sendShip(attackerId, targetId, shipType) {
         combatMissionId = latestCombat?.id || null;
     }
 
+    const flightMinutes = cfg.travel_seconds / 60;
+    
     const { data: mission, error } = await supabase
         .from('missions')
         .insert({
@@ -97,6 +102,12 @@ export async function sendShip(attackerId, targetId, shipType) {
 
     fleetModule.setShipMissionStatus(ship.id, true, mission.id, mission);
 
+    // БАГ #9: уведомление атакующему
+    await pushNotification(attackerId, 'mission_sent', {
+        message: `🚀 Миссия отправлена (${cfg.icon} ${cfg.label}), прибытие через ${Math.round(flightMinutes)} мин`,
+        payload: { mission_id: mission.id, ship_type: shipType, arrives_at: arrivesAt.toISOString() }
+    });
+
     await pushNotification(targetId, 'incoming_ship', {
         message: `⚠️ К вашей планете летит ${cfg.icon} ${cfg.label}! Прибудет через ${Math.floor(cfg.travel_seconds / 60)} мин.`,
         payload: { arrives_at: arrivesAt.toISOString(), mission_id: mission.id, ship_type: shipType }
@@ -105,12 +116,19 @@ export async function sendShip(attackerId, targetId, shipType) {
     return { success: true, mission, ship };
 }
 
-// ─── Обработка прибытия ─────────────────────────────────────────────────────
+// ─── Обработка прибытия (БАГ #4: защита от двойного вызова) ─────────────────────────────────
 export async function processArrivedMissions(currentUserId) {
-    const now = new Date();
-    console.log(`🔄 processArrivedMissions вызван в ${now.toISOString()}`);
+    // БАГ #4: предотвращаем двойную обработку
+    if (isProcessingMissions) {
+        console.log("⏭️ processArrivedMissions уже выполняется, пропускаем");
+        return;
+    }
+    isProcessingMissions = true;
     
     try {
+        const now = new Date();
+        console.log(`🔄 processArrivedMissions вызван в ${now.toISOString()}`);
+        
         const { data: arrived, error: err1 } = await supabase
             .from('missions')
             .select('*')
@@ -186,6 +204,8 @@ export async function processArrivedMissions(currentUserId) {
         
     } catch(e) {
         console.error('Ошибка в processArrivedMissions:', e);
+    } finally {
+        isProcessingMissions = false;
     }
 }
 
@@ -228,11 +248,10 @@ async function _processScout(mission) {
     });
 }
 
-// ========== ИСПРАВЛЕННЫЙ _processCombat (БАГ #6 - не трогать full_state) ==========
 async function _processCombat(mission) {
     const { data: targetSave } = await supabase
         .from('game_saves')
-        .select('ore, coal, chips, plasma, trash')
+        .select('ore, coal, chips, plasma, trash, full_state')
         .eq('user_id', mission.target_id)
         .single();
 
@@ -261,7 +280,6 @@ async function _processCombat(mission) {
         newInventory[res] = Math.max(0, val - (loot[res] ?? 0));
     }
 
-    // БАГ #6 ИСПРАВЛЕНИЕ: обновляем ТОЛЬКО flat-поля, не трогаем full_state
     await supabase.from('game_saves').update({
         ore:   newInventory.ore,
         coal:  newInventory.coal,
@@ -284,7 +302,6 @@ async function _processCombat(mission) {
         resources_stolen: loot,
     });
 
-    // БАГ #9 ИСПРАВЛЕНИЕ: только ОДНО уведомление жертве (без дубля от cargo)
     await pushNotification(mission.target_id, 'under_attack', {
         message: `💥 Ваша планета атакована! Потери: ${_formatLoot(loot)}`,
         payload: { stolen: loot, had_defense: hasDefense }
@@ -319,9 +336,6 @@ async function _processCargo(mission) {
         status: 'returning',
         loot:   loot,
     }).eq('id', mission.id);
-
-    // БАГ #9 ИСПРАВЛЕНИЕ: cargo НЕ отправляет уведомление жертве
-    // Только атакующий получит уведомление при возврате
 }
 
 // ─── Вспомогательные функции ──────────────────────────────────────────────
@@ -350,7 +364,8 @@ async function pushNotification(playerId, type, { message, payload }) {
             type, 
             message, 
             payload: payload || {},
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            is_read: false
         });
     } catch(e) {
         console.warn('Ошибка отправки уведомления:', e);
@@ -371,11 +386,15 @@ export async function getLatestScoutData(attackerId, targetId) {
     return data ?? null;
 }
 
+// БАГ #6: фильтрация неактивных игроков (не заходили 7+ дней)
 export async function getTargetPlayers(currentUserId) {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    
     const { data: saves } = await supabase
         .from('game_saves')
         .select('user_id, ore, coal, chips, plasma, total_mined, neuro_evolution, last_seen')
         .neq('user_id', currentUserId)
+        .gte('last_seen', sevenDaysAgo)  // БАГ #6: только игроки, заходившие за последние 7 дней
         .order('total_mined', { ascending: false })
         .limit(50);
 
