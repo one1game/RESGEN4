@@ -1,4 +1,5 @@
 // game.js
+// ИСПРАВЛЕННАЯ ВЕРСИЯ - добавлена загрузка прогресса квестов и защита от конфликтов
 
 import init, { start_game, apply_config_from_admin } from './pkg/corebox_rs.js';
 import { initStatistics, updateStatisticsDisplay, switchTab, gameStats, loadUserStatistics, resetUserStatistics, updateStatisticsFromRust } from './statistics.js';
@@ -60,10 +61,12 @@ let _lastAutoClickSound = 0;
 let _isSaving = false;
 let _nightWarnShown = false;
 let _currentTab = 'inventory';
+let _fleetUITimer = null;
 
 let _notifChannel = null;
 let _missionPollInterval = null;
 let _missionChannel = null;
+let _incomingChannel = null;
 let _universalChannel = null;
 let _keepAliveChannel = null;
 
@@ -159,10 +162,19 @@ function stopLastSeenUpdater() {
     }
 }
 
+// БАГ #6 ИСПРАВЛЕНИЕ: cloudSaveNow с восстановлением флота, чертежей и планетарных миссий при конфликте
 async function cloudSaveNow(force = false) {
     if (!currentUser || !game) return;
     if (_isSaving && !force) return;
+    
+    if (force && _isSaving) {
+        console.log('⚠️ Принудительное сохранение: сбрасываем флаг _isSaving');
+        _isSaving = false;
+    }
+    
     _isSaving = true;
+    
+    const currentFleetBackup = window.fleetModule?.ships ? JSON.parse(JSON.stringify(window.fleetModule.ships)) : null;
     
     try {
         const result = await saveGameToCloud(game, force);
@@ -176,16 +188,102 @@ async function cloudSaveNow(force = false) {
                 indicator.style.opacity = '1';
                 setTimeout(() => { indicator.style.opacity = '0'; }, 2000);
             }
+            console.log('✅ Облачное сохранение успешно');
         } else if (result.error === "Конфликт: облако новее" && result.server_save) {
-            addToLog("⚠️ Обнаружен конфликт сохранений, загружаем облачную версию", "warning");
+            addToLog("⚠️ Обнаружен конфликт сохранений, выполняем объединение данных", "warning");
             
             try {
                 game.load_game_state(JSON.stringify(result.server_save));
-                addToLog("💾 Загружена облачная версия (была новее");
+                
+                // БАГ #6: объединение флота
+                if (result.server_save.fleet && Array.isArray(result.server_save.fleet) && window.fleetModule) {
+                    const cloudFleet = result.server_save.fleet;
+                    const localFleet = currentFleetBackup || window.fleetModule.ships || [];
+                    const cloudIds = new Set(cloudFleet.map(s => s.id));
+                    const newLocalShips = localFleet.filter(s => !cloudIds.has(s.id));
+                    const mergedFleet = [...cloudFleet, ...newLocalShips];
+                    
+                    console.log(`🔄 Объединение флота: облако=${cloudFleet.length}, новые=${newLocalShips.length}, всего=${mergedFleet.length}`);
+                    window.fleetModule.ships = mergedFleet;
+                    window.fleetModule.saveFleet();
+                    
+                    if (newLocalShips.length > 0) {
+                        addToLog(`✅ Сохранены новые корабли: +${newLocalShips.length}`, "success");
+                    }
+                }
+                
+                // БАГ #6: восстановление планетарных миссий из облака при конфликте
+                if (result.server_save.active_planet_missions && window.fleetModule && window.spaceModule) {
+                    try {
+                        const cloudMissions = result.server_save.active_planet_missions;
+                        const currentMissionsJson = game.get_active_planet_missions();
+                        const currentMissions = currentMissionsJson ? JSON.parse(currentMissionsJson) : [];
+                        const currentIds = new Set(currentMissions.map(m => m.id));
+                        const newMissions = cloudMissions.filter(m => !currentIds.has(m.id));
+                        
+                        if (newMissions.length > 0) {
+                            console.log(`🪐 Восстановлено ${newMissions.length} планетарных миссий из облака`);
+                            for (const mission of newMissions) {
+                                const ship = window.fleetModule.ships.find(s => s.id === mission.ship_id);
+                                if (ship && mission.status === 'flying') {
+                                    ship.onMission = true;
+                                    ship.currentMissionId = mission.id;
+                                    ship.targetPlanetId = mission.planet_id;
+                                    ship.missionReturnsAt = mission.returns_at;
+                                    ship.missionArrivesAt = mission.arrives_at;
+                                    ship.shipType = mission.ship_type || 'cargo';
+                                }
+                            }
+                            window.fleetModule.saveFleet();
+                            if (window.spaceModule.loadPlanetsFromRust) {
+                                window.spaceModule.loadPlanetsFromRust();
+                            }
+                            if (window.spaceModule.renderPlanets) {
+                                window.spaceModule.renderPlanets();
+                            }
+                            addToLog(`🪐 Восстановлено ${newMissions.length} планетарных миссий из облака`, "success");
+                        }
+                    } catch(e) {
+                        console.warn('Ошибка восстановления планетарных миссий:', e);
+                    }
+                }
+                
+                // БАГ #6: объединение чертежей
+                if (result.server_save.blueprints && window.designModule) {
+                    const cloudBlueprints = result.server_save.blueprints;
+                    const localBlueprints = window.designModule.blueprints || [];
+                    
+                    if (typeof cloudBlueprints === 'object' && !Array.isArray(cloudBlueprints)) {
+                        for (const bp of localBlueprints) {
+                            if (bp.unlocked && !cloudBlueprints[bp.id]) {
+                                cloudBlueprints[bp.id] = true;
+                                console.log(`🔄 Добавлен чертеж ${bp.id} в облако`);
+                            }
+                        }
+                        window.designModule.loadBlueprintsFromCloud(cloudBlueprints);
+                    } else if (Array.isArray(cloudBlueprints)) {
+                        const cloudBpMap = new Map(cloudBlueprints.map(b => [b.id, b]));
+                        for (const bp of localBlueprints) {
+                            if (bp.unlocked && !cloudBpMap.get(bp.id)?.unlocked) {
+                                cloudBpMap.set(bp.id, { id: bp.id, unlocked: true });
+                                console.log(`🔄 Добавлен чертеж ${bp.id} в облако`);
+                            }
+                        }
+                        window.designModule.loadBlueprintsFromCloud(Array.from(cloudBpMap.values()));
+                    }
+                    window.designModule.syncBlueprintsToRust();
+                }
+                
+                addToLog("💾 Выполнено объединение с облачной версией", "success");
                 await updateLastSeen();
-            } catch(e) {}
+            } catch(e) {
+                console.error('Ошибка при объединении:', e);
+                addToLog("❌ Ошибка при разрешении конфликта", "error");
+            }
         }
-    } catch(e) {} finally {
+    } catch(e) {
+        console.error('Ошибка в cloudSaveNow:', e);
+    } finally {
         _isSaving = false;
     }
 }
@@ -197,6 +295,40 @@ function scheduleCloudSave() {
         await cloudSaveNow(false);
         _cloudSaveTimer = null;
     }, 2000);
+}
+
+window.cloudSaveNow = cloudSaveNow;
+
+function getCurrentGameState() {
+    if (!game) return null;
+    try {
+        const statsJson = game.get_statistics();
+        if (statsJson) {
+            const parsed = JSON.parse(statsJson);
+            parsed.mining_level = parsed.upgrades?.mining ?? 0;
+            parsed.defense_active = parsed.upgrades?.defense ?? false;
+            parsed.defense_level = parsed.upgrades?.defense_level ?? 0;
+            parsed.computational_power = game.get_computational_power() || 0;
+            parsed.max_computational_power = game.get_max_computational_power ? game.get_max_computational_power() : 1000;
+
+            if (window.fleetModule) {
+                parsed.fleet = window.fleetModule.ships;
+                parsed.defense_ship_id = window.fleetModule.defenseShipId || null;
+                parsed.fleet_log = window.fleetModule.fleetLog || [];
+            }
+
+            if (window.designModule) {
+                parsed.blueprints = {
+                    cargo: window.designModule.blueprints.find(b => b.id === 'cargo')?.unlocked || false,
+                    scout: window.designModule.blueprints.find(b => b.id === 'scout')?.unlocked || false,
+                    combat: window.designModule.blueprints.find(b => b.id === 'combat')?.unlocked || false,
+                };
+            }
+
+            return parsed;
+        }
+    } catch(e) {}
+    return null;
 }
 
 function showFloatingText(text, x, y) {
@@ -262,8 +394,29 @@ function setupLogObserver() {
 }
 
 function triggerRandomEvent() {
+    let stats = null;
+    try { 
+        const j = game?.get_statistics(); 
+        if (j) stats = JSON.parse(j); 
+    } catch(e) {}
+    
     const events = [
-        { name: '🎁 Найден тайник!', effect: () => { game.add_resource('coal', 30 + Math.floor(Math.random() * 40)); return '+30-70 угля'; } },
+        { name: '🎁 Найден тайник!', effect: () => { 
+            const coal = stats?.coal_inventory || 0;
+            const ore = stats?.ore_inventory || 0;
+            const trash = stats?.trash_inventory || 0;
+            
+            if (coal < 500) {
+                game.add_resource('coal', 30 + Math.floor(Math.random() * 40));
+                return '+30-70 угля';
+            } else if (ore < 300) {
+                game.add_resource('ore', 15 + Math.floor(Math.random() * 25));
+                return '+15-40 руды';
+            } else {
+                game.add_resource('trash', 40 + Math.floor(Math.random() * 50));
+                return '+40-90 мусора';
+            }
+        } },
         { name: '☄️ Метеоритный дождь!', effect: () => { game.add_resource('ore', 15 + Math.floor(Math.random() * 25)); return '+15-40 руды'; } },
         { name: '⚠️ Перегрев системы!', effect: () => { const p = game?.get_computational_power() || 0; game.subtract_power(Math.min(20, Math.floor(p * 0.1))); return '-мощности'; } },
         { name: '💀 Саботаж повстанцев!', effect: () => {
@@ -282,14 +435,35 @@ function triggerRandomEvent() {
     showFloatingText(e.name, 300, 100);
 }
 
-function prestigeReset() {
+async function prestigeReset() {
     if (!confirm('ПРЕСТИЖ!\nНачнёте заново, получите бонусы. Продолжить?')) return;
+    
+    const fleetBackup = window.fleetModule?.ships ? JSON.stringify(window.fleetModule.ships) : null;
+    const blueprintBackup = window.designModule?.blueprints ? JSON.stringify(window.designModule.blueprints) : null;
+    
+    if (game && typeof game.clear_planet_missions === 'function') {
+        game.clear_planet_missions();
+    }
+    
     prestigeLevel++;
     localStorage.setItem('corebox_prestige_level', prestigeLevel);
+    
+    if (fleetModule) {
+        fleetModule.ships = [];
+        fleetModule.defenseShipId = null;
+        fleetModule.saveFleet();
+    }
+    
+    if (designModule) {
+        designModule.blueprints.forEach(bp => bp.unlocked = false);
+        designModule.saveBlueprints();
+    }
+    
     if (typeof game.reset_progress === 'function') game.reset_progress();
     showFloatingText(`🔁 ПРЕСТИЖ ${prestigeLevel}!`, window.innerWidth / 2, window.innerHeight / 2);
     document.dispatchEvent(new CustomEvent('prestigeComplete', { detail: { level: prestigeLevel } }));
-    scheduleCloudSave();
+    
+    await cloudSaveNow(true);
 }
 
 function getPrestigeBonus() {
@@ -379,23 +553,6 @@ function escapeHtml(str) {
     return str?.replace(/[&<>"']/g, function(m) {
         return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
     }) || '';
-}
-
-function getCurrentGameState() {
-    if (!game) return null;
-    try {
-        const statsJson = game.get_statistics();
-        if (statsJson) {
-            const parsed = JSON.parse(statsJson);
-            parsed.mining_level = parsed.upgrades?.mining ?? parsed.mining_level ?? 0;
-            parsed.defense_active = parsed.upgrades?.defense ?? parsed.defense_active ?? false;
-            parsed.defense_level = parsed.upgrades?.defense_level ?? parsed.defense_level ?? 0;
-            parsed.computational_power = game.get_computational_power() || 0;
-            parsed.max_computational_power = game.get_max_computational_power ? game.get_max_computational_power() : 1000;
-            return parsed;
-        }
-    } catch(e) {}
-    return null;
 }
 
 function showAuthUI() {
@@ -510,6 +667,10 @@ function syncUIAfterCloudLoad(cloudSave) {
         updateAttackHistory(cloudSave.attack_history);
     }
     
+    if (cloudSave.auto_clicking !== undefined) {
+        localStorage.setItem('corebox_autoclicking', cloudSave.auto_clicking ? 'true' : 'false');
+    }
+    
     localStorage.setItem('corebox_save_backup', JSON.stringify(cloudSave));
     localStorage.setItem('corebox_save_universal', JSON.stringify({
         inventory: cloudSave.inventory,
@@ -520,24 +681,64 @@ function syncUIAfterCloudLoad(cloudSave) {
     }));
 }
 
+// БАГ #3 ИСПРАВЛЕНИЕ: функция восстановления планетарных миссий
+window._restorePlanetMissions = function() {
+    if (!game || !window.fleetModule) return;
+    try {
+        const missionsJson = game.get_active_planet_missions();
+        const missions = JSON.parse(missionsJson);
+        let restored = 0;
+        
+        missions.forEach(mission => {
+            const ship = window.fleetModule.ships.find(s => s.id === mission.ship_id);
+            if (ship && mission.status === 'flying') {
+                ship.onMission = true;
+                ship.currentMissionId = mission.id;
+                ship.targetPlanetId = mission.planet_id;
+                ship.missionReturnsAt = mission.returns_at;
+                ship.missionArrivesAt = mission.arrives_at;
+                ship.shipType = mission.ship_type || 'cargo';
+                restored++;
+            }
+        });
+        
+        if (restored > 0) {
+            window.fleetModule.saveFleet();
+            window.fleetModule._renderFleetTab?.();
+            addToLog(`🪐 Восстановлено ${restored} планетарных миссий`, "info");
+        }
+    } catch(e) {
+        console.warn('Ошибка восстановления планетарных миссий:', e);
+    }
+};
+
 async function loadFromCloudAndMerge() {
     if (!currentUser || !game) return null;
+    
+    const localBackup = localStorage.getItem('corebox_save_backup');
+    const localUniversal = localStorage.getItem('corebox_save_universal');
     
     try {
         const cloudSave = await loadGameFromCloud(true);
         
         if (cloudSave) {
-            const localBackup = localStorage.getItem('corebox_save_backup');
+            let localTimestamp = 0;
+            if (localBackup) {
+                try { localTimestamp = JSON.parse(localBackup).timestamp || 0; } catch(e) {}
+            }
+            if (localUniversal) {
+                try {
+                    const u = JSON.parse(localUniversal);
+                    const uTs = u.timestamp || u._savedAt || 0;
+                    if (uTs > localTimestamp) localTimestamp = uTs;
+                } catch(e) {}
+            }
+            
             let shouldLoad = true;
             
-            if (localBackup) {
-                try {
-                    const local = JSON.parse(localBackup);
-                    if (local.timestamp > cloudSave.timestamp) {
-                        shouldLoad = false;
-                        addToLog("💾 Локальное сохранение новее облачного, используем его");
-                    }
-                } catch(e) {}
+            if (localTimestamp > cloudSave.timestamp) {
+                shouldLoad = false;
+                addToLog("💾 Локальное сохранение новее облачного, используем его");
             }
             
             if (shouldLoad) {
@@ -572,6 +773,8 @@ async function loadFromCloudAndMerge() {
                             coal_enabled: cloudSave.coal_enabled || false,
                             game_time: cloudSave.game_time || 24,
                             rebel_activity: cloudSave.rebel_activity || 0,
+                            rebel_protection_nights: cloudSave.rebel_protection_nights || 0,
+                            rebel_protection_active: cloudSave.rebel_protection_active || false,
                             turbine_heat: cloudSave.turbine_heat || 0,
                             turbine_upgrade_level: cloudSave.turbine_upgrade_level || 0,
                             total_coal_mined: cloudSave.statistics?.total_coal_mined || 0,
@@ -587,11 +790,30 @@ async function loadFromCloudAndMerge() {
                             current_night_type: cloudSave.current_night_type || "",
                             blueprint_cargo_unlocked: cargoUnlocked,
                             blueprint_scout_unlocked: scoutUnlocked,
-                            blueprint_combat_unlocked: combatUnlocked
+                            blueprint_combat_unlocked: combatUnlocked,
+                            quests_progress: cloudSave.quests_progress || [],
+                            planets: cloudSave.planets || [],
+                            active_planet_missions: cloudSave.active_planet_missions || []
                         };
                     }
                     game.load_game_state(JSON.stringify(rustFormatSave));
                     addToLog(`💾 Загружено облачное сохранение (${new Date(cloudSave.timestamp).toLocaleString()})`);
+                    
+                    // БАГ #3: восстанавливаем флот из облачного сохранения
+                    if (cloudSave.fleet && Array.isArray(cloudSave.fleet) && window.fleetModule) {
+                        const storageKey = window.fleetModule._getStorageKey();
+                        localStorage.setItem(storageKey, JSON.stringify(cloudSave.fleet));
+                        window.fleetModule.ships = cloudSave.fleet;
+                        if (window.fleetModule._renderFleetTab) {
+                            window.fleetModule._renderFleetTab();
+                        }
+                        console.log(`✅ Флот восстановлен из облака: ${cloudSave.fleet.length} кораблей`);
+                    }
+                    
+                    // БАГ #3: восстанавливаем планетарные миссии
+                    if (window._restorePlanetMissions) {
+                        setTimeout(() => window._restorePlanetMissions(), 500);
+                    }
                 } catch(e) {
                     addToLog("❌ Ошибка загрузки облачного сохранения", "error");
                     return null;
@@ -612,6 +834,13 @@ async function loadFromCloudAndMerge() {
                     window.updateCraftTab();
                     window.updateDesignTab();
                     _refreshFleetWithMissions();
+                    
+                    if (window.spaceModule) {
+                        setTimeout(() => {
+                            window.spaceModule.loadPlanetsFromRust();
+                            window.spaceModule.renderPlanets();
+                        }, 500);
+                    }
                 }, 100);
                 
                 if (cloudSave.blueprints) {
@@ -619,24 +848,9 @@ async function loadFromCloudAndMerge() {
                         detail: { blueprints: cloudSave.blueprints } 
                     }));
                     
-                    try {
-                        const stats = JSON.parse(game.get_statistics());
-                        
-                        if (typeof cloudSave.blueprints === 'object') {
-                            stats.blueprint_cargo_unlocked = cloudSave.blueprints.cargo === true;
-                            stats.blueprint_scout_unlocked = cloudSave.blueprints.scout === true;
-                            stats.blueprint_combat_unlocked = cloudSave.blueprints.combat === true;
-                        } else if (Array.isArray(cloudSave.blueprints)) {
-                            stats.blueprint_cargo_unlocked = cloudSave.blueprints.find(b => b.id === 'cargo')?.unlocked === true;
-                            stats.blueprint_scout_unlocked = cloudSave.blueprints.find(b => b.id === 'scout')?.unlocked === true;
-                            stats.blueprint_combat_unlocked = cloudSave.blueprints.find(b => b.id === 'combat')?.unlocked === true;
-                        }
-                        
-                        game.load_game_state(JSON.stringify(stats));
-                    } catch(e) {}
-                    
                     if (designModule) {
                         designModule.loadBlueprintsFromCloud(cloudSave.blueprints);
+                        designModule.syncBlueprintsToRust();
                         const designContainer = document.getElementById('designContainer');
                         if (designContainer && designContainer.style.display !== 'none') {
                             window.updateDesignTab();
@@ -794,18 +1008,42 @@ function _initMultiplayer(user) {
         supabase.removeChannel(_missionChannel);
         _missionChannel = null;
     }
+    if (_incomingChannel) {
+        supabase.removeChannel(_incomingChannel);
+        _incomingChannel = null;
+    }
     
     _missionChannel = supabase
-        .channel(`missions:${user.id}`)
+        .channel(`missions_out:${user.id}`)
         .on('postgres_changes', {
             event: 'UPDATE',
             schema: 'public',
             table: 'missions',
             filter: `attacker_id=eq.${user.id}`,
         }, (payload) => {
-            if (payload.new && (payload.new.status === 'returning' || payload.new.status === 'done')) {
+            if (payload.new && ['returning', 'done'].includes(payload.new.status)) {
                 processArrivedMissions(user.id);
                 setTimeout(() => _refreshFleetWithMissions(), 500);
+            }
+        })
+        .subscribe();
+    
+    _incomingChannel = supabase
+        .channel(`missions_in:${user.id}`)
+        .on('postgres_changes', {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'missions',
+            filter: `target_id=eq.${user.id}`,
+        }, (payload) => {
+            if (payload.new && ['flying', 'returning'].includes(payload.new.status)) {
+                processArrivedMissions(user.id);
+                if (payload.new.status === 'flying' && window.showNotif) {
+                    const shipIcons = { scout: '🔭', combat: '⚔️', cargo: '📦' };
+                    const icon = shipIcons[payload.new.ship_type] || '🚀';
+                    window.showNotif(`⚠️ ${icon} Вражеский корабль летит к вам!`, true);
+                    Sounds.rebelAttack && Sounds.rebelAttack();
+                }
             }
         })
         .subscribe();
@@ -827,6 +1065,7 @@ function _initMultiplayer(user) {
 function _cleanupMultiplayer() {
     if (_notifChannel) { supabase.removeChannel(_notifChannel); _notifChannel = null; }
     if (_missionChannel) { supabase.removeChannel(_missionChannel); _missionChannel = null; }
+    if (_incomingChannel) { supabase.removeChannel(_incomingChannel); _incomingChannel = null; }
     if (_missionPollInterval) { clearInterval(_missionPollInterval); _missionPollInterval = null; }
     if (_missionTimerInterval) { clearInterval(_missionTimerInterval); _missionTimerInterval = null; }
 }
@@ -998,6 +1237,15 @@ function validateAndFixNeuroConsciousness() {
         }
         
         if (fixed) {
+            try {
+                const currentStateJson = game.get_statistics();
+                const currentState = JSON.parse(currentStateJson);
+                currentState.neuro_consciousness = consciousness;
+                game.load_game_state(JSON.stringify(currentState));
+            } catch(e) {
+                console.warn('Не удалось применить исправление сознания в Rust:', e);
+            }
+            
             const save = localStorage.getItem('corebox_save_backup');
             if (save) {
                 try {
@@ -1019,6 +1267,8 @@ function validateAndFixNeuroConsciousness() {
                     }
                 } catch(e) {}
             }
+            
+            setTimeout(() => cloudSaveNow(true), 500);
         }
         
         updateNeuroStatus();
@@ -1225,6 +1475,7 @@ async function handleLogout() {
     if (_universalChannel) { _universalChannel.close(); _universalChannel = null; }
     if (_keepAliveChannel) { _keepAliveChannel.close(); _keepAliveChannel = null; }
     if (_gameLoopInterval) { clearInterval(_gameLoopInterval); _gameLoopInterval = null; }
+    if (_fleetUITimer) { clearInterval(_fleetUITimer); _fleetUITimer = null; }
     offlineProgressShown = false;
     
     if (currentUser && game) {
@@ -1716,10 +1967,9 @@ function renderUpgradesTab() {
     
     const critButtonDisabled = (() => {
         if (critLevel >= 10) return 'disabled';
-        if (critLevel < 3) {
-            return inv.coal >= critCost && inv.trash >= critCost ? '' : 'disabled';
-        }
-        return inv.coal >= critCost && inv.ore >= critCost && inv.chips >= critCost && inv.plasma >= critCost && inv.trash >= critCost ? '' : 'disabled';
+        return inv.coal >= critCost && inv.ore >= critCost && 
+               inv.chips >= critCost && inv.plasma >= critCost && 
+               inv.trash >= critCost ? '' : 'disabled';
     })();
     
     const html = `
@@ -2052,11 +2302,6 @@ function setupEventListeners() {
             notif.textContent = e.detail.success ? e.detail.message : e.detail.error;
             document.body.appendChild(notif);
             setTimeout(() => notif.remove(), 2000);
-            if (e.detail.success && e.detail.recipe?.result?.type === 'ship') {
-                fleetModule.addShip(e.detail.recipe.result.subtype);
-                scheduleCloudSave();
-                setTimeout(() => _refreshFleetWithMissions(), 500);
-            }
         }
     });
     document.addEventListener('designResult', (e) => { 
@@ -2096,6 +2341,7 @@ function cleanupGameTimers() {
     if (_lastSeenTimer) { clearInterval(_lastSeenTimer); _lastSeenTimer = null; }
     if (_universalChannel) { _universalChannel.close(); _universalChannel = null; }
     if (_keepAliveChannel) { _keepAliveChannel.close(); _keepAliveChannel = null; }
+    if (_fleetUITimer) { clearInterval(_fleetUITimer); _fleetUITimer = null; }
 }
 
 let lastConfigHash = null;
@@ -2155,13 +2401,21 @@ async function initializeGame(existingSave = null) {
                         nights_survived: existingSave.nights_survived || 0,
                         manual_clicks: existingSave.total_mined || 0,
                         neuro_evolution: existingSave.neuro?.evolution || 0,
-                        neuro_consciousness: existingSave.neuro?.consciousness || 0,
+                        neuro_consciousness: (() => {
+                            let c = existingSave.neuro?.consciousness || 0;
+                            if (c > 1.5) c = c / 100.0;
+                            if (c > 1.0) c = 1.0;
+                            if (c < 0) c = 0;
+                            return c;
+                        })(),
                         neuro_score: existingSave.neuro?.score || 0,
                         current_ai_mode: existingSave.neuro?.ai_mode || "Обычный",
                         is_day: existingSave.is_day !== undefined ? existingSave.is_day : true,
                         coal_enabled: existingSave.coal_enabled || false,
                         game_time: existingSave.game_time || 24,
                         rebel_activity: existingSave.rebel_activity || 0,
+                        rebel_protection_nights: existingSave.rebel_protection_nights || 0,
+                        rebel_protection_active: existingSave.rebel_protection_active || false,
                         turbine_heat: existingSave.turbine_heat || 0,
                         turbine_upgrade_level: existingSave.turbine_upgrade_level || 0,
                         total_coal_mined: existingSave.statistics?.total_coal_mined || 0,
@@ -2177,12 +2431,26 @@ async function initializeGame(existingSave = null) {
                         current_night_type: existingSave.current_night_type || "",
                         blueprint_cargo_unlocked: cargoUnlocked,
                         blueprint_scout_unlocked: scoutUnlocked,
-                        blueprint_combat_unlocked: combatUnlocked
+                        blueprint_combat_unlocked: combatUnlocked,
+                        quests_progress: existingSave.quests_progress || [],
+                        planets: existingSave.planets || [],
+                        active_planet_missions: existingSave.active_planet_missions || []
                     };
                 }
                 game.load_game_state(JSON.stringify(rustFormatSave));
                 addToLog("💾 Загружено облачное сохранение");
                 syncUIAfterCloudLoad(existingSave);
+                
+                if (existingSave?.fleet && Array.isArray(existingSave.fleet) && window.fleetModule) {
+                    const storageKey = window.fleetModule._getStorageKey();
+                    localStorage.setItem(storageKey, JSON.stringify(existingSave.fleet));
+                    window.fleetModule.ships = existingSave.fleet;
+                    if (window.fleetModule._renderFleetTab) {
+                        window.fleetModule._renderFleetTab();
+                    }
+                    console.log(`✅ Флот восстановлен из existingSave: ${existingSave.fleet.length} кораблей`);
+                }
+                
                 loadedFromCloud = true;
             } catch(e) {}
         }
@@ -2222,6 +2490,22 @@ async function initializeGame(existingSave = null) {
             } else {
                 addToLog("⚠️ Сохранений не найдено, начинаем новую игру");
             }
+        }
+        
+        const universalSave = localStorage.getItem('corebox_save_universal');
+        if (universalSave && !offlineProgressShown) {
+            try {
+                const savedState = JSON.parse(universalSave);
+                const offlineProgress = calculateOfflineProgress(savedState);
+                if (offlineProgress && game) {
+                    if (offlineProgress.coalGained > 0) game.add_resource('coal', offlineProgress.coalGained);
+                    if (offlineProgress.trashGained > 0) game.add_resource('trash', offlineProgress.trashGained);
+                    if (offlineProgress.oreGained > 0) game.add_resource('ore', offlineProgress.oreGained);
+                    offlineProgressShown = true;
+                    showOfflineRewardPopup(offlineProgress);
+                    scheduleCloudSave();
+                }
+            } catch(e) {}
         }
         
         _applyPendingLoot();
@@ -2282,6 +2566,21 @@ async function initializeGame(existingSave = null) {
         designModule.updateComputationalPower(game.get_computational_power());
         
         spaceModule.init(game, currentUser);
+        
+        if (_fleetUITimer) clearInterval(_fleetUITimer);
+        _fleetUITimer = setInterval(() => {
+            if (window.fleetModule && _currentTab === 'fleet') {
+                window.fleetModule._renderFleetTab?.();
+            }
+        }, 5000);
+        
+        // БАГ #3: вызов восстановления планетарных миссий
+        setTimeout(() => {
+            if (window._restorePlanetMissions) {
+                window._restorePlanetMissions();
+            }
+        }, 2000);
+        
         initStatistics();
         setupEventListeners();
         initializeCollapsiblePanels();
@@ -2291,6 +2590,22 @@ async function initializeGame(existingSave = null) {
         
         if (existingSave?.blueprints) {
             designModule.loadBlueprintsFromCloud(existingSave.blueprints);
+        }
+        
+        if (existingSave?.defense_ship_id && window.fleetModule) {
+            setTimeout(() => {
+                const ship = window.fleetModule.ships.find(s => s.id === existingSave.defense_ship_id);
+                if (ship && !ship.onMission && ship.type === 'combat') {
+                    window.fleetModule.defenseShipId = existingSave.defense_ship_id;
+                    ship.onDefense = true;
+                    window.fleetModule.saveFleet();
+                    window.fleetModule._renderFleetTab?.();
+                }
+            }, 2000);
+        }
+        if (existingSave?.fleet_log && window.fleetModule) {
+            window.fleetModule.fleetLog = existingSave.fleet_log;
+            window.fleetModule._renderFleetLog?.();
         }
         
         setTimeout(() => {
@@ -2345,9 +2660,15 @@ async function initializeGame(existingSave = null) {
                 } else if (overheated) {
                     mineBtn.classList.add('turbine-critical');
                     mineBtn.title = 'Турбина перегрета — ожидайте остывания';
+                    const coolingRate = 2 + (rustStats.turbine_upgrade_level || 0);
+                    const ticksLeft = Math.ceil(rustStats.turbine_heat / coolingRate);
+                    const btnText = mineBtn.querySelector('.btn-text');
+                    if (btnText) btnText.textContent = `${ticksLeft}с`;
                 } else {
                     mineBtn.classList.remove('system-offline', 'turbine-critical');
                     mineBtn.title = 'Добыча активна';
+                    const btnText = mineBtn.querySelector('.btn-text');
+                    if (btnText && btnText.textContent.includes('с')) btnText.textContent = 'ДОБЫЧА';
                 }
             }
             

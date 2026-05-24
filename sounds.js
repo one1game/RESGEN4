@@ -1,4 +1,4 @@
-// sounds.js — ОПТИМИЗИРОВАННАЯ ВЕРСИЯ
+// sounds.js — ИСПРАВЛЕННАЯ ВЕРСИЯ (playDigitalClick теперь async)
 const AudioContext = window.AudioContext || window.webkitAudioContext;
 let audioCtx = null;
 let isAudioEnabled = true;
@@ -71,8 +71,9 @@ async function playSpaceNoise({ duration = 0.5, volume = 0.1, filterFreq = 200, 
     } catch(e) {}
 }
 
-function playDigitalClick(volume = 0.12) {
-    const ctx = getAudioCtx();
+// ИСПРАВЛЕНО: функция теперь async
+async function playDigitalClick(volume = 0.12) {
+    const ctx = await getAudioCtx();
     if (!ctx) return;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -93,30 +94,30 @@ export const Sounds = {
     },
     async mine() {
         await this.resume();
-        playDigitalClick(0.18);
-        playModernTone({ frequency: 110, type: 'triangle', duration: 0.1, volume: 0.2, attack: 0.002, freqEnd: 50, filterFreq: 800 });
-        playSpaceNoise({ duration: 0.04, volume: 0.06, filterFreq: 5000, type: 'white' });
+        await playDigitalClick(0.18);
+        await playModernTone({ frequency: 110, type: 'triangle', duration: 0.1, volume: 0.2, attack: 0.002, freqEnd: 50, filterFreq: 800 });
+        await playSpaceNoise({ duration: 0.04, volume: 0.06, filterFreq: 5000, type: 'white' });
     },
     async combo(level = 1) {
         await this.resume();
         const pitchShift = Math.min(level * 15, 500);
-        playDigitalClick(0.15);
-        playModernTone({ frequency: 160 + pitchShift, type: 'sine', duration: 0.08, volume: 0.18, attack: 0.002, freqEnd: 100 + pitchShift });
+        await playDigitalClick(0.15);
+        await playModernTone({ frequency: 160 + pitchShift, type: 'sine', duration: 0.08, volume: 0.18, attack: 0.002, freqEnd: 100 + pitchShift });
     },
     async critical() {
         await this.resume();
-        playModernTone({ frequency: 50, type: 'sine', duration: 0.4, volume: 0.35, attack: 0.005, freqEnd: 20 });
+        await playModernTone({ frequency: 50, type: 'sine', duration: 0.4, volume: 0.35, attack: 0.005, freqEnd: 20 });
         setTimeout(() => { playModernTone({ frequency: 1800, type: 'sine', duration: 0.06, volume: 0.1, attack: 0.001, freqEnd: 800 }); }, 10);
     },
     async chips() {
         await this.resume();
-        playModernTone({ frequency: 1800, type: 'sine', duration: 0.05, volume: 0.1, attack: 0.002, detune: 15 });
+        await playModernTone({ frequency: 1800, type: 'sine', duration: 0.05, volume: 0.1, attack: 0.002, detune: 15 });
         setTimeout(() => playModernTone({ frequency: 2600, type: 'sine', duration: 0.04, volume: 0.07 }), 30);
     },
     async plasma() {
         await this.resume();
-        playSpaceNoise({ duration: 0.4, volume: 0.15, filterFreq: 1500, type: 'pink' });
-        playModernTone({ frequency: 180, type: 'sawtooth', duration: 0.3, volume: 0.1, filterFreq: 500, attack: 0.08 });
+        await playSpaceNoise({ duration: 0.4, volume: 0.15, filterFreq: 1500, type: 'pink' });
+        await playModernTone({ frequency: 180, type: 'sawtooth', duration: 0.3, volume: 0.1, filterFreq: 500, attack: 0.08 });
     },
     async upgrade() {
         await this.resume();
@@ -124,29 +125,29 @@ export const Sounds = {
     },
     async error() {
         await this.resume();
-        playModernTone({ frequency: 150, type: 'square', duration: 0.06, volume: 0.12, filterFreq: 1200 });
+        await playModernTone({ frequency: 150, type: 'square', duration: 0.06, volume: 0.12, filterFreq: 1200 });
         setTimeout(() => { playModernTone({ frequency: 100, type: 'square', duration: 0.1, volume: 0.1, filterFreq: 600 }); }, 40);
     },
     async rebelAttack() {
         await this.resume();
-        playSpaceNoise({ duration: 1.2, volume: 0.25, filterFreq: 120, type: 'pink' });
-        playModernTone({ frequency: 80, type: 'sawtooth', duration: 0.8, volume: 0.15, freqEnd: 40, filterFreq: 250 });
+        await playSpaceNoise({ duration: 1.2, volume: 0.25, filterFreq: 120, type: 'pink' });
+        await playModernTone({ frequency: 80, type: 'sawtooth', duration: 0.8, volume: 0.15, freqEnd: 40, filterFreq: 250 });
     },
     async evolution() {
         await this.resume();
         let f = 110;
         for(let i=0; i<10; i++) { setTimeout(() => { playModernTone({ frequency: f, type: 'sine', duration: 0.4, volume: 0.08, attack: 0.03 }); f *= 1.15; }, i * 60); }
-        playSpaceNoise({ duration: 1.5, volume: 0.15, filterFreq: 2500 });
+        await playSpaceNoise({ duration: 1.5, volume: 0.15, filterFreq: 2500 });
     },
     async questDone() {
         await this.resume();
-        playModernTone({ frequency: 1046.50, type: 'sine', duration: 0.1, volume: 0.12, attack: 0.01 });
+        await playModernTone({ frequency: 1046.50, type: 'sine', duration: 0.1, volume: 0.12, attack: 0.01 });
         setTimeout(() => { playModernTone({ frequency: 1318.51, type: 'sine', duration: 0.25, volume: 0.1, attack: 0.01 }); }, 120);
     },
     async nightStart() {
         await this.resume();
-        playSpaceNoise({ duration: 2.5, volume: 0.12, filterFreq: 60 });
-        playModernTone({ frequency: 180, type: 'sine', duration: 2, volume: 0.06, attack: 1.5, freqEnd: 60 });
+        await playSpaceNoise({ duration: 2.5, volume: 0.12, filterFreq: 60 });
+        await playModernTone({ frequency: 180, type: 'sine', duration: 2, volume: 0.06, attack: 1.5, freqEnd: 60 });
     },
     async warning() {
         await this.resume();
@@ -154,8 +155,31 @@ export const Sounds = {
     },
     async trade() {
         await this.resume();
-        playModernTone({ frequency: 440, type: 'sine', duration: 0.08, volume: 0.1, attack: 0.005 });
+        await playModernTone({ frequency: 440, type: 'sine', duration: 0.08, volume: 0.1, attack: 0.005 });
         setTimeout(() => playModernTone({ frequency: 660, type: 'sine', duration: 0.12, volume: 0.09, attack: 0.005 }), 80);
+    },
+    async click() {
+        await this.resume();
+        await playDigitalClick(0.1);
+    },
+    async autoStart() {
+        await this.resume();
+        await playModernTone({ frequency: 880, type: 'sine', duration: 0.15, volume: 0.12 });
+        await playModernTone({ frequency: 1100, type: 'sine', duration: 0.2, volume: 0.1 });
+    },
+    async autoStop() {
+        await this.resume();
+        await playModernTone({ frequency: 660, type: 'sine', duration: 0.2, volume: 0.1 });
+        await playModernTone({ frequency: 440, type: 'sine', duration: 0.15, volume: 0.08 });
+    },
+    async coalOn() {
+        await this.resume();
+        await playModernTone({ frequency: 110, type: 'sine', duration: 0.3, volume: 0.12 });
+        await playSpaceNoise({ duration: 0.2, volume: 0.08, filterFreq: 800 });
+    },
+    async coalOff() {
+        await this.resume();
+        await playModernTone({ frequency: 80, type: 'sine', duration: 0.2, volume: 0.1 });
     },
     async toggleMute() {
         isAudioEnabled = !isAudioEnabled;

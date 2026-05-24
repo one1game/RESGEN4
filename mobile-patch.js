@@ -1,4 +1,4 @@
-// ========== mobile-patch.js (ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+// ========== mobile-patch.js (ИСПРАВЛЕННАЯ ВЕРСИЯ + БАГ #10) ==========
 
 /**
  * CoreBox 3.2 — МОБИЛЬНЫЙ JS-ПАТЧ
@@ -69,7 +69,7 @@
     }
   }, { passive: true });
 
-  // Плавающая кнопка с long-press
+  // Плавающая кнопка с long-press (ИСПРАВЛЕНА)
   function patchFloatingButton() {
     const oldBtn = document.getElementById('floatingMineBtn');
     if (!oldBtn) return null;
@@ -253,9 +253,6 @@
     });
     floatObserver.observe(document.body, { childList: true, subtree: true });
   }
-
-  // ИСПРАВЛЕНО: убрана попытка патча Sounds (ES-модули не кладут экспорты в window)
-  // Звуки и так работают через Haptic при кликах
 
   function scrollTabIntoView (tabEl) {
     if (!tabEl) return;

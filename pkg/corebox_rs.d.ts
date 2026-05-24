@@ -20,10 +20,12 @@ export class CoreGame {
     craft_scout_ship(): string;
     design_ship(ship_type: string): string;
     game_loop(): void;
+    get_active_planet_missions(): string;
     get_blueprint_status(): string;
     get_computational_power(): number;
     get_max_computational_power(): number;
     get_neuro_evolution(): number;
+    get_planets(): string;
     get_resource(resource: string): number;
     get_statistics(): string;
     get_turbine_heat(): number;
@@ -36,9 +38,11 @@ export class CoreGame {
     constructor();
     reload_config(): void;
     repair_systems(): void;
+    research_planet(): string;
     reset_progress(): void;
     save_current_state(): void;
     sell_resource(resource: string): void;
+    send_ship_to_planet(ship_id: string, planet_id: string): string;
     set_fleet_cargo_bonus(bonus: number): void;
     set_fleet_defense_bonus(bonus: number): void;
     set_max_power(max: number): void;
@@ -84,10 +88,12 @@ export interface InitOutput {
     readonly coregame_craft_scout_ship: (a: number) => [number, number];
     readonly coregame_design_ship: (a: number, b: number, c: number) => [number, number];
     readonly coregame_game_loop: (a: number) => void;
+    readonly coregame_get_active_planet_missions: (a: number) => [number, number];
     readonly coregame_get_blueprint_status: (a: number) => [number, number];
     readonly coregame_get_computational_power: (a: number) => number;
     readonly coregame_get_max_computational_power: (a: number) => number;
     readonly coregame_get_neuro_evolution: (a: number) => number;
+    readonly coregame_get_planets: (a: number) => [number, number];
     readonly coregame_get_resource: (a: number, b: number, c: number) => number;
     readonly coregame_get_statistics: (a: number) => [number, number];
     readonly coregame_get_turbine_heat: (a: number) => number;
@@ -100,8 +106,10 @@ export interface InitOutput {
     readonly coregame_new: () => number;
     readonly coregame_reload_config: (a: number) => void;
     readonly coregame_repair_systems: (a: number) => void;
+    readonly coregame_research_planet: (a: number) => [number, number];
     readonly coregame_reset_progress: (a: number) => void;
     readonly coregame_save_current_state: (a: number) => void;
+    readonly coregame_send_ship_to_planet: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly coregame_set_fleet_cargo_bonus: (a: number, b: number) => void;
     readonly coregame_set_fleet_defense_bonus: (a: number, b: number) => void;
     readonly coregame_set_max_power: (a: number, b: number) => void;
@@ -120,12 +128,12 @@ export interface InitOutput {
     readonly main: () => void;
     readonly start_game: () => number;
     readonly coregame_sell_resource: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
-    readonly __wbindgen_malloc: (a: number, b: number) => number;
-    readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
 }

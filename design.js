@@ -12,6 +12,12 @@ export const designModule = {
         { id: 'combat', name: 'Боевой корабль', desc: 'Защита флота и атака угроз', designCost: 800, icon: '⚔️', unlocked: false }
     ],
     
+    // БАГ #7 ИСПРАВЛЕНИЕ: единый метод получения ключа localStorage с userId
+    _getStorageKey() {
+        const userId = window.currentUser?.id;
+        return userId ? `corebox_ship_blueprints_${userId}` : 'corebox_ship_blueprints';
+    },
+    
     init(game) {
         this.game = game;
         this.loadBlueprints();
@@ -22,7 +28,7 @@ export const designModule = {
         console.log('📐 Модуль дизайна инициализирован, мощность:', this.computationalPower);
     },
     
-    // ИСПРАВЛЕНИЕ БАГ #1: единый метод синхронизации из Rust
+    // ИСПРАВЛЕНИЕ БАГА #1: единый метод синхронизации из Rust
     syncBlueprintsFromRust() {
         try {
             const statsJson = this.game.get_statistics();
@@ -34,7 +40,8 @@ export const designModule = {
                 else if (bp.id === 'combat') bp.unlocked = stats.blueprint_combat_unlocked === true;
             });
             
-            this.aiResearchBonus = stats.ai_research_bonus || 0;
+            // БАГ #13 ИСПРАВЛЕНИЕ: читаем ai_research_bonus из статистики
+            this.aiResearchBonus = stats.ai_research_bonus || Math.floor((stats.neuro_consciousness || 0) / 20);
             this.computationalPower = stats.computational_power || 0;
             
             this.saveBlueprints();
@@ -44,7 +51,7 @@ export const designModule = {
         }
     },
     
-    // ИСПРАВЛЕНИЕ БАГ #1: публичный метод проверки статуса чертежа
+    // ИСПРАВЛЕНИЕ БАГА #1: публичный метод проверки статуса чертежа
     isBlueprintUnlocked(blueprintId) {
         const bp = this.blueprints.find(b => b.id === blueprintId);
         if (bp) return bp.unlocked === true;
@@ -62,7 +69,7 @@ export const designModule = {
     },
     
     loadBlueprints() {
-        const saved = localStorage.getItem('corebox_ship_blueprints');
+        const saved = localStorage.getItem(this._getStorageKey());
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
@@ -74,23 +81,34 @@ export const designModule = {
         }
     },
     
+    // БАГ #10 ИСПРАВЛЕНИЕ: поддержка формата объекта и массива
     loadBlueprintsFromCloud(cloudBlueprints) {
-        if (cloudBlueprints && Array.isArray(cloudBlueprints)) {
+        if (!cloudBlueprints) return;
+        
+        // Формат: {cargo: true, scout: false, combat: false}
+        if (typeof cloudBlueprints === 'object' && !Array.isArray(cloudBlueprints)) {
+            this.blueprints.forEach(bp => {
+                if (cloudBlueprints[bp.id] !== undefined) {
+                    bp.unlocked = cloudBlueprints[bp.id] === true;
+                }
+            });
+        } else if (Array.isArray(cloudBlueprints)) {
             cloudBlueprints.forEach(cb => {
                 const bp = this.blueprints.find(b => b.id === cb.id);
                 if (bp && cb.unlocked !== undefined) {
                     bp.unlocked = cb.unlocked;
                 }
             });
-            this.saveBlueprints();
-            this.syncBlueprintsToRust();
-            console.log('📐 Чертежи загружены из облака');
         }
+        
+        this.saveBlueprints();
+        this.syncBlueprintsToRust();
+        console.log('📐 Чертежи загружены из облака');
     },
     
     saveBlueprints() {
         const toSave = this.blueprints.map(bp => ({ id: bp.id, unlocked: bp.unlocked }));
-        localStorage.setItem('corebox_ship_blueprints', JSON.stringify(toSave));
+        localStorage.setItem(this._getStorageKey(), JSON.stringify(toSave));
         this.syncBlueprintsToRust();
     },
     
@@ -117,10 +135,12 @@ export const designModule = {
         }
     },
     
+    // БАГ #5 ИСПРАВЛЕНИЕ: убираем скидку ИИ для чертежей (оставляем только для крафта)
     getEffectiveCost(blueprintId) {
         const blueprint = this.blueprints.find(bp => bp.id === blueprintId);
         if (!blueprint) return Infinity;
-        return Math.max(1, blueprint.designCost - (this.aiResearchBonus || 0));
+        // Убираем скидку ИИ на чертежи - только полная стоимость
+        return blueprint.designCost;
     },
     
     canDesign(blueprintId) {
@@ -131,7 +151,6 @@ export const designModule = {
         return this.computationalPower >= effectiveCost;
     },
     
-    // ИСПРАВЛЕНИЕ БАГ #3: полная синхронизация после создания чертежа
     designBlueprint(blueprintId) {
         const blueprint = this.blueprints.find(bp => bp.id === blueprintId);
         if (!blueprint) return { success: false, error: 'Чертеж не найден' };
@@ -148,13 +167,13 @@ export const designModule = {
                 blueprint.unlocked = true;
                 this.saveBlueprints();
                 
-                // ИСПРАВЛЕНИЕ БАГ #3: принудительная синхронизация ВСЕХ систем
+                // ИСПРАВЛЕНИЕ БАГА #3: принудительная синхронизация ВСЕХ систем
                 this.syncBlueprintsToRust();
                 
                 // Обновляем мощность
                 this.computationalPower = this.game.get_computational_power();
                 
-                // ИСПРАВЛЕНИЕ БАГ #3: обновляем craftModule
+                // ИСПРАВЛЕНИЕ БАГА #3: обновляем craftModule
                 if (window.craftModule) {
                     const stats = JSON.parse(this.game.get_statistics());
                     window.craftModule.syncFromStats(stats);
@@ -166,7 +185,7 @@ export const designModule = {
                     }
                 }
                 
-                // ИСПРАВЛЕНИЕ БАГ #3: обновляем fleetModule (на случай если корабли уже есть)
+                // ИСПРАВЛЕНИЕ БАГА #3: обновляем fleetModule (на случай если корабли уже есть)
                 if (window.fleetModule && window._refreshFleetWithMissions) {
                     window._refreshFleetWithMissions();
                 }
@@ -195,7 +214,6 @@ export const designModule = {
                 const result = this.handleDesignClick(blueprintId);
                 if (this.game && result.success) {
                     this.computationalPower = this.game.get_computational_power();
-                    // ИСПРАВЛЕНИЕ: обновляем вкладку крафта после успешной разработки
                     if (window.updateCraftTab) window.updateCraftTab();
                 }
                 this.refreshUI(container);
@@ -285,3 +303,5 @@ export const designModule = {
         return html;
     }
 };
+
+export default designModule;

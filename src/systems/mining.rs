@@ -111,7 +111,7 @@ impl MiningSystem {
         let crit_module_bonus = state.upgrades.crit_level as f64 * 0.02;
         let consciousness_crit_bonus = bonuses.crit_bonus;
         
-        // БАЛАНС #2: расчёт критического шанса с потолком 25%
+        // ИСПРАВЛЕНО: расчёт критического шанса с потолком 25%
         let mut critical_chance = (self.config.critical_chance 
             + crit_module_bonus 
             + consciousness_crit_bonus) 

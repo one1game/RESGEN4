@@ -1,10 +1,13 @@
-// ========== multiplayer_combat.js (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ - БАГ #4 ДВОЙНОЙ ЛУТ, БАГ #6 ФИЛЬТРАЦИЯ) ==========
+// ========== multiplayer_combat.js (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ - БАГ #4 ДВОЙНОЙ ЛУТ, БАГ #6 ФИЛЬТРАЦИЯ, БАГ #11 ДЕДУПЛИКАЦИЯ) ==========
 
 import { supabase } from './supabase.js';
 import { fleetModule } from './fleet.js';
 
 // БАГ #4: флаг для предотвращения двойной обработки
 let isProcessingMissions = false;
+
+// БАГ #11: Set для дедупликации обработанных миссий
+const _processedMissions = new Set();
 
 // Конфиг кораблей (время в СЕКУНДАХ для точности)
 const SHIP_CONFIG = {
@@ -102,7 +105,12 @@ export async function sendShip(attackerId, targetId, shipType) {
 
     fleetModule.setShipMissionStatus(ship.id, true, mission.id, mission);
 
-    // БАГ #9: уведомление атакующему
+    if (window.fleetModule) {
+        window.fleetModule._addFleetLog(
+            `🚀 ${cfg.icon} ${ship.name} отправлен (прибытие: ${new Date(arrivesAt).toLocaleTimeString()})`
+        );
+    }
+
     await pushNotification(attackerId, 'mission_sent', {
         message: `🚀 Миссия отправлена (${cfg.icon} ${cfg.label}), прибытие через ${Math.round(flightMinutes)} мин`,
         payload: { mission_id: mission.id, ship_type: shipType, arrives_at: arrivesAt.toISOString() }
@@ -116,9 +124,8 @@ export async function sendShip(attackerId, targetId, shipType) {
     return { success: true, mission, ship };
 }
 
-// ─── Обработка прибытия (БАГ #4: защита от двойного вызова) ─────────────────────────────────
+// ─── Обработка прибытия (БАГ #4: защита от двойного вызова, БАГ #11: дедупликация) ─────────────────────────────────
 export async function processArrivedMissions(currentUserId) {
-    // БАГ #4: предотвращаем двойную обработку
     if (isProcessingMissions) {
         console.log("⏭️ processArrivedMissions уже выполняется, пропускаем");
         return;
@@ -141,11 +148,21 @@ export async function processArrivedMissions(currentUserId) {
         console.log(`📥 Найдено входящих миссий для обработки: ${arrived?.length || 0}`);
 
         for (const mission of arrived ?? []) {
+            // БАГ #11: проверка на уже обработанную миссию
+            if (_processedMissions.has(mission.id)) {
+                console.log(`⏭️ Миссия ${mission.id} уже обработана, пропускаем`);
+                continue;
+            }
+            
             console.log(`📦 Обработка входящей миссии ${mission.id}, тип=${mission.ship_type}`);
             
             if (mission.ship_type === 'scout')  await _processScout(mission);
             if (mission.ship_type === 'combat') await _processCombat(mission);
             if (mission.ship_type === 'cargo')  await _processCargo(mission);
+            
+            _processedMissions.add(mission.id);
+            // Очищаем Set через час чтобы не накапливать
+            setTimeout(() => _processedMissions.delete(mission.id), 3600000);
         }
 
         const { data: returning, error: err2 } = await supabase
@@ -160,6 +177,11 @@ export async function processArrivedMissions(currentUserId) {
         console.log(`📤 Найдено возвращающихся миссий: ${returning?.length || 0}`);
 
         for (const mission of returning ?? []) {
+            if (_processedMissions.has(mission.id)) {
+                console.log(`⏭️ Миссия ${mission.id} уже обработана, пропускаем`);
+                continue;
+            }
+            
             console.log(`🏁 Завершение миссии ${mission.id}, статус=${mission.status}`);
             
             if (mission.fleet_ship_id) {
@@ -170,6 +192,9 @@ export async function processArrivedMissions(currentUserId) {
                 status: 'done',
                 completed_at: now.toISOString()
             }).eq('id', mission.id);
+            
+            _processedMissions.add(mission.id);
+            setTimeout(() => _processedMissions.delete(mission.id), 3600000);
 
             if (typeof window.showNotif === 'function') {
                 const cfg = SHIP_CONFIG[mission.ship_type];
@@ -394,7 +419,7 @@ export async function getTargetPlayers(currentUserId) {
         .from('game_saves')
         .select('user_id, ore, coal, chips, plasma, total_mined, neuro_evolution, last_seen')
         .neq('user_id', currentUserId)
-        .gte('last_seen', sevenDaysAgo)  // БАГ #6: только игроки, заходившие за последние 7 дней
+        .gte('last_seen', sevenDaysAgo)
         .order('total_mined', { ascending: false })
         .limit(50);
 

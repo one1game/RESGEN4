@@ -170,6 +170,21 @@ export class CoreGame {
     /**
      * @returns {string}
      */
+    get_active_planet_missions() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.coregame_get_active_planet_missions(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {string}
+     */
     get_blueprint_status() {
         let deferred1_0;
         let deferred1_1;
@@ -202,6 +217,21 @@ export class CoreGame {
     get_neuro_evolution() {
         const ret = wasm.coregame_get_neuro_evolution(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * @returns {string}
+     */
+    get_planets() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.coregame_get_planets(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * @param {string} resource
@@ -297,6 +327,21 @@ export class CoreGame {
     repair_systems() {
         wasm.coregame_repair_systems(this.__wbg_ptr);
     }
+    /**
+     * @returns {string}
+     */
+    research_planet() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.coregame_research_planet(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
     reset_progress() {
         wasm.coregame_reset_progress(this.__wbg_ptr);
     }
@@ -310,6 +355,27 @@ export class CoreGame {
         const ptr0 = passStringToWasm0(resource, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         wasm.coregame_sell_resource(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * @param {string} ship_id
+     * @param {string} planet_id
+     * @returns {string}
+     */
+    send_ship_to_planet(ship_id, planet_id) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(ship_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(planet_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.coregame_send_ship_to_planet(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+            deferred3_0 = ret[0];
+            deferred3_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
     }
     /**
      * @param {number} bonus
@@ -419,8 +485,17 @@ export function start_game() {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_boolean_get_2304fb8c853028c8: function(arg0) {
+            const v = arg0;
+            const ret = typeof(v) === 'boolean' ? v : undefined;
+            return isLikeNone(ret) ? 0xFFFFFF : ret ? 1 : 0;
+        },
         __wbg___wbindgen_is_function_5cd60d5cf78b4eef: function(arg0) {
             const ret = typeof(arg0) === 'function';
+            return ret;
+        },
+        __wbg___wbindgen_is_null_2042690d351e14f0: function(arg0) {
+            const ret = arg0 === null;
             return ret;
         },
         __wbg___wbindgen_is_object_b4593df85baada48: function(arg0) {
@@ -436,11 +511,27 @@ function __wbg_get_imports() {
             const ret = arg0 === undefined;
             return ret;
         },
+        __wbg___wbindgen_string_get_d109740c0d18f4d7: function(arg0, arg1) {
+            const obj = arg1;
+            const ret = typeof(obj) === 'string' ? obj : undefined;
+            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            var len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+        },
         __wbg___wbindgen_throw_9c31b086c2b26051: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
         __wbg_appendChild_6e88800a9a8fb360: function() { return handleError(function (arg0, arg1) {
             const ret = arg0.appendChild(arg1);
+            return ret;
+        }, arguments); },
+        __wbg_call_13665d9f14390edc: function() { return handleError(function (arg0, arg1) {
+            const ret = arg0.call(arg1);
+            return ret;
+        }, arguments); },
+        __wbg_call_93d90490983b7e17: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
+            const ret = arg0.call(arg1, arg2, arg3, arg4, arg5);
             return ret;
         }, arguments); },
         __wbg_call_dfde26266607c996: function() { return handleError(function (arg0, arg1, arg2) {
@@ -487,6 +578,9 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbg_getRandomValues_c44a50d8cfdaebeb: function() { return handleError(function (arg0, arg1) {
             arg0.getRandomValues(arg1);
+        }, arguments); },
+        __wbg_getRandomValues_ef12552bf5acd2fe: function() { return handleError(function (arg0, arg1) {
+            globalThis.crypto.getRandomValues(getArrayU8FromWasm0(arg0, arg1));
         }, arguments); },
         __wbg_get_dcf82ab8aad1a593: function() { return handleError(function (arg0, arg1) {
             const ret = Reflect.get(arg0, arg1);
@@ -634,12 +728,17 @@ function __wbg_get_imports() {
         __wbg_warn_c4e0780980765a86: function(arg0) {
             console.warn(arg0);
         },
-        __wbindgen_cast_0000000000000001: function(arg0, arg1) {
+        __wbindgen_cast_0000000000000001: function(arg0) {
+            // Cast intrinsic for `F64 -> Externref`.
+            const ret = arg0;
+            return ret;
+        },
+        __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
             const ret = getArrayU8FromWasm0(arg0, arg1);
             return ret;
         },
-        __wbindgen_cast_0000000000000002: function(arg0, arg1) {
+        __wbindgen_cast_0000000000000003: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
             return ret;

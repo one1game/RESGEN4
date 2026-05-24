@@ -1,3 +1,4 @@
+<!-- index.html (ИСПРАВЛЕНА: добавлен контейнер для зума и кнопки) -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -199,6 +200,11 @@
             background: rgba(255,170,68,0.1);
             border-radius: 4px;
             text-align: center;
+        }
+        
+        #space-players-list {
+            max-height: 200px;
+            overflow-y: auto;
         }
     </style>
 </head>
@@ -681,7 +687,7 @@
                 </div>
             </div>
             
-            <!-- ВКЛАДКА КАРТА -->
+            <!-- ВКЛАДКА КАРТА (ИСПРАВЛЕНА: добавлен viewport для зума и кнопки) -->
             <div class="tab-content" id="space-tab">
                 <div class="panel">
                     <div class="panel-title">
@@ -690,7 +696,6 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content" style="padding:0;">
-
                         <!-- Ресурсы и статус -->
                         <div id="space-status-bar" style="display:flex;gap:12px;padding:10px 12px;background:rgba(0,0,0,0.3);flex-wrap:wrap;">
                             <div style="font-size:11px;opacity:0.7;">
@@ -701,24 +706,54 @@
                             <div style="font-size:11px;opacity:0.7;">🚀 <span id="space-ships-count">0</span> кораблей</div>
                         </div>
 
-                        <!-- Звёздная карта -->
+                        <!-- Звёздная карта с поддержкой зума -->
                         <div class="star-map" id="space-star-map" style="
                             position: relative;
                             width: 100%;
                             height: 55vw;
                             min-height: 260px;
                             max-height: 400px;
+                            overflow: hidden;
+                            touch-action: none;
+                            cursor: grab;
                         ">
-                            <div id="space-stars-layer"></div>
-                            <div id="space-objects-layer">
-                                <div style="
-                                    position:absolute;left:50%;top:50%;
-                                    transform:translate(-50%,-50%);
-                                    text-align:center;cursor:pointer;
-                                " id="space-base-planet">
-                                    <span style="font-size:28px;">🏠</span>
-                                    <div style="font-size:9px;color:#4aff9d;margin-top:2px;">БАЗА</div>
+                            <div id="space-map-viewport" style="
+                                position: absolute;
+                                width: 100%;
+                                height: 100%;
+                                transform-origin: 0 0;
+                                transform: scale(1) translate(0px, 0px);
+                                transition: none;
+                            ">
+                                <div id="space-stars-layer"></div>
+                                <div id="space-objects-layer">
+                                    <div style="
+                                        position:absolute;left:50%;top:50%;
+                                        transform:translate(-50%,-50%);
+                                        text-align:center;cursor:pointer;
+                                    " id="space-base-planet">
+                                        <span style="font-size:28px;">🏠</span>
+                                        <div style="font-size:9px;color:#4aff9d;margin-top:2px;">БАЗА</div>
+                                    </div>
                                 </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Кнопки зума -->
+                        <div style="position:relative;margin-top:-36px;margin-bottom:8px;padding-right:12px;display:flex;justify-content:flex-end;">
+                            <div style="display:flex;gap:4px;">
+                                <button id="map-zoom-in" style="
+                                    width:32px;height:32px;background:rgba(0,0,0,0.7);
+                                    border:1px solid rgba(74,255,157,0.4);border-radius:6px;
+                                    color:#4aff9d;font-size:18px;cursor:pointer;line-height:1;">+</button>
+                                <button id="map-zoom-reset" style="
+                                    width:32px;height:24px;background:rgba(0,0,0,0.7);
+                                    border:1px solid rgba(255,255,255,0.2);border-radius:6px;
+                                    color:#888;font-size:9px;cursor:pointer;">1:1</button>
+                                <button id="map-zoom-out" style="
+                                    width:32px;height:32px;background:rgba(0,0,0,0.7);
+                                    border:1px solid rgba(74,255,157,0.4);border-radius:6px;
+                                    color:#4aff9d;font-size:18px;cursor:pointer;line-height:1;">−</button>
                             </div>
                         </div>
 
@@ -733,12 +768,11 @@
                             ">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
                         </div>
 
-                        <!-- Список игроков онлайн -->
+                        <!-- Список игроков онлайн (увеличен лимит и добавлен скролл) -->
                         <div style="padding:0 12px 12px;">
                             <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
-                            <div id="space-players-list"></div>
+                            <div id="space-players-list" style="max-height:200px;overflow-y:auto;"></div>
                         </div>
-
                     </div>
                 </div>
             </div>

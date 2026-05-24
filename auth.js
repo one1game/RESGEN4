@@ -1,5 +1,6 @@
 // auth.js
 // Модуль авторизации - регистрация, вход, выход
+// ИСПРАВЛЕНА ВЕРСИЯ: исправлен двойной вызов onLogin и upsert для профиля
 
 import { supabase } from './supabase.js';
 
@@ -16,10 +17,14 @@ export async function register(email, password, username) {
         if (error) throw error;
 
         if (data.user) {
+            // ИСПРАВЛЕНО: upsert вместо update
             const { error: updateError } = await supabase
                 .from('profiles')
-                .update({ username: username })
-                .eq('id', data.user.id);
+                .upsert({ 
+                    id: data.user.id, 
+                    username: username,
+                    created_at: new Date().toISOString()
+                }, { onConflict: 'id' });
             
             if (updateError) console.warn("Не удалось обновить username:", updateError);
         }
@@ -82,23 +87,31 @@ export async function getCurrentUser() {
     }
 }
 
+// ИСПРАВЛЕНО: исправлен двойной вызов onLogin
 export function initAuth(onLogin, onLogout) {
-    let initialSessionHandled = false;
+    let loginHandled = false;
     
     supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'INITIAL_SESSION') {
-            if (initialSessionHandled) return;
-            initialSessionHandled = true;
-        }
-        
-        if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
             if (session?.user) {
+                loginHandled = true;
                 onLogin(session.user);
             } else {
                 onLogout();
             }
+            return; // Выходим, не обрабатываем дальше
+        }
+        
+        if (event === 'SIGNED_IN') {
+            if (loginHandled) {
+                loginHandled = false; // Сбрасываем флаг для следующих входов
+                return; // Пропускаем дублирующий вызов после INITIAL_SESSION
+            }
+            if (session?.user) {
+                onLogin(session.user);
+            }
         } else if (event === 'SIGNED_OUT') {
-            initialSessionHandled = false;
+            loginHandled = false;
             onLogout();
         }
     });

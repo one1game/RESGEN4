@@ -1,4 +1,6 @@
-// ========== space-module.js (ИСПРАВЛЕНА - БАГИ #3, #4, #5, #7) ==========
+// space-module.js (ИСПРАВЛЕНА: добавлен зум карты, немедленное сохранение планет, улучшено распределение игроков)
+
+// ========== space-module.js (ПОЛНАЯ ВЕРСИЯ С ПЛАНЕТАРНЫМИ МИССИЯМИ) ==========
 
 import { supabase } from './supabase.js';
 
@@ -16,7 +18,8 @@ export const spaceModule = {
     
     _playerPositions: {},
     _currentPopup: null,
-    _flightLineInterval: null, // БАГ #7: интервал для анимации линий
+    _flightLineInterval: null,
+    _missionCheckInterval: null,  // БАГ #5: интервал для проверки завершения миссий
 
     PLANET_TYPES: {
         'earth':   { icon: '🌍', name: 'Землеподобная',  color: '#4aff9d' },
@@ -36,33 +39,256 @@ export const spaceModule = {
         this.currentUser = user;
         this._playerPositions = {};
 
-        // ========== БАГ #4: зафиксировать позицию текущего игрока ==========
         if (user?.id) {
             this._playerPositions[user.id] = { x: 50, y: 50 };
         }
 
-        this.loadPlanets().then(() => this.renderPlanets());
+        this.loadPlanetsFromRust();
         this.generateStars();
+        
         this.setupMultiplayer();
         this.initialized = true;
+        
+        // Инициализация зума карты
+        this.initMapZoom();
 
-        console.log('🌌 Space module инициализирован');
+        // БАГ #5: запускаем интервал для проверки завершения миссий (каждые 2 секунды)
+        this._startMissionCheckInterval();
+
+        console.log('🌌 Space модуль инициализирован');
+    },
+
+    // БАГ #5: интервал для принудительного завершения миссий
+    _startMissionCheckInterval() {
+        if (this._missionCheckInterval) clearInterval(this._missionCheckInterval);
+        
+        this._missionCheckInterval = setInterval(() => {
+            if (!this.game) return;
+            
+            try {
+                const missionsJson = this.game.get_active_planet_missions();
+                const missions = JSON.parse(missionsJson);
+                let needsRefresh = false;
+                let needsFleetSave = false;
+                
+                const now = Date.now();
+                
+                for (const mission of missions) {
+                    // Если миссия должна была завершиться (remaining_ms <= 0)
+                    const remaining = mission.remaining_ms;
+                    if (remaining <= 0 && mission.status === 'flying') {
+                        console.log(`✅ Принудительное завершение миссии ${mission.id}`);
+                        
+                        // Освобождаем корабль во fleetModule
+                        if (window.fleetModule) {
+                            const ship = window.fleetModule.ships.find(s => s.id === mission.ship_id);
+                            if (ship && ship.onMission) {
+                                ship.onMission = false;
+                                ship.currentMissionId = null;
+                                ship.targetPlanetId = null;
+                                ship.missionReturnsAt = null;
+                                ship.missionArrivesAt = null;
+                                needsFleetSave = true;
+                                needsRefresh = true;
+                                console.log(`🆓 Корабль ${ship.name} освобождён (миссия завершена)`);
+                            }
+                        }
+                        
+                        // Обновляем планеты из Rust
+                        this.loadPlanetsFromRust();
+                        
+                        // Обновляем UI флота
+                        if (window._refreshFleetWithMissions) {
+                            window._refreshFleetWithMissions();
+                        }
+                    }
+                }
+                
+                if (needsFleetSave && window.fleetModule) {
+                    window.fleetModule.saveFleet();
+                }
+                
+                if (needsRefresh && window.fleetModule?._renderFleetTab) {
+                    window.fleetModule._renderFleetTab();
+                }
+                
+                this.renderFlightLines();
+                
+            } catch(e) {
+                console.warn('Ошибка в missionCheckInterval:', e);
+            }
+        }, 2000);
+    },
+
+    // ========== ЗУМИРОВАНИЕ КАРТЫ ==========
+    initMapZoom() {
+        const starMap = document.getElementById('space-star-map');
+        const viewport = document.getElementById('space-map-viewport');
+        if (!starMap || !viewport) return;
+
+        let scale = 1;
+        let translateX = 0;
+        let translateY = 0;
+        let isDragging = false;
+        let lastX = 0, lastY = 0;
+        let lastPinchDist = null;
+
+        const MIN_SCALE = 0.5;
+        const MAX_SCALE = 3.0;
+        const ZOOM_STEP = 0.25;
+        const MAP_WIDTH = 2000;
+        const MAP_HEIGHT = 2000;
+
+        const applyTransform = () => {
+            viewport.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+            viewport.style.transformOrigin = '0 0';
+        };
+
+        const clampTranslate = () => {
+            const mapW = starMap.clientWidth;
+            const mapH = starMap.clientHeight;
+            const scaledW = mapW * scale;
+            const scaledH = mapH * scale;
+            const maxX = Math.max(0, scaledW - mapW);
+            const maxY = Math.max(0, scaledH - mapH);
+            translateX = Math.max(-maxX, Math.min(0, translateX));
+            translateY = Math.max(-maxY, Math.min(0, translateY));
+        };
+
+        starMap.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = starMap.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+            const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale + delta));
+            if (newScale === scale) return;
+            translateX = mouseX - (mouseX - translateX) * (newScale / scale);
+            translateY = mouseY - (mouseY - translateY) * (newScale / scale);
+            scale = newScale;
+            clampTranslate();
+            applyTransform();
+        }, { passive: false });
+
+        starMap.addEventListener('mousedown', (e) => {
+            if (e.target.closest('.space-planet, .other-player-marker, #space-base-planet, button')) return;
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            starMap.style.cursor = 'grabbing';
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            translateX += e.clientX - lastX;
+            translateY += e.clientY - lastY;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            clampTranslate();
+            applyTransform();
+        });
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+            starMap.style.cursor = 'grab';
+        });
+
+        starMap.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                lastPinchDist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+            } else if (e.touches.length === 1) {
+                if (e.target.closest('.space-planet, .other-player-marker, #space-base-planet, button')) return;
+                isDragging = true;
+                lastX = e.touches[0].clientX;
+                lastY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        starMap.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2 && lastPinchDist !== null) {
+                e.preventDefault();
+                const dist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                const ratio = dist / lastPinchDist;
+                const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * ratio));
+                const rect = starMap.getBoundingClientRect();
+                const midX = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
+                const midY = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
+                translateX = midX - (midX - translateX) * (newScale / scale);
+                translateY = midY - (midY - translateY) * (newScale / scale);
+                scale = newScale;
+                lastPinchDist = dist;
+                clampTranslate();
+                applyTransform();
+            } else if (e.touches.length === 1 && isDragging) {
+                translateX += e.touches[0].clientX - lastX;
+                translateY += e.touches[0].clientY - lastY;
+                lastX = e.touches[0].clientX;
+                lastY = e.touches[0].clientY;
+                clampTranslate();
+                applyTransform();
+            }
+        }, { passive: false });
+
+        starMap.addEventListener('touchend', () => {
+            isDragging = false;
+            lastPinchDist = null;
+        });
+
+        document.getElementById('map-zoom-in')?.addEventListener('click', () => {
+            const rect = starMap.getBoundingClientRect();
+            const cx = rect.width / 2, cy = rect.height / 2;
+            const newScale = Math.min(MAX_SCALE, scale + ZOOM_STEP);
+            translateX = cx - (cx - translateX) * (newScale / scale);
+            translateY = cy - (cy - translateY) * (newScale / scale);
+            scale = newScale;
+            clampTranslate();
+            applyTransform();
+        });
+        document.getElementById('map-zoom-out')?.addEventListener('click', () => {
+            const rect = starMap.getBoundingClientRect();
+            const cx = rect.width / 2, cy = rect.height / 2;
+            const newScale = Math.max(MIN_SCALE, scale - ZOOM_STEP);
+            translateX = cx - (cx - translateX) * (newScale / scale);
+            translateY = cy - (cy - translateY) * (newScale / scale);
+            scale = newScale;
+            clampTranslate();
+            applyTransform();
+        });
+        document.getElementById('map-zoom-reset')?.addEventListener('click', () => {
+            scale = 1;
+            const rect = starMap.getBoundingClientRect();
+            translateX = rect.width / 2 - (MAP_WIDTH * scale) / 2;
+            translateY = rect.height / 2 - (MAP_HEIGHT * scale) / 2;
+            clampTranslate();
+            applyTransform();
+        });
     },
 
     onTabActivated() {
         if (!this.initialized) return;
         this.isTabActive = true;
-        this.syncFromGame();
+        
+        this.loadPlanetsFromRust();
         this.renderPlanets();
         this.renderPlayers();
-        this.renderFlightLines();  // ЛИНИИ ПОЛЁТА
+        this.renderFlightLines();
         this.updateStatusBar();
-        window.dispatchEvent(new CustomEvent('updateLastSeen'));
+        
+        this.syncFromGame();
+
+        const researchBtn = document.getElementById('space-research-btn');
+        if (researchBtn && !researchBtn._handlerSet) {
+            researchBtn._handlerSet = true;
+            researchBtn.onclick = () => this.startResearch();
+        }
     },
 
     onTabDeactivated() {
         this.isTabActive = false;
-        // БАГ #7: очищаем интервал анимации при уходе с вкладки
         if (this._flightLineInterval) {
             clearInterval(this._flightLineInterval);
             this._flightLineInterval = null;
@@ -93,10 +319,14 @@ export const spaceModule = {
 
         let ships = [];
         try {
-            const fleetKey = this.currentUser?.id 
-                ? `corebox_fleet_${this.currentUser.id}` 
-                : 'corebox_fleet';
-            ships = JSON.parse(localStorage.getItem(fleetKey) ?? '[]');
+            if (window.fleetModule && window.fleetModule.ships.length > 0) {
+                ships = window.fleetModule.ships;
+            } else {
+                const fleetKey = this.currentUser?.id 
+                    ? `corebox_fleet_${this.currentUser.id}` 
+                    : 'corebox_fleet';
+                ships = JSON.parse(localStorage.getItem(fleetKey) ?? '[]');
+            }
         } catch(e) {}
 
         const el = id => document.getElementById(id);
@@ -108,39 +338,44 @@ export const spaceModule = {
 
         const btn = document.getElementById('space-research-btn');
         if (btn) {
-            btn.style.opacity = power >= 100 ? '1' : '0.5';
-            btn.style.color   = power >= 100 ? '#4aff9d' : '#ff6a6a';
+            const canResearch = power >= 100 && !this.isResearching && this.planets.length < 3;
+            btn.style.opacity = canResearch ? '1' : '0.5';
+            btn.style.color   = canResearch ? '#4aff9d' : '#ff6a6a';
+            btn.style.cursor  = canResearch ? 'pointer' : 'not-allowed';
+            btn.title = canResearch
+                ? 'Исследовать новую планету'
+                : power < 100
+                    ? `Нужно 100 мощности (сейчас ${power})`
+                    : this.planets.length >= 3
+                        ? 'Максимум 3 планеты исследовано'
+                        : 'Уже исследуется...';
         }
     },
 
-    // ========== СИСТЕМА ПЛАНЕТ ==========
+    // ========== ЗАГРУЗКА ПЛАНЕТ ИЗ RUST ==========
     
-    async loadPlanets() {
+    loadPlanetsFromRust() {
+        if (!this.game) return;
         try {
-            const { data, error } = await supabase
-                .from('planets')
-                .select('*')
-                .order('discovered_at', { ascending: true });
-            if (error) throw error;
-            this.planets = data || [];
-            console.log(`🌍 Загружено ${this.planets.length} планет из БД`);
+            const planetsJson = this.game.get_planets();
+            this.planets = JSON.parse(planetsJson);
+            this.renderPlanets();
+            console.log(`🌍 Загружено ${this.planets.length} планет из Rust`);
         } catch(e) {
-            console.warn('Ошибка загрузки планет:', e);
+            console.warn('Ошибка загрузки планет из Rust:', e);
             this.planets = [];
         }
     },
 
-    savePlanets() {
-        // Планеты теперь в Supabase, localStorage не используем
-    },
-
+    // ========== ИССЛЕДОВАНИЕ ПЛАНЕТЫ ==========
+    
     async startResearch() {
         if (this.isResearching) return;
 
-        await this.loadPlanets();
+        this.loadPlanetsFromRust();
 
         if (this.planets.length >= 3) {
-            window.showNotif?.('🌌 Уже исследовано максимум 3 планеты. Отправьте корабль — вывезите ресурсы!', true);
+            window.showNotif?.('🌌 Уже исследовано максимум 3 планеты', true);
             return;
         }
 
@@ -150,13 +385,29 @@ export const spaceModule = {
             return;
         }
 
-        this.game.subtract_power(100);
         this.isResearching = true;
         const btn = document.getElementById('space-research-btn');
         if (btn) { btn.textContent = '⏳ ИССЛЕДОВАНИЕ...'; btn.disabled = true; }
 
         setTimeout(async () => {
-            await this.addPlanet();
+            const resultJson = this.game.research_planet();
+            const result = JSON.parse(resultJson);
+            
+            if (result.success) {
+                this.planets.push(result.planet);
+                this.renderPlanets();
+                window.showNotif?.(`🪐 Открыта планета ${result.planet.name}!`, false);
+                
+                if (this.game && typeof this.game.save_current_state === 'function') {
+                    this.game.save_current_state();
+                }
+                if (typeof window.cloudSaveNow === 'function') {
+                    window.cloudSaveNow(true);
+                }
+            } else {
+                window.showNotif?.(`❌ ${result.error}`, true);
+            }
+            
             this.isResearching = false;
             if (btn) {
                 btn.textContent = '🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)';
@@ -166,52 +417,6 @@ export const spaceModule = {
         }, 1500);
     },
 
-    async addPlanet() {
-        if (this.planets.length >= 3) {
-            window.showNotif?.('🌌 Карта заполнена (максимум 3 планеты)', true);
-            return;
-        }
-
-        const types = Object.keys(this.PLANET_TYPES);
-        const type  = types[Math.floor(Math.random() * types.length)];
-        const cfg   = this.PLANET_TYPES[type];
-        const name  = this.PLANET_NAMES[Math.floor(Math.random() * this.PLANET_NAMES.length)];
-
-        const angle = Math.random() * Math.PI * 2;
-        const r     = 15 + Math.random() * 25;
-        const x     = 50 + Math.cos(angle) * r;
-        const y     = 50 + Math.sin(angle) * r;
-
-        const totalResources = 300 + Math.floor(Math.random() * 300);
-        const coalPart   = Math.floor(Math.random() * totalResources * 0.5);
-        const plasmaPart = Math.floor(Math.random() * (totalResources - coalPart) * 0.6);
-        const orePart    = totalResources - coalPart - plasmaPart;
-
-        const resources = { coal: coalPart, plasma: plasmaPart, ore: orePart };
-
-        try {
-            const { data, error } = await supabase
-                .from('planets')
-                .insert({
-                    name, type, x, y,
-                    discovered_by: this.currentUser.id,
-                    resources: { ...resources },
-                    resources_remaining: { ...resources }
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-
-            this.planets.push(data);
-            this.renderPlanets();
-            window.showNotif?.(`🪐 Открыта планета ${name} (${cfg.name})! Ресурсы: 🪨${coalPart} ⚡${plasmaPart} ⛏️${orePart}`, false);
-        } catch(e) {
-            console.error('Ошибка сохранения планеты:', e);
-            window.showNotif?.('❌ Ошибка исследования', true);
-        }
-    },
-
     renderPlanets() {
         const layer = document.getElementById('space-objects-layer');
         if (!layer) return;
@@ -219,17 +424,23 @@ export const spaceModule = {
         layer.querySelectorAll('.space-planet').forEach(el => el.remove());
 
         this.planets.forEach(planet => {
-            const cfg = this.PLANET_TYPES[planet.type] ?? this.PLANET_TYPES['earth'];
+            const cfg = this.PLANET_TYPES[planet.planet_type] ?? this.PLANET_TYPES['earth'];
+            const totalRemaining = (planet.resources_remaining?.coal || 0) + 
+                                   (planet.resources_remaining?.plasma || 0) + 
+                                   (planet.resources_remaining?.ore || 0);
+            
             const el = document.createElement('div');
             el.className = 'space-planet';
             el.style.cssText = `
                 position:absolute;left:${planet.x}%;top:${planet.y}%;
                 transform:translate(-50%,-50%);text-align:center;cursor:pointer;
                 z-index:5;
+                ${totalRemaining === 0 ? 'opacity:0.6;filter:grayscale(0.5);' : ''}
             `;
             el.innerHTML = `
                 <span style="font-size:22px;">${cfg.icon}</span>
-                <div style="font-size:9px;color:${cfg.color};margin-top:2px;">${planet.name}</div>
+                <div style="font-size:9px;color:${cfg.color};margin-top:2px;">${this.escapeHtml(planet.name)}</div>
+                ${totalRemaining === 0 ? '<div style="font-size:7px;color:#f88;">ИСЧЕРПАНА</div>' : ''}
             `;
             el.onclick = () => this.showPlanetInfo(planet);
             layer.appendChild(el);
@@ -237,17 +448,29 @@ export const spaceModule = {
     },
 
     showPlanetInfo(planet) {
-        const cfg = this.PLANET_TYPES[planet.type] ?? {};
+        const cfg = this.PLANET_TYPES[planet.planet_type] ?? {};
         const rem = planet.resources_remaining || planet.resources || {};
-        const totalRem = (rem.coal||0) + (rem.plasma||0) + (rem.ore||0);
+        const totalRem = (rem.coal || 0) + (rem.plasma || 0) + (rem.ore || 0);
+        const isExhausted = totalRem === 0;
 
         if (this._currentPopup) { this._currentPopup.remove(); this._currentPopup = null; }
+
+        let hasFreeCargo = false;
+        try {
+            if (window.fleetModule) {
+                hasFreeCargo = window.fleetModule.ships.some(s => s.type === 'cargo' && !s.onMission && !s.onDefense);
+            } else {
+                const fleetKey = this.currentUser?.id ? `corebox_fleet_${this.currentUser.id}` : 'corebox_fleet';
+                const fleet = JSON.parse(localStorage.getItem(fleetKey) || '[]');
+                hasFreeCargo = fleet.some(s => s.type === 'cargo' && !s.onMission);
+            }
+        } catch(e) {}
 
         const popup = document.createElement('div');
         popup.className = 'player-popup';
         popup.style.cssText = `
             position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-            background:#0a0a0a;border:2px solid ${cfg.color || '#4aff9d'};
+            background:#0a0a0a;border:2px solid ${isExhausted ? '#f88' : (cfg.color || '#4aff9d')};
             border-radius:16px;padding:20px;z-index:10001;
             font-family:monospace;min-width:280px;max-width:90vw;
             box-shadow:0 0 30px rgba(74,255,157,0.2);
@@ -255,20 +478,20 @@ export const spaceModule = {
         popup.innerHTML = `
             <div style="font-size:28px;text-align:center;">${cfg.icon || '🪐'}</div>
             <div style="font-size:16px;font-weight:bold;color:${cfg.color};text-align:center;margin-bottom:8px;">
-                ${this.escapeHtml(planet.name)} — ${cfg.name || planet.type}
+                ${this.escapeHtml(planet.name)} — ${cfg.name || planet.planet_type}
             </div>
             <div style="font-size:11px;margin-bottom:12px;background:rgba(255,255,255,0.05);padding:8px;border-radius:8px;">
-                <div>🪨 Уголь: <b>${rem.coal||0}</b></div>
-                <div>⚡ Плазма: <b>${rem.plasma||0}</b></div>
-                <div>⛏️ Руда: <b>${rem.ore||0}</b></div>
-                ${totalRem === 0 ? '<div style="color:#f88;margin-top:4px;">⚠️ Ресурсы исчерпаны</div>' : ''}
+                <div>🪨 Уголь: <b>${rem.coal || 0}</b></div>
+                <div>⚡ Плазма: <b>${rem.plasma || 0}</b></div>
+                <div>⛏️ Руда: <b>${rem.ore || 0}</b></div>
+                ${isExhausted ? '<div style="color:#f88;margin-top:4px;">⚠️ Ресурсы исчерпаны</div>' : ''}
             </div>
             <button id="planet-btn-cargo" style="width:100%;padding:10px;background:rgba(255,170,0,0.15);
                 border:1px solid rgba(255,170,0,0.4);border-radius:8px;color:#ffaa44;
                 font-family:monospace;font-size:12px;cursor:pointer;margin-bottom:8px;
-                ${totalRem === 0 ? 'opacity:0.4;cursor:not-allowed;' : ''}"
-                ${totalRem === 0 ? 'disabled' : ''}>
-                📦 ОТПРАВИТЬ ГРУЗОВОЙ КОРАБЛЬ (100 ед.)
+                ${isExhausted || !hasFreeCargo ? 'opacity:0.4;cursor:not-allowed;' : ''}"
+                ${isExhausted || !hasFreeCargo ? 'disabled' : ''}>
+                📦 ОТПРАВИТЬ ГРУЗОВОЙ КОРАБЛЬ (100 ед.)${!hasFreeCargo && !isExhausted ? '<br><small style="font-size:9px;">Нет свободного корабля</small>' : ''}
             </button>
             <button id="planet-btn-close" style="width:100%;padding:8px;background:transparent;
                 border:1px solid #555;border-radius:8px;color:#aaa;cursor:pointer;font-family:monospace;font-size:11px;">
@@ -281,7 +504,7 @@ export const spaceModule = {
 
         popup.querySelector('#planet-btn-cargo').onclick = async (e) => {
             e.stopPropagation();
-            if (totalRem === 0) return;
+            if (isExhausted) return;
             await this.sendShipToPlanet(planet, 'cargo');
             popup.remove(); this._currentPopup = null;
         };
@@ -295,144 +518,171 @@ export const spaceModule = {
         setTimeout(() => document.addEventListener('click', closeOnOutside), 100);
     },
 
+    // ========== ОТПРАВКА КОРАБЛЯ (БАГ #2, #4 - ИСПРАВЛЕНО) ==========
+    
     async sendShipToPlanet(planet, shipType) {
-        let fleet = [];
-        try {
-            const fleetKey = this.currentUser?.id ? `corebox_fleet_${this.currentUser.id}` : 'corebox_fleet';
-            fleet = JSON.parse(localStorage.getItem(fleetKey) || '[]');
-        } catch(e) {}
-
-        const availableShip = fleet.find(s => s.type === shipType && !s.onMission);
+        // БАГ #2: работаем с fleetModule.ships напрямую
+        if (!window.fleetModule || !window.fleetModule.ships) {
+            window.showNotif?.('❌ Система флота не инициализирована', true);
+            return;
+        }
+        
+        const availableShip = window.fleetModule.ships.find(s => s.type === shipType && !s.onMission && !s.onDefense);
         if (!availableShip) {
             window.showNotif?.('❌ Нет свободного грузового корабля', true);
             return;
         }
 
-        const cargoCapacity = 100;
-        const travelTimeSec = 60 + Math.floor(Math.random() * 60);
-        const now = new Date();
-        const arrivesAt  = new Date(now.getTime() + travelTimeSec * 1000);
-        const returnsAt  = new Date(arrivesAt.getTime() + travelTimeSec * 1000);
-
-        try {
-            const { data: mission, error } = await supabase
-                .from('planet_missions')
-                .insert({
-                    planet_id: planet.id,
-                    user_id: this.currentUser.id,
-                    ship_type: shipType,
-                    cargo_capacity: cargoCapacity,
-                    arrives_at: arrivesAt.toISOString(),
-                    returns_at: returnsAt.toISOString(),
-                    status: 'flying'
-                })
-                .select()
-                .single();
-
-            if (error) throw error;
-
-            availableShip.onMission = true;
-            availableShip.missionId = mission.id;
-            const fleetKey = this.currentUser?.id ? `corebox_fleet_${this.currentUser.id}` : 'corebox_fleet';
-            localStorage.setItem(fleetKey, JSON.stringify(fleet));
-
-            window.showNotif?.(`🚀 Грузовой корабль летит к ${planet.name}! Прибытие через ${travelTimeSec} сек.`, false);
-            if (window.addToLog) window.addToLog(`📦 Грузовой отправлен к планете ${planet.name} (ёмкость: ${cargoCapacity})`);
-
-            setTimeout(() => this._processPlanetMissionArrival(mission.id, planet, availableShip), travelTimeSec * 1000 + 500);
-
-        } catch(e) {
-            console.error('Ошибка отправки корабля к планете:', e);
-            window.showNotif?.('❌ Ошибка отправки корабля', true);
+        // Вызываем Rust метод
+        const resultJson = this.game.send_ship_to_planet(availableShip.id, planet.id);
+        const result = JSON.parse(resultJson);
+        
+        if (result.success) {
+            // БАГ #2: обновляем fleetModule.ships напрямую
+            const ship = window.fleetModule.ships.find(s => s.id === availableShip.id);
+            if (ship) {
+                ship.onMission = true;
+                ship.currentMissionId = result.mission.id;
+                ship.targetPlanetId = planet.id;
+                ship.missionReturnsAt = result.mission.returns_at;
+                ship.missionArrivesAt = result.mission.arrives_at;
+                ship.shipType = shipType;
+            }
+            
+            // Сохраняем флот
+            window.fleetModule.saveFleet();
+            
+            // БАГ #4: НЕ вычитаем ресурсы вручную, просто перезагружаем планеты из Rust (там уже всё вычтено)
+            this.loadPlanetsFromRust();
+            
+            if (window._refreshFleetWithMissions) {
+                window._refreshFleetWithMissions();
+            }
+            
+            window.showNotif?.(`🚀 Корабль отправлен к ${planet.name}! Забрано: 🪨${result.mission.coal} ⚡${result.mission.plasma} ⛏️${result.mission.ore}`, false);
+        } else {
+            window.showNotif?.(`❌ ${result.error}`, true);
         }
     },
 
-    async _processPlanetMissionArrival(missionId, planet, ship) {
+    // ========== МЕТОД ДЛЯ ОБНОВЛЕНИЯ СТАТУСА КОРАБЛЯ ИЗ RUST ==========
+    
+    setShipMissionStatusFromRust(shipId, onMission, missionId, returnsAt) {
         try {
-            const { data: loot, error } = await supabase.rpc('claim_planet_resources', {
-                p_planet_id: planet.id,
-                p_capacity: ship.cargoCapacity || 100
-            });
-
-            if (error) {
-                console.error('RPC ошибка:', error);
-                const { data: freshPlanet } = await supabase
-                    .from('planets')
-                    .select('resources_remaining')
-                    .eq('id', planet.id)
-                    .single();
-
-                const rem = freshPlanet?.resources_remaining || { coal: 0, plasma: 0, ore: 0 };
-                let capacity = ship.cargoCapacity || 100;
-                let lootManual = {};
+            const fleetKey = this.currentUser?.id ? `corebox_fleet_${this.currentUser.id}` : 'corebox_fleet';
+            let fleet = JSON.parse(localStorage.getItem(fleetKey) || '[]');
+            
+            const ship = fleet.find(s => s.id === shipId);
+            if (ship) {
+                ship.onMission = onMission;
+                ship.currentMissionId = missionId;
+                if (returnsAt) ship.missionReturnsAt = returnsAt;
+                if (!onMission) {
+                    ship.targetPlanetId = null;
+                    ship.currentMissionId = null;
+                }
+                localStorage.setItem(fleetKey, JSON.stringify(fleet));
                 
-                for (const res of ['coal', 'plasma', 'ore']) {
-                    if ((rem[res]||0) > 0 && capacity > 0) {
-                        const take = Math.min(rem[res], capacity);
-                        lootManual[res] = take;
-                        capacity -= take;
+                if (window._refreshFleetWithMissions) window._refreshFleetWithMissions();
+                
+                this.loadPlanetsFromRust();
+            }
+        } catch(e) {
+            console.warn('Ошибка обновления статуса корабля из Rust:', e);
+        }
+    },
+
+    // ========== ОБНОВЛЕНИЕ МИССИЙ (БАГ #5 - ИСПРАВЛЕНО) ==========
+    
+    updateMissionTimers() {
+        if (!this.game) return;
+        try {
+            const missionsJson = this.game.get_active_planet_missions();
+            const missions = JSON.parse(missionsJson);
+            let needsRefresh = false;
+            let needsFleetSave = false;
+            
+            const now = Date.now();
+            
+            for (const mission of missions) {
+                const remaining = mission.remaining_ms;
+                
+                // БАГ #5: принудительно завершаем миссию при remaining <= 0
+                if (remaining <= 0 && mission.status === 'flying') {
+                    console.log(`✅ Планетарная миссия ${mission.id} завершена, освобождаем корабль`);
+                    
+                    const ship = window.fleetModule?.ships.find(s => s.id === mission.ship_id);
+                    if (ship && ship.onMission) {
+                        ship.onMission = false;
+                        ship.currentMissionId = null;
+                        ship.targetPlanetId = null;
+                        ship.missionReturnsAt = null;
+                        ship.missionArrivesAt = null;
+                        needsFleetSave = true;
+                        needsRefresh = true;
+                        
+                        console.log(`🆓 Корабль ${ship.name} освобождён (миссия завершена)`);
                     }
-                }
-
-                const newRem = {
-                    coal:   Math.max(0, (rem.coal||0)   - (lootManual.coal||0)),
-                    plasma: Math.max(0, (rem.plasma||0) - (lootManual.plasma||0)),
-                    ore:    Math.max(0, (rem.ore||0)    - (lootManual.ore||0)),
-                };
-
-                await supabase
-                    .from('planets')
-                    .update({ resources_remaining: newRem })
-                    .eq('id', planet.id);
-
-                if ((newRem.coal + newRem.plasma + newRem.ore) === 0) {
-                    await supabase.from('planets').delete().eq('id', planet.id);
-                    if (window.addToLog) window.addToLog(`🪐 Планета ${planet.name} полностью исчерпана и исчезла с карты`);
-                }
-
-                if (Object.keys(lootManual).length > 0) {
-                    for (const [res, amt] of Object.entries(lootManual)) {
-                        if (amt > 0 && window.game) window.game.add_resource(res, amt);
+                    
+                    this.loadPlanetsFromRust();
+                    
+                    if (window._refreshFleetWithMissions) {
+                        window._refreshFleetWithMissions();
                     }
-                    const lootText = Object.entries(lootManual)
-                        .filter(([,a]) => a > 0)
-                        .map(([r,a]) => `+${a} ${r}`)
-                        .join(', ');
-                    if (window.addToLog) window.addToLog(`📦 Грузовой вернулся с планеты ${planet.name}: ${lootText}`);
-                }
-            } else {
-                if (loot && Object.keys(loot).length > 0) {
-                    for (const [res, amt] of Object.entries(loot)) {
-                        if (amt > 0 && window.game) window.game.add_resource(res, amt);
+                } else if (remaining <= 30000 && remaining > 0 && mission.status === 'flying') {
+                    if (!mission._warningShown) {
+                        mission._warningShown = true;
+                        const ship = window.fleetModule?.ships.find(s => s.id === mission.ship_id);
+                        if (ship) {
+                            window.showNotif?.(`⚠️ Корабль "${ship.name}" возвращается через ${Math.floor(remaining / 1000)} сек`, false);
+                        }
                     }
-                    const lootText = Object.entries(loot)
-                        .filter(([,a]) => a > 0)
-                        .map(([r,a]) => `+${a} ${r}`)
-                        .join(', ');
-                    if (window.addToLog) window.addToLog(`📦 Грузовой вернулся с планеты ${planet.name}: ${lootText}`);
-                } else {
-                    if (window.addToLog) window.addToLog(`📦 Грузовой прибыл к планете ${planet.name} — ресурсы уже вывезены`);
                 }
             }
-
-            await supabase
-                .from('planet_missions')
-                .update({ status: 'done', completed_at: new Date().toISOString() })
-                .eq('id', missionId);
-
-            try {
-                const fleetKey = this.currentUser?.id ? `corebox_fleet_${this.currentUser.id}` : 'corebox_fleet';
-                const fleet = JSON.parse(localStorage.getItem(fleetKey) || '[]');
-                const s = fleet.find(x => x.id === ship.id);
-                if (s) { s.onMission = false; s.missionId = null; }
-                localStorage.setItem(fleetKey, JSON.stringify(fleet));
-            } catch(e) {}
-
-            await this.loadPlanets();
-            this.renderPlanets();
-
+            
+            if (needsFleetSave && window.fleetModule) {
+                window.fleetModule.saveFleet();
+            }
+            
+            if (needsRefresh && window.fleetModule?._renderFleetTab) {
+                window.fleetModule._renderFleetTab();
+            }
+            
+            this.renderFlightLines();
         } catch(e) {
-            console.error('Ошибка обработки прилёта к планете:', e);
+            console.warn('Ошибка обновления таймеров миссий:', e);
+        }
+    },
+
+    // ========== ВОССТАНОВЛЕНИЕ ПЛАНЕТАРНЫХ МИССИЙ (БАГ #3 - ИСПРАВЛЕНО) ==========
+    
+    _restorePlanetMissions() {
+        if (!this.game || !window.fleetModule) return;
+        try {
+            const missionsJson = this.game.get_active_planet_missions();
+            const missions = JSON.parse(missionsJson);
+            let restored = 0;
+            
+            missions.forEach(mission => {
+                const ship = window.fleetModule.ships.find(s => s.id === mission.ship_id);
+                if (ship && mission.status === 'flying') {
+                    ship.onMission = true;
+                    ship.currentMissionId = mission.id;
+                    ship.targetPlanetId = mission.planet_id;
+                    ship.missionReturnsAt = mission.returns_at;
+                    ship.missionArrivesAt = mission.arrives_at;
+                    ship.shipType = 'cargo';
+                    restored++;
+                }
+            });
+            
+            if (restored > 0) {
+                window.fleetModule.saveFleet();
+                window.fleetModule._renderFleetTab?.();
+                console.log(`🪐 Восстановлено ${restored} планетарных миссий`);
+            }
+        } catch(e) {
+            console.warn('Ошибка восстановления планетарных миссий:', e);
         }
     },
 
@@ -462,13 +712,10 @@ export const spaceModule = {
         if (this.multiplayerInterval) clearInterval(this.multiplayerInterval);
         this.multiplayerInterval = setInterval(() => this.loadMultiplayerPlayers(), 30000);
         
-        if (this.planetsChannel) supabase.removeChannel(this.planetsChannel);
-        this.planetsChannel = supabase
-            .channel('planets-updates')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'planets' }, () => {
-                this.loadPlanets().then(() => this.renderPlanets());
-            })
-            .subscribe();
+        setInterval(() => this.updateMissionTimers(), 1000);
+        
+        // БАГ #3: восстанавливаем планетарные миссии
+        setTimeout(() => this._restorePlanetMissions(), 2000);
     },
 
     async _forceLoadPlayers() {
@@ -495,7 +742,6 @@ export const spaceModule = {
 
             this.renderPlayers();
             this.renderPlayersOnMap();
-            // ========== БАГ #5: добавляем вызов renderFlightLines ==========
             this.renderFlightLines();
         } catch(e) {
             console.warn('Ошибка первоначальной загрузки игроков:', e);
@@ -552,7 +798,7 @@ export const spaceModule = {
             return;
         }
 
-        list.innerHTML = [...online, ...offline].slice(0, 10).map(p => `
+        list.innerHTML = [...online, ...offline].slice(0, 30).map(p => `
             <div style="
                 display:flex;align-items:center;gap:8px;padding:6px 0;
                 border-bottom:1px solid rgba(255,255,255,0.05);
@@ -578,40 +824,55 @@ export const spaceModule = {
         if (!layer) return;
         layer.querySelectorAll('.other-player-marker').forEach(el => el.remove());
 
-        this.otherPlayers.slice(0, 15).forEach((player, i) => {
+        const getTimeAgo = (isoString) => {
+            if (!isoString) return 'давно';
+            const diff = Date.now() - new Date(isoString).getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 60) return `${mins} мин назад`;
+            const hours = Math.floor(mins / 60);
+            if (hours < 24) return `${hours} ч назад`;
+            return `${Math.floor(hours / 24)} дн назад`;
+        };
+
+        this.otherPlayers.slice(0, 20).forEach((player, index) => {
             if (!this._playerPositions[player.user_id]) {
-                const hash = this._hashString(player.user_id);
-                const angle = (hash % 360) * Math.PI / 180;
-                const r = 30 + (hash % 20);
+                const goldenAngle = 2.399963;
+                const angle = index * goldenAngle;
+                const r = 18 + (index % 5) * 8;
                 this._playerPositions[player.user_id] = {
-                    x: 50 + Math.cos(angle) * r,
-                    y: 50 + Math.sin(angle) * r
+                    x: Math.max(8, Math.min(92, 50 + Math.cos(angle) * r)),
+                    y: Math.max(8, Math.min(92, 50 + Math.sin(angle) * r))
                 };
             }
             const { x, y } = this._playerPositions[player.user_id];
             
-            const el = document.createElement('div');
-            el.className = 'other-player-marker';
-            el.style.cssText = `
+            const marker = document.createElement('div');
+            marker.className = 'other-player-marker';
+            marker.style.cssText = `
                 position:absolute;left:${x}%;top:${y}%;
                 transform:translate(-50%,-50%);text-align:center;cursor:pointer;
                 z-index:15;
             `;
             const isOnline = this.isOnline(player);
-            el.innerHTML = `
+            
+            marker.title = `${player.username || 'Игрок'}\n` +
+                `🛡️ Защита: ${player.has_defense_ship ? `Да (ур. ${player.defense_ship_level})` : 'Нет'}\n` +
+                `⏱️ Последний онлайн: ${getTimeAgo(player.last_seen)}`;
+            
+            marker.innerHTML = `
                 <span style="font-size:18px;">🏰</span>
                 <div style="font-size:8px;color:${isOnline ? '#4aff9d' : '#888'};margin-top:1px;">
                     ${this.escapeHtml(player.username?.slice(0,10) ?? 'Игрок')}
                 </div>
             `;
-            el.onclick = () => this.showPlayerInfo(player.user_id);
-            layer.appendChild(el);
+            marker.onclick = () => this.showPlayerInfo(player.user_id);
+            layer.appendChild(marker);
         });
         
         this.renderFlightLines();
     },
     
-    // ========== ЛИНИИ ПОЛЁТА (БАГ #3 И БАГ #7) ==========
+    // ========== ЛИНИИ ПОЛЁТА ==========
     
     renderFlightLines() {
         const layer = document.getElementById('space-objects-layer');
@@ -622,77 +883,53 @@ export const spaceModule = {
         const myPos = this._getMyPlanetPosition();
         if (!myPos) return;
 
-        // ========== БАГ #3: получаем актуальные миссии через fleetModule ==========
-        if (window.fleetModule?.refreshActivePvpMissions) {
-            window.fleetModule.refreshActivePvpMissions();
+        let activeMissions = [];
+        if (this.game) {
+            try {
+                const missionsJson = this.game.get_active_planet_missions();
+                activeMissions = JSON.parse(missionsJson);
+            } catch(e) {}
         }
-        const missions = window.fleetModule?.activePvpMissions || [];
-
-        missions.forEach(mission => {
-            const targetPos = this._getPlayerPosition(mission.targetUserId);
-            if (!targetPos) return;
-
+        
+        const now = Date.now();
+        
+        activeMissions.forEach(mission => {
+            const targetPlanet = this.planets.find(p => p.id === mission.planet_id);
+            if (!targetPlanet) return;
+            
+            const targetPos = { x: targetPlanet.x, y: targetPlanet.y };
             const dx = targetPos.x - myPos.x;
             const dy = targetPos.y - myPos.y;
             const length = Math.sqrt(dx * dx + dy * dy);
             const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-
-            const color = mission.phase === 'scout'  ? '#4a9eff'
-                        : mission.phase === 'combat' ? '#ff4a4a'
-                        : '#ffaa44';
+            const color = '#ffaa44';
+            
+            const progress = now < mission.returns_at 
+                ? Math.min(1.0, Math.max(0, (now - (mission.returns_at - mission.arrives_at)) / (mission.arrives_at - (mission.returns_at - mission.arrives_at))))
+                : 0.9;
+            const shipPosX = myPos.x + dx * progress;
+            const shipPosY = myPos.y + dy * progress;
 
             const line = document.createElement('div');
             line.className = 'flight-line';
             line.style.cssText = `
-                position: absolute;
-                left: ${myPos.x}%;
-                top: ${myPos.y}%;
-                width: ${length}%;
-                height: 2px;
+                position: absolute; left: ${myPos.x}%; top: ${myPos.y}%;
+                width: ${length}%; height: 2px;
                 background: linear-gradient(90deg, ${color}, transparent);
-                transform-origin: 0 50%;
-                transform: rotate(${angle}deg);
-                opacity: 0.7;
-                pointer-events: none;
-                z-index: 2;
+                transform-origin: 0 50%; transform: rotate(${angle}deg);
+                opacity: 0.7; pointer-events: none; z-index: 2;
             `;
-
-            const shipIcon = mission.phase === 'scout'  ? '🔭'
-                           : mission.phase === 'combat' ? '⚔️'
-                           : '📦';
-            
-            const progress = mission.status === 'flying' ? '→' : '←';
-            
-            let shipPosX = myPos.x + dx * 0.5;
-            let shipPosY = myPos.y + dy * 0.5;
-            
-            if (mission.status === 'returning') {
-                shipPosX = targetPos.x + dx * 0.25;
-                shipPosY = targetPos.y + dy * 0.25;
-            } else if (mission.status === 'arrived') {
-                shipPosX = targetPos.x;
-                shipPosY = targetPos.y;
-            }
             
             const shipEl = document.createElement('div');
             shipEl.className = 'flight-ship-icon';
-            shipEl.style.cssText = `
-                position: absolute;
-                left: ${shipPosX}%;
-                top: ${shipPosY}%;
-                transform: translate(-50%, -50%);
-                font-size: 14px;
-                z-index: 10;
-                text-shadow: 0 0 3px black;
-            `;
-            shipEl.textContent = `${shipIcon}${progress}`;
-
+            shipEl.style.cssText = `position:absolute;left:${shipPosX}%;top:${shipPosY}%;transform:translate(-50%,-50%);font-size:14px;z-index:10;text-shadow:0 0 3px black;`;
+            shipEl.textContent = `📦${now < mission.returns_at ? '→' : '←'}`;
+            
             layer.appendChild(line);
             layer.appendChild(shipEl);
         });
 
-        // ========== БАГ #7: запускаем интервал анимации если есть миссии ==========
-        if (missions.length > 0 && !this._flightLineInterval && this.isTabActive) {
+        if (activeMissions.length > 0 && !this._flightLineInterval && this.isTabActive) {
             this._flightLineInterval = setInterval(() => {
                 if (this.isTabActive) {
                     this.renderFlightLines();
@@ -701,7 +938,7 @@ export const spaceModule = {
                     this._flightLineInterval = null;
                 }
             }, 2000);
-        } else if (missions.length === 0 && this._flightLineInterval) {
+        } else if (activeMissions.length === 0 && this._flightLineInterval) {
             clearInterval(this._flightLineInterval);
             this._flightLineInterval = null;
         }
@@ -907,10 +1144,13 @@ export const spaceModule = {
             this._currentPopup.remove();
             this._currentPopup = null;
         }
-        // БАГ #7: очищаем интервал анимации при уничтожении модуля
         if (this._flightLineInterval) {
             clearInterval(this._flightLineInterval);
             this._flightLineInterval = null;
+        }
+        if (this._missionCheckInterval) {
+            clearInterval(this._missionCheckInterval);
+            this._missionCheckInterval = null;
         }
     },
 
@@ -922,3 +1162,5 @@ export const spaceModule = {
 };
 
 window.spaceModule = spaceModule;
+window.spaceModule.setShipMissionStatusFromRust = spaceModule.setShipMissionStatusFromRust.bind(spaceModule);
+window.spaceModule.loadPlanetsFromRust = spaceModule.loadPlanetsFromRust.bind(spaceModule);

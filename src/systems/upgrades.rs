@@ -136,6 +136,7 @@ impl UpgradeSystem {
         
         let cost = (lvl + 1) * 2 + 4;
         
+        // ИСПРАВЛЕНО: проверяем все 5 ресурсов
         let inv = &state.inventory;
         if inv.coal >= cost && inv.ore >= cost && inv.chips >= cost 
             && inv.plasma >= cost && inv.trash >= cost {

@@ -94,43 +94,87 @@ export const craftModule = {
         return (this.resources[recipe.cost.type] || 0) >= this.getEffectiveCost(recipe);
     },
     
+    // БАГ #2 ИСПРАВЛЕНИЕ: убираем дублирование кораблей
     executeCraft(recipeId) {
         const recipe = this.recipes.find(r => r.id === recipeId);
         if (!recipe) return { success: false, error: 'Рецепт не найден' };
         if (!this.canCraft(recipe)) return { success: false, error: 'Недостаточно ресурсов или чертежа' };
         
+        // БАГ #2: защита от двойного клика
+        if (this._isProcessing) {
+            return { success: false, error: 'Уже выполняется крафт...' };
+        }
+        this._isProcessing = true;
+        
         try {
             if (typeof this.game[recipe.action] !== 'function') {
+                this._isProcessing = false;
                 return { success: false, error: `Системная ошибка: метод ${recipe.action} не найден` };
             }
             
             const result = this.game[recipe.action]();
             if (result === 'success') {
                 setTimeout(() => {
+                    // БАГ #2 ИСПРАВЛЕНИЕ: Rust уже добавил корабль, не вызываем addShip()
+                    // Только сохраняем флот и обновляем UI
                     if (window.fleetModule && recipe.result?.type === 'ship') {
-                        window.fleetModule.addShip(recipe.result.subtype);
+                        // Загружаем актуальное состояние флота из Rust через sync
+                        try {
+                            const statsJson = this.game.get_statistics();
+                            if (statsJson) {
+                                const stats = JSON.parse(statsJson);
+                                // Если в Rust есть массив fleet, синхронизируем его
+                                if (stats.fleet && Array.isArray(stats.fleet) && stats.fleet.length > 0) {
+                                    window.fleetModule.ships = stats.fleet;
+                                }
+                            }
+                        } catch(e) {}
+                        
+                        // Сохраняем флот
+                        window.fleetModule.saveFleet();
+                        
+                        // БАГ #1 ИСПРАВЛЕНИЕ: немедленное облачное сохранение
+                        if (window.cloudSaveNow) {
+                            window.cloudSaveNow(true);
+                        }
                     }
                     if (window._refreshFleetWithMissions) {
                         window._refreshFleetWithMissions();
                     }
+                    this._isProcessing = false;
                 }, 100);
                 return { success: true, message: `✅ Создан ${recipe.result.icon} ${recipe.name}`, recipe };
             }
+            this._isProcessing = false;
             return { success: false, error: `Ошибка крафта: ${result}` };
         } catch(e) { 
+            this._isProcessing = false;
+            console.error('Ошибка крафта:', e);
             return { success: false, error: 'Системная ошибка' }; 
         }
     },
     
     setupEventListeners(container) {
         if (!container) return;
-        container.onclick = null;
-        container.onclick = (e) => {
+        
+        // БАГ #2: удаляем старый обработчик и добавляем новый с защитой от двойного клика
+        if (container._clickHandler) {
+            container.removeEventListener('click', container._clickHandler);
+        }
+        
+        container._clickHandler = (e) => {
             const btn = e.target.closest('.craft-btn:not(.disabled)');
             if (!btn) return;
+            
+            // БАГ #2: дополнительная защита от двойного клика
+            if (btn.disabled || btn.classList.contains('processing')) return;
+            
             const recipeId = btn.dataset.recipe;
             if (!recipeId) return;
+            
+            btn.disabled = true;
             btn.classList.add('processing');
+            const originalText = btn.innerHTML;
             btn.innerHTML = '⏳...';
             
             setTimeout(() => {
@@ -142,10 +186,15 @@ export const craftModule = {
                         if (window.updateDesignTab) window.updateDesignTab();
                     }
                 } catch(e) {} finally {
+                    btn.disabled = false;
+                    btn.classList.remove('processing');
+                    btn.innerHTML = originalText;
                     this.refreshUI(container);
                 }
-            }, 300);
+            }, 500);
         };
+        
+        container.addEventListener('click', container._clickHandler);
         return container;
     },
     
