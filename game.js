@@ -2640,56 +2640,8 @@ async function initializeGame(existingSave = null) {
         fleetModule.init(game, currentUser?.id);
         
         if (currentUser) {
-    // Небольшая задержка для гарантии готовности Supabase
-    setTimeout(async () => {
-        try {
-            const { checkSupabaseConnection } = await import('./supabase.js');
-            const isConnected = await checkSupabaseConnection();
-            
-            if (!isConnected) {
-                console.warn('⚠️ Supabase не доступен, realtime уведомления отключены');
-                return;
-            }
-            
-            const channel = supabase.channel(`pvp-combat-log-${currentUser.id}`);
-            
-            // Добавляем обработчики ДО subscribe
-            channel.on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'pvp_combat_log',
-                    filter: `player_id=eq.${currentUser.id}`,
-                },
-                (payload) => {
-                    const log = payload.new;
-                    if (log.log_type === 'incoming_attack') {
-                        Sounds.rebelAttack?.();
-                        window.showNotif?.(`⚠️ ${log.message}`, true);
-                    } else if (log.log_type === 'incoming_scout') {
-                        window.showNotif?.(`🔭 ${log.message}`, false);
-                    }
-                    if (fleetModule?._renderCommandCenter) {
-                        fleetModule._renderCommandCenter();
-                    }
-                }
-            );
-            
-            // Подписываемся
-            channel.subscribe((status) => {
-                if (status === 'SUBSCRIBED') {
-                    console.log('✅ Подписан на pvp_combat_log');
-                } else if (status === 'CHANNEL_ERROR') {
-                    console.warn('⚠️ Ошибка подписки на pvp_combat_log');
-                } else if (status === 'TIMED_OUT') {
-                    console.warn('⏱️ Таймаут подписки на pvp_combat_log');
-                }
-            });
-        } catch (e) {
-            console.warn('Не удалось настроить realtime для pvp_combat_log:', e);
-        }
-    }, 1500); // Задержка 1.5 секунды
+    // PvP уведомления обрабатываются в multiplayer_combat.js
+    console.log('ℹ️ Мультиплеер инициализирован');
 }
         
         designModule.updateComputationalPower(game.get_computational_power());
