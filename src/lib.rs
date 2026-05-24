@@ -1,4 +1,4 @@
-// src/lib.rs (ИСПРАВЛЕН: исправлены вызовы economy, убран QuestProgress, исправлен last_attack_time)
+// src/lib.rs (ИСПРАВЛЕН: добавлена защита от рекурсивных вызовов get_statistics)
 
 #![recursion_limit = "256"]
 
@@ -18,6 +18,7 @@ use crate::systems::neuro_ecosystem::NeuroEcosystem;
 use crate::web::GameUI;
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
+use std::cell::Cell;
 use serde_json;
 use uuid::Uuid;
 use rand::Rng;
@@ -52,6 +53,10 @@ pub struct CoreGame {
     neuro_ecosystem: NeuroEcosystem,
     ui: GameUI,
     last_save_time: u64,
+    // Защита от рекурсивных вызовов
+    in_get_statistics: Cell<bool>,
+    cached_statistics: Cell<String>,
+    statistics_dirty: Cell<bool>,
 }
 
 #[wasm_bindgen]
@@ -309,6 +314,8 @@ impl CoreGame {
         }
         let _ = self.ui.render(&self.state);
         self.force_save_throttled();
+        // После изменения состояния помечаем статистику как грязную
+        self.statistics_dirty.set(true);
     }
     
     fn load(&mut self) {
@@ -346,6 +353,7 @@ impl CoreGame {
                 }
             }
         }
+        self.statistics_dirty.set(true);
     }
     
     fn update_config(&mut self, new_config: GameConfig) {
@@ -372,6 +380,7 @@ impl CoreGame {
         }
         *CONFIG.lock().unwrap() = new_config;
         let _ = self.ui.render(&self.state);
+        self.statistics_dirty.set(true);
     }
     
     fn add_manual_click_internal(&mut self) -> Vec<GameEvent> {
@@ -429,12 +438,10 @@ impl CoreGame {
     }
     
     fn buy_resource_internal(&mut self, r: &str) -> Vec<GameEvent> {
-        // ИСПРАВЛЕНО: добавлен amount = 1
         self.economy_system.buy_resource(&mut self.state, r, 1)
     }
     
     fn sell_resource_internal(&mut self, r: &str) -> Vec<GameEvent> {
-        // ИСПРАВЛЕНО: добавлен amount = 1
         self.economy_system.sell_resource(&mut self.state, r, 1)
     }
     
@@ -592,6 +599,9 @@ impl CoreGame {
             neuro_ecosystem: NeuroEcosystem::new(),
             ui: GameUI::new(),
             last_save_time: 0,
+            in_get_statistics: Cell::new(false),
+            cached_statistics: Cell::new(String::new()),
+            statistics_dirty: Cell::new(true),
         }
     }
 
@@ -599,6 +609,7 @@ impl CoreGame {
         self.load();
         let _ = self.ui.render(&self.state);
         self.force_save();
+        self.statistics_dirty.set(true);
     }
 
     #[wasm_bindgen]
@@ -668,6 +679,7 @@ impl CoreGame {
                 }
                 
                 self.force_save();
+                self.statistics_dirty.set(true);
                 Ok(())
             }
             Err(e) => Err(JsValue::from_str(&format!("Ошибка: {}", e)))
@@ -682,6 +694,7 @@ impl CoreGame {
     #[wasm_bindgen]
     pub fn set_max_power(&mut self, max: u32) {
         self.state.max_computational_power = max;
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -720,6 +733,7 @@ impl CoreGame {
         let events = self.add_manual_click_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -727,6 +741,7 @@ impl CoreGame {
         let events = self.start_auto_clicking_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -734,6 +749,7 @@ impl CoreGame {
         let events = self.stop_auto_clicking_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -750,6 +766,7 @@ impl CoreGame {
         let events = self.toggle_coal_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -757,6 +774,7 @@ impl CoreGame {
         let events = self.upgrade_mining_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -764,6 +782,7 @@ impl CoreGame {
         let events = self.activate_defense_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -771,6 +790,7 @@ impl CoreGame {
         let events = self.upgrade_defense_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -778,6 +798,7 @@ impl CoreGame {
         let events = self.upgrade_system.upgrade_crit_module(&mut self.state);
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -785,6 +806,7 @@ impl CoreGame {
         let events = self.upgrade_system.upgrade_cooling_module(&mut self.state);
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -792,6 +814,7 @@ impl CoreGame {
         let events = self.buy_resource_internal(&resource);
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -799,6 +822,7 @@ impl CoreGame {
         let events = self.sell_resource_internal(&resource);
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -806,6 +830,7 @@ impl CoreGame {
         let events = self.buy_rebel_protection_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -813,6 +838,7 @@ impl CoreGame {
         let events = self.toggle_rebel_protection_internal();
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -820,13 +846,39 @@ impl CoreGame {
         let config = Self::load_config_from_storage();
         self.update_config(config);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
     pub fn clear_log(&self) { self.ui.clear_log(); }
 
+    // ИСПРАВЛЕНО: get_statistics с защитой от рекурсии и кэшированием
     #[wasm_bindgen]
     pub fn get_statistics(&self) -> String {
+        // Защита от рекурсивных вызовов
+        if self.in_get_statistics.get() {
+            // Возвращаем последний кэш или пустой объект
+            let cached = self.cached_statistics.take();
+            if !cached.is_empty() {
+                self.cached_statistics.set(cached.clone());
+                return cached;
+            }
+            return "{}".to_string();
+        }
+        
+        self.in_get_statistics.set(true);
+        
+        // Если статистика не грязная и есть кэш - возвращаем кэш
+        if !self.statistics_dirty.get() {
+            let cached = self.cached_statistics.take();
+            if !cached.is_empty() {
+                self.cached_statistics.set(cached.clone());
+                self.in_get_statistics.set(false);
+                return cached;
+            }
+        }
+        
+        // Генерируем свежую статистику
         let blueprints = format!(r#"{{"cargo":{},"scout":{},"combat":{}}}"#,
             self.state.blueprint_cargo_unlocked,
             self.state.blueprint_scout_unlocked,
@@ -838,7 +890,7 @@ impl CoreGame {
         let planets_json = serde_json::to_string(&self.state.planets).unwrap_or_else(|_| "[]".to_string());
         let missions_json = serde_json::to_string(&self.state.active_planet_missions).unwrap_or_else(|_| "[]".to_string());
         
-        format!(r#"{{"total_clicks":{},"nights_survived":{},"rebel_attacks_count":{},"attacks_defended":{},"coal_mined":{},"trash_mined":{},"plasma_mined":{},"ore_mined":{},"ore_inventory":{},"chips_inventory":{},"plasma_inventory":{},"coal_inventory":{},"trash_inventory":{},"neuro_evolution":{},"neuro_consciousness":{},"neuro_score":{},"current_ai_mode":"{}","is_day":{},"coal_enabled":{},"game_time":{},"turbine_heat":{},"turbine_upgrade_level":{},"computational_power":{},"max_computational_power":{},"mining_level":{},"defense_active":{},"defense_level":{},"crit_level":{},"cooling_level":{},"power_tier":{},"prestige_level":{},"blueprint_cargo_unlocked":{},"blueprint_scout_unlocked":{},"blueprint_combat_unlocked":{},"blueprints_unlocked":{},"ai_research_bonus":{},"planets":{},"active_planet_missions":{}}}"#,
+        let result = format!(r#"{{"total_clicks":{},"nights_survived":{},"rebel_attacks_count":{},"attacks_defended":{},"coal_mined":{},"trash_mined":{},"plasma_mined":{},"ore_mined":{},"ore_inventory":{},"chips_inventory":{},"plasma_inventory":{},"coal_inventory":{},"trash_inventory":{},"neuro_evolution":{},"neuro_consciousness":{},"neuro_score":{},"current_ai_mode":"{}","is_day":{},"coal_enabled":{},"game_time":{},"turbine_heat":{},"turbine_upgrade_level":{},"computational_power":{},"max_computational_power":{},"mining_level":{},"defense_active":{},"defense_level":{},"crit_level":{},"cooling_level":{},"power_tier":{},"prestige_level":{},"blueprint_cargo_unlocked":{},"blueprint_scout_unlocked":{},"blueprint_combat_unlocked":{},"blueprints_unlocked":{},"ai_research_bonus":{},"planets":{},"active_planet_missions":{}}}"#,
             self.state.manual_clicks,
             self.state.nights_survived,
             self.state.rebel_attacks_count,
@@ -877,7 +929,14 @@ impl CoreGame {
             ai_research_bonus,
             planets_json,
             missions_json
-        )
+        );
+        
+        // Сохраняем в кэш
+        self.cached_statistics.set(result.clone());
+        self.statistics_dirty.set(false);
+        self.in_get_statistics.set(false);
+        
+        result
     }
     
     // ========== КРАФТ ==========
@@ -889,6 +948,7 @@ impl CoreGame {
             self.state.inventory.chips += 1;
             self.log_to_js("⚙️ Крафт: создан 1 чип из 100 руды!");
             self.force_save_throttled();
+            self.statistics_dirty.set(true);
             "success".to_string()
         } else { "error".to_string() }
     }
@@ -901,6 +961,7 @@ impl CoreGame {
             self.state.total_plasma_mined += 1;
             self.log_to_js("⚡ Крафт: создана плазма из 50 угля!");
             self.force_save_throttled();
+            self.statistics_dirty.set(true);
             "success".to_string()
         } else { "error".to_string() }
     }
@@ -924,6 +985,7 @@ impl CoreGame {
             }
             self.log_to_js(&format!("📐 Создан чертеж {} корабля!", ship_type));
             self.force_save_throttled();
+            self.statistics_dirty.set(true);
             "success".to_string()
         } else { 
             "error".to_string() 
@@ -936,6 +998,7 @@ impl CoreGame {
         if result == "success" {
             self.add_ship_to_fleet("cargo");
         }
+        self.statistics_dirty.set(true);
         result
     }
     
@@ -945,6 +1008,7 @@ impl CoreGame {
         if result == "success" {
             self.add_ship_to_fleet("scout");
         }
+        self.statistics_dirty.set(true);
         result
     }
     
@@ -954,6 +1018,7 @@ impl CoreGame {
         if result == "success" {
             self.add_ship_to_fleet("combat");
         }
+        self.statistics_dirty.set(true);
         result
     }
     
@@ -1030,6 +1095,7 @@ impl CoreGame {
         self.state.blueprint_scout_unlocked = scout;
         self.state.blueprint_combat_unlocked = combat;
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     // ========== ФЛОТ ==========
@@ -1041,6 +1107,7 @@ impl CoreGame {
             self.state.inventory.chips -= chips_cost;
             self.log_to_js(&format!("🔧 Флот отремонтирован (-{} руды, -{} чипов)", ore_cost, chips_cost));
             self.force_save_throttled();
+            self.statistics_dirty.set(true);
             true
         } else { false }
     }
@@ -1053,15 +1120,22 @@ impl CoreGame {
             self.state.inventory.plasma -= plasma;
             self.log_to_js(&format!("⬆️ Корабль улучшен (-{} руды, -{} чипов, -{} плазмы)", ore, chips, plasma));
             self.force_save_throttled();
+            self.statistics_dirty.set(true);
             true
         } else { false }
     }
     
     #[wasm_bindgen]
-    pub fn set_fleet_defense_bonus(&mut self, bonus: u32) { self.state.temporary_defense_bonus = bonus; }
+    pub fn set_fleet_defense_bonus(&mut self, bonus: u32) { 
+        self.state.temporary_defense_bonus = bonus;
+        self.statistics_dirty.set(true);
+    }
     
     #[wasm_bindgen]
-    pub fn set_fleet_cargo_bonus(&mut self, bonus: u32) { self.state.temporary_mining_bonus = self.state.temporary_mining_bonus.max(bonus); }
+    pub fn set_fleet_cargo_bonus(&mut self, bonus: u32) { 
+        self.state.temporary_mining_bonus = self.state.temporary_mining_bonus.max(bonus);
+        self.statistics_dirty.set(true);
+    }
     
     // ========== ТУРБИНА ==========
     
@@ -1079,6 +1153,7 @@ impl CoreGame {
             self.state.turbine_upgrade_level += 1;
             self.log_to_js(&format!("⚙️ Турбина улучшена до уровня {}!", self.state.turbine_upgrade_level));
             self.force_save_throttled();
+            self.statistics_dirty.set(true);
             true
         } else { false }
     }
@@ -1106,6 +1181,7 @@ impl CoreGame {
         }
         let _ = self.ui.render(&self.state);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -1120,18 +1196,21 @@ impl CoreGame {
         }
         let _ = self.ui.render(&self.state);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen] 
     pub fn add_power(&mut self, amount: u32) {
         self.state.computational_power = (self.state.computational_power + amount).min(self.state.max_computational_power);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen] 
     pub fn subtract_power(&mut self, amount: u32) {
         self.state.computational_power = self.state.computational_power.saturating_sub(amount);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -1143,6 +1222,7 @@ impl CoreGame {
         self.state.defense_debuff_remaining = 0;
         self.log_to_js("🔧 Все системы восстановлены!");
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen]
@@ -1158,6 +1238,7 @@ impl CoreGame {
         self.rebel_system = RebelSystem::new();
         self.log_to_js("🔄 Прогресс сброшен!");
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
     
     #[wasm_bindgen] 
@@ -1229,6 +1310,7 @@ impl CoreGame {
         self.state.computational_power -= 100;
         self.state.planets.push(planet.clone());
         self.force_save();
+        self.statistics_dirty.set(true);
         
         serde_json::json!({
             "success": true,
@@ -1272,6 +1354,7 @@ impl CoreGame {
             self.state.active_planet_missions.remove(idx);
             
             self.force_save();
+            self.statistics_dirty.set(true);
             
             return serde_json::json!({
                 "success": true,
@@ -1362,6 +1445,7 @@ impl CoreGame {
         self.state.active_planet_missions.push(mission.clone());
         self.set_ship_mission_status(&ship_id, true, Some(mission.id.clone()), Some(returns_at));
         self.force_save();
+        self.statistics_dirty.set(true);
         
         self.log_to_js(&format!("🚀 Корабль {} отправлен к планете {}! Забрано: {}🪨 {}⚡ {}⛏️",
             ship_info.name, planet.name, coal, plasma, ore));
@@ -1387,6 +1471,7 @@ impl CoreGame {
             Ok(ships) => {
                 self.state.fleet_ships = ships;
                 self.force_save_throttled();
+                self.statistics_dirty.set(true);
                 "ok".to_string()
             }
             Err(e) => format!("error: {}", e)
@@ -1403,6 +1488,7 @@ impl CoreGame {
         
         self.handle_events(events);
         self.force_save_throttled();
+        self.statistics_dirty.set(true);
     }
 }
 
