@@ -1,29 +1,57 @@
-// auth.js
-// Модуль авторизации - регистрация, вход, выход
-// ИСПРАВЛЕНА ВЕРСИЯ: исправлен двойной вызов onLogin и upsert для профиля
+
 
 import { supabase } from './supabase.js';
+import { GameBus, EVENTS } from './game-events.js';
+
+// ПАТЧ 3.3: глобальный счётчик сессий для синхронизации между вкладками
+let _sessionId = Math.random().toString(36).substring(2, 10);
+let _authChannel = null;
+
+function getAuthChannel() {
+    if (!_authChannel && typeof BroadcastChannel !== 'undefined') {
+        try {
+            _authChannel = new BroadcastChannel('corebox_auth');
+            _authChannel.onmessage = (e) => {
+                if (e.data.type === 'logout' && e.data.sessionId !== _sessionId) {
+                    console.log('🔓 Выход из системы в другой вкладке');
+                    if (window._onLogoutCallback) {
+                        window._onLogoutCallback();
+                    }
+                }
+            };
+        } catch(e) {}
+    }
+    return _authChannel;
+}
 
 export async function register(email, password, username) {
     try {
+        // БАГ #34: валидация username
+        const cleanUsername = (username || email.split('@')[0]).trim();
+        if (cleanUsername.length < 3) {
+            return { success: false, error: 'Имя должно быть минимум 3 символа' };
+        }
+        if (cleanUsername.length > 20) {
+            return { success: false, error: 'Имя не должно быть длиннее 20 символов' };
+        }
+        
         const { data, error } = await supabase.auth.signUp({
             email: email,
             password: password,
             options: {
-                data: { username: username }
+                data: { username: cleanUsername }
             }
         });
 
         if (error) throw error;
 
         if (data.user) {
-            // ИСПРАВЛЕНО: upsert вместо update
+            // БАГ #22: убран created_at, пусть Supabase выставляет сам
             const { error: updateError } = await supabase
                 .from('profiles')
                 .upsert({ 
                     id: data.user.id, 
-                    username: username,
-                    created_at: new Date().toISOString()
+                    username: cleanUsername
                 }, { onConflict: 'id' });
             
             if (updateError) console.warn("Не удалось обновить username:", updateError);
@@ -63,10 +91,23 @@ export async function login(email, password) {
 
 export async function logout() {
     try {
+        const channel = getAuthChannel();
+        if (channel) {
+            try {
+                channel.postMessage({
+                    type: 'logout',
+                    sessionId: _sessionId,
+                    timestamp: Date.now()
+                });
+            } catch(e) {}
+        }
+        
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
         
         localStorage.removeItem('corebox_current_user');
+        
+        // БАГ #18: НЕ вызываем GameBus.clear() — каждый компонент отписывается сам
         
         return { success: true };
         
@@ -87,11 +128,18 @@ export async function getCurrentUser() {
     }
 }
 
-// ИСПРАВЛЕНО: исправлен двойной вызов onLogin
+// БАГ #9: исправлена логика SIGNED_IN
 export function initAuth(onLogin, onLogout) {
     let loginHandled = false;
+    let isInitialized = false;
     
-    supabase.auth.onAuthStateChange((event, session) => {
+    window._onLogoutCallback = onLogout;
+    
+    getAuthChannel();
+    
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        console.log(`🔐 Auth state change: ${event}, session: ${!!session}`);
+        
         if (event === 'INITIAL_SESSION') {
             if (session?.user) {
                 loginHandled = true;
@@ -99,28 +147,40 @@ export function initAuth(onLogin, onLogout) {
             } else {
                 onLogout();
             }
-            return; // Выходим, не обрабатываем дальше
+            isInitialized = true;
+            return;
         }
         
         if (event === 'SIGNED_IN') {
-            if (loginHandled) {
-                loginHandled = false; // Сбрасываем флаг для следующих входов
-                return; // Пропускаем дублирующий вызов после INITIAL_SESSION
+            // БАГ #9: пропускаем если уже обработали через INITIAL_SESSION
+            if (loginHandled && isInitialized) {
+                loginHandled = false;
+                return;
             }
             if (session?.user) {
+                loginHandled = false;
                 onLogin(session.user);
             }
         } else if (event === 'SIGNED_OUT') {
             loginHandled = false;
             onLogout();
+        } else if (event === 'TOKEN_REFRESHED') {
+            console.log('🔄 Токен обновлён');
         }
     });
+    
+    return () => {
+        subscription?.unsubscribe();
+        window._onLogoutCallback = null;
+    };
 }
 
 export async function resetPassword(email) {
     try {
+        // БАГ #35: fallback для PWA/Electron
+        const origin = window.location.origin || 'https://your-production-domain.com';
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-            redirectTo: window.location.origin + '/reset-password.html'
+            redirectTo: origin + '/reset-password.html'
         });
         
         if (error) throw error;

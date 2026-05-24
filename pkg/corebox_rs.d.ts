@@ -13,6 +13,7 @@ export class CoreGame {
     buy_rebel_protection(): void;
     buy_resource(resource: string): void;
     clear_log(): void;
+    complete_planet_mission(mission_id: string): string;
     craft_cargo_ship(): string;
     craft_chips_from_ore(): string;
     craft_combat_ship(): string;
@@ -51,6 +52,7 @@ export class CoreGame {
     subtract_power(amount: number): void;
     subtract_resource(resource: string, amount: number): void;
     sync_blueprints(cargo: boolean, scout: boolean, combat: boolean): void;
+    sync_fleet_from_js(fleet_json: string): string;
     toggle_coal(): void;
     toggle_rebel_protection(): void;
     upgrade_cooling_module(): void;
@@ -81,6 +83,7 @@ export interface InitOutput {
     readonly coregame_buy_rebel_protection: (a: number) => void;
     readonly coregame_buy_resource: (a: number, b: number, c: number) => void;
     readonly coregame_clear_log: (a: number) => void;
+    readonly coregame_complete_planet_mission: (a: number, b: number, c: number) => [number, number];
     readonly coregame_craft_cargo_ship: (a: number) => [number, number];
     readonly coregame_craft_chips_from_ore: (a: number) => [number, number];
     readonly coregame_craft_combat_ship: (a: number) => [number, number];
@@ -109,6 +112,7 @@ export interface InitOutput {
     readonly coregame_research_planet: (a: number) => [number, number];
     readonly coregame_reset_progress: (a: number) => void;
     readonly coregame_save_current_state: (a: number) => void;
+    readonly coregame_sell_resource: (a: number, b: number, c: number) => void;
     readonly coregame_send_ship_to_planet: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly coregame_set_fleet_cargo_bonus: (a: number, b: number) => void;
     readonly coregame_set_fleet_defense_bonus: (a: number, b: number) => void;
@@ -118,6 +122,7 @@ export interface InitOutput {
     readonly coregame_subtract_power: (a: number, b: number) => void;
     readonly coregame_subtract_resource: (a: number, b: number, c: number, d: number) => void;
     readonly coregame_sync_blueprints: (a: number, b: number, c: number, d: number) => void;
+    readonly coregame_sync_fleet_from_js: (a: number, b: number, c: number) => [number, number];
     readonly coregame_toggle_coal: (a: number) => void;
     readonly coregame_toggle_rebel_protection: (a: number) => void;
     readonly coregame_upgrade_cooling_module: (a: number) => void;
@@ -127,7 +132,6 @@ export interface InitOutput {
     readonly coregame_upgrade_turbine: (a: number) => number;
     readonly main: () => void;
     readonly start_game: () => number;
-    readonly coregame_sell_resource: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

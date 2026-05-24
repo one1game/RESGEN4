@@ -1,4 +1,4 @@
-// src/lib.rs (ИСПРАВЛЕН: немедленное сохранение планет, исправлен returns_at)
+// src/lib.rs (ИСПРАВЛЕН: исправлены вызовы economy, убран QuestProgress, исправлен last_attack_time)
 
 #![recursion_limit = "256"]
 
@@ -8,7 +8,7 @@ mod web;
 
 use wasm_bindgen::prelude::*;
 use crate::game::GameEvent;
-use crate::game::state::{GameState, Planet, PlanetMission, Inventory, QuestProgress};
+use crate::game::state::{GameState, Planet, PlanetMission, Inventory, FleetShip};
 use crate::game::config::GameConfig;
 use crate::systems::mining::MiningSystem;
 use crate::systems::economy::EconomySystem;
@@ -36,7 +36,6 @@ pub fn main() {
     log("CoreBox запущен");
 }
 
-// Структура для информации о корабле
 struct ShipInfo {
     id: String,
     name: String,
@@ -142,8 +141,6 @@ impl CoreGame {
             }
         }
     }
-    
-    // ========== МЕТОДЫ ДЛЯ ПЛАНЕТ ==========
     
     fn generate_random_planet(&self) -> Planet {
         use rand::Rng;
@@ -306,8 +303,6 @@ impl CoreGame {
         events
     }
     
-    // ========== ВНУТРЕННИЕ МЕТОДЫ ДЛЯ ОБРАБОТКИ СОБЫТИЙ ==========
-    
     fn handle_events(&mut self, events: Vec<GameEvent>) {
         for event in events {
             let _ = self.ui.handle_event(&event);
@@ -434,11 +429,13 @@ impl CoreGame {
     }
     
     fn buy_resource_internal(&mut self, r: &str) -> Vec<GameEvent> {
-        self.economy_system.buy_resource(&mut self.state, r)
+        // ИСПРАВЛЕНО: добавлен amount = 1
+        self.economy_system.buy_resource(&mut self.state, r, 1)
     }
     
     fn sell_resource_internal(&mut self, r: &str) -> Vec<GameEvent> {
-        self.economy_system.sell_resource(&mut self.state, r)
+        // ИСПРАВЛЕНО: добавлен amount = 1
+        self.economy_system.sell_resource(&mut self.state, r, 1)
     }
     
     fn buy_rebel_protection_internal(&mut self) -> Vec<GameEvent> {
@@ -1231,12 +1228,60 @@ impl CoreGame {
         let planet = self.generate_random_planet();
         self.state.computational_power -= 100;
         self.state.planets.push(planet.clone());
-        // БАГ №1: НЕМЕДЛЕННОЕ СОХРАНЕНИЕ
         self.force_save();
         
         serde_json::json!({
             "success": true,
             "planet": planet
+        }).to_string()
+    }
+    
+    #[wasm_bindgen]
+    pub fn complete_planet_mission(&mut self, mission_id: String) -> String {
+        let mission_index = self.state.active_planet_missions.iter().position(|m| m.id == mission_id);
+        
+        if let Some(idx) = mission_index {
+            let mission = self.state.active_planet_missions[idx].clone();
+            
+            if mission.status != "flying" {
+                return serde_json::json!({
+                    "success": false,
+                    "error": "Миссия уже завершена"
+                }).to_string();
+            }
+            
+            let resources = serde_json::json!({
+                "coal": mission.resources_taken.coal,
+                "plasma": mission.resources_taken.plasma,
+                "ore": mission.resources_taken.ore
+            });
+            
+            if mission.resources_taken.coal > 0 {
+                self.state.inventory.coal += mission.resources_taken.coal;
+                self.state.total_coal_mined += mission.resources_taken.coal;
+            }
+            if mission.resources_taken.plasma > 0 {
+                self.state.inventory.plasma += mission.resources_taken.plasma;
+                self.state.total_plasma_mined += mission.resources_taken.plasma;
+            }
+            if mission.resources_taken.ore > 0 {
+                self.state.inventory.ore += mission.resources_taken.ore;
+                self.state.total_ore_mined += mission.resources_taken.ore;
+            }
+            
+            self.state.active_planet_missions.remove(idx);
+            
+            self.force_save();
+            
+            return serde_json::json!({
+                "success": true,
+                "resources": resources
+            }).to_string();
+        }
+        
+        serde_json::json!({
+            "success": false,
+            "error": "Миссия не найдена"
         }).to_string()
     }
     
@@ -1293,7 +1338,6 @@ impl CoreGame {
         let travel_sec = 60 + rand::thread_rng().gen_range(0..61);
         let now = js_sys::Date::now() as i64;
         let arrives_at = now + (travel_sec as i64 * 1000);
-        // БАГ №6: ИСПРАВЛЕН returns_at
         let returns_at = now + (travel_sec as i64 * 2 * 1000);
         
         let mission = PlanetMission {
@@ -1333,6 +1377,20 @@ impl CoreGame {
                 "ore": ore
             }
         }).to_string()
+    }
+    
+    // ========== СИНХРОНИЗАЦИЯ ФЛОТА ИЗ JS ==========
+    
+    #[wasm_bindgen]
+    pub fn sync_fleet_from_js(&mut self, fleet_json: &str) -> String {
+        match serde_json::from_str::<Vec<FleetShip>>(fleet_json) {
+            Ok(ships) => {
+                self.state.fleet_ships = ships;
+                self.force_save_throttled();
+                "ok".to_string()
+            }
+            Err(e) => format!("error: {}", e)
+        }
     }
     
     // ========== ИГРОВОЙ ЦИКЛ ==========

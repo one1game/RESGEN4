@@ -1,11 +1,25 @@
 // craft.js
+// ПАТЧ 3.3: добавлена проверка активности системы с пояснением в UI
+// БАГ #23: исправлена проверка isSystemActive через геттер
 
 import { designModule } from './design.js';
+import { GameBus, EVENTS } from './game-events.js';
 
 export const craftModule = {
     game: null, resources: { ore: 0, coal: 0, plasma: 0, trash: 0, chips: 0 },
     isDay: true, coalEnabled: false, aiProductionBonus: 0,
     computationalPower: 0,
+    
+    // БАГ #23: геттер для актуальной проверки активности системы
+    get isSystemActive() {
+        if (!this.game) return false;
+        try {
+            const stats = JSON.parse(this.game.get_statistics());
+            return stats.is_day || (stats.coal_enabled && stats.coal_inventory > 0);
+        } catch {
+            return this.isDay || this.coalEnabled;
+        }
+    },
     
     recipes: [
         { id: 'chips', name: 'Чип', desc: 'Электронный компонент из руды',
@@ -28,7 +42,17 @@ export const craftModule = {
           requiresBlueprint: true, blueprintId: 'combat' }
     ],
     
-    init(game) { this.game = game; },
+    init(game) { 
+        this.game = game;
+        GameBus.on(EVENTS.STATS_UPDATED, (stats) => {
+            this.syncFromStats(stats);
+        });
+        GameBus.on(EVENTS.INVENTORY_CHANGED, () => {
+            if (document.getElementById('craftContainer')?.style.display !== 'none') {
+                this.refreshUI(document.getElementById('craftContainer'));
+            }
+        });
+    },
     
     syncFromStats(stats) {
         if (!stats) return;
@@ -62,7 +86,11 @@ export const craftModule = {
     },
     
     canCraft(recipe) {
-        if (!this.isDay && !this.coalEnabled) return false;
+        // БАГ #23: используем геттер isSystemActive
+        const systemInactive = !this.isSystemActive;
+        if (systemInactive) {
+            return { can: false, reason: '⚫ Система неактивна: ночь без ТЭЦ' };
+        }
         
         if (recipe.requiresBlueprint) {
             let hasBlueprint = false;
@@ -83,24 +111,40 @@ export const craftModule = {
                 } catch(e) {}
             }
             
-            if (!hasBlueprint) return false;
+            if (!hasBlueprint) {
+                return { can: false, reason: '📐 Требуется чертеж (вкладка "Разработка")' };
+            }
         }
         
         if (recipe.cost.type === 'composite') {
             const cost = this.getEffectiveCost(recipe);
-            return Object.entries(cost).every(([res, amt]) => (this.resources[res] || 0) >= amt);
+            const missing = [];
+            for (const [res, amt] of Object.entries(cost)) {
+                if ((this.resources[res] || 0) < amt) {
+                    missing.push(`${res}: ${(this.resources[res] || 0)}/${amt}`);
+                }
+            }
+            if (missing.length > 0) {
+                return { can: false, reason: `❌ Недостаточно ресурсов: ${missing.join(', ')}` };
+            }
+        } else {
+            const need = this.getEffectiveCost(recipe);
+            const have = this.resources[recipe.cost.type] || 0;
+            if (have < need) {
+                return { can: false, reason: `❌ Недостаточно ${recipe.cost.type}: ${have}/${need}` };
+            }
         }
         
-        return (this.resources[recipe.cost.type] || 0) >= this.getEffectiveCost(recipe);
+        return { can: true, reason: null };
     },
     
-    // БАГ #2 ИСПРАВЛЕНИЕ: убираем дублирование кораблей
     executeCraft(recipeId) {
         const recipe = this.recipes.find(r => r.id === recipeId);
         if (!recipe) return { success: false, error: 'Рецепт не найден' };
-        if (!this.canCraft(recipe)) return { success: false, error: 'Недостаточно ресурсов или чертежа' };
         
-        // БАГ #2: защита от двойного клика
+        const check = this.canCraft(recipe);
+        if (!check.can) return { success: false, error: check.reason };
+        
         if (this._isProcessing) {
             return { success: false, error: 'Уже выполняется крафт...' };
         }
@@ -115,28 +159,25 @@ export const craftModule = {
             const result = this.game[recipe.action]();
             if (result === 'success') {
                 setTimeout(() => {
-                    // БАГ #2 ИСПРАВЛЕНИЕ: Rust уже добавил корабль, не вызываем addShip()
-                    // Только сохраняем флот и обновляем UI
                     if (window.fleetModule && recipe.result?.type === 'ship') {
-                        // Загружаем актуальное состояние флота из Rust через sync
                         try {
                             const statsJson = this.game.get_statistics();
                             if (statsJson) {
                                 const stats = JSON.parse(statsJson);
-                                // Если в Rust есть массив fleet, синхронизируем его
                                 if (stats.fleet && Array.isArray(stats.fleet) && stats.fleet.length > 0) {
                                     window.fleetModule.ships = stats.fleet;
                                 }
                             }
                         } catch(e) {}
                         
-                        // Сохраняем флот
                         window.fleetModule.saveFleet();
                         
-                        // БАГ #1 ИСПРАВЛЕНИЕ: немедленное облачное сохранение
                         if (window.cloudSaveNow) {
                             window.cloudSaveNow(true);
                         }
+                        
+                        GameBus.emit(EVENTS.CRAFT_DONE, { recipe, success: true });
+                        GameBus.emit(EVENTS.FLEET_UPDATED, { ships: window.fleetModule.ships });
                     }
                     if (window._refreshFleetWithMissions) {
                         window._refreshFleetWithMissions();
@@ -157,7 +198,6 @@ export const craftModule = {
     setupEventListeners(container) {
         if (!container) return;
         
-        // БАГ #2: удаляем старый обработчик и добавляем новый с защитой от двойного клика
         if (container._clickHandler) {
             container.removeEventListener('click', container._clickHandler);
         }
@@ -166,7 +206,6 @@ export const craftModule = {
             const btn = e.target.closest('.craft-btn:not(.disabled)');
             if (!btn) return;
             
-            // БАГ #2: дополнительная защита от двойного клика
             if (btn.disabled || btn.classList.contains('processing')) return;
             
             const recipeId = btn.dataset.recipe;
@@ -184,6 +223,7 @@ export const craftModule = {
                         const j = this.game.get_statistics();
                         if (j) this.syncFromStats(JSON.parse(j));
                         if (window.updateDesignTab) window.updateDesignTab();
+                        GameBus.emit(EVENTS.INVENTORY_CHANGED, { resources: this.resources });
                     }
                 } catch(e) {} finally {
                     btn.disabled = false;
@@ -225,16 +265,20 @@ export const craftModule = {
     },
     
     renderCraftUI() {
-        const systemInactive = !this.isDay && !this.coalEnabled;
+        // БАГ #23: используем геттер isSystemActive
+        const systemInactive = !this.isSystemActive;
         const aiBonus = this.aiProductionBonus > 0 ? `<div class="ai-bonus-craft">🧠 Бонус ИИ: -${this.aiProductionBonus}% к стоимости</div>` : '';
         const powerDisplay = `<div class="power-display-craft" style="font-size:11px;opacity:0.7;margin-bottom:4px;">⚡ Мощность: ${this.computationalPower}</div>`;
         
         let html = `<div class="craft-compact"><div class="craft-header"><span>⚙️ СИСТЕМА КРАФТА</span>${systemInactive ? '<span class="system-offline-badge">⚫ СИСТЕМА НЕАКТИВНА</span>' : ''}</div>${powerDisplay}${aiBonus}<div class="craft-grid">`;
         
         this.recipes.forEach(recipe => {
-            const can = this.canCraft(recipe);
+            const check = this.canCraft(recipe);
+            const can = check.can;
+            const blockReason = check.reason;
             const hasBlueprint = !recipe.requiresBlueprint || (designModule && designModule.isBlueprintUnlocked(recipe.blueprintId));
             let costHtml = '';
+            
             if (recipe.cost.type === 'composite') {
                 const effCost = this.getEffectiveCost(recipe);
                 costHtml = `<div class="cost-side">${Object.entries(recipe.cost.resources).map(([res, amt]) => {
@@ -250,10 +294,24 @@ export const craftModule = {
                 const discountText = this.aiProductionBonus > 0 && need !== recipe.cost.amount ? ` (было ${recipe.cost.amount})` : '';
                 costHtml = `<div class="cost-side"><div class="cost-item ${have < need ? 'insufficient' : ''}"><span class="cost-icon">${recipe.cost.icon}</span><span class="cost-count">${have}/${need}${discountText}</span></div></div>`;
             }
-            html += `<div class="recipe-card ${systemInactive ? 'system-offline' : can ? 'available' : 'locked'}"><div class="recipe-info"><div class="recipe-name">${recipe.name}</div><div class="recipe-desc">${recipe.desc}</div></div><div class="recipe-main">${costHtml}<div class="craft-arrow">⮕</div><div class="result-side"><div class="result-item"><span class="result-icon">${recipe.result.icon}</span><span class="result-count">×${recipe.result.amount}</span></div></div></div>`;
-            if (systemInactive) html += `<div class="offline-msg">⚫ Крафт недоступен: система неактивна</div>`;
-            else if (!hasBlueprint) html += `<div class="blueprint-required">📐 Требуется чертеж (вкладка "Разработка")</div>`;
-            else html += `<button class="craft-btn ${can ? '' : 'disabled'}" data-recipe="${recipe.id}" ${can ? '' : 'disabled'}>${can ? '⚙️ СОЗДАТЬ' : '❌ НЕДОСТАТОЧНО'}</button>`;
+            
+            html += `<div class="recipe-card ${systemInactive ? 'system-offline' : can ? 'available' : 'locked'}">
+                <div class="recipe-info">
+                    <div class="recipe-name">${recipe.name}</div>
+                    <div class="recipe-desc">${recipe.desc}</div>
+                </div>
+                <div class="recipe-main">${costHtml}<div class="craft-arrow">⮕</div><div class="result-side"><div class="result-item"><span class="result-icon">${recipe.result.icon}</span><span class="result-count">×${recipe.result.amount}</span></div></div></div>`;
+            
+            if (systemInactive) {
+                html += `<div class="offline-msg">⚫ Крафт недоступен: система неактивна (ночь без угля)</div>`;
+            } else if (!hasBlueprint) {
+                html += `<div class="blueprint-required">📐 Требуется чертеж (вкладка "Разработка")</div>`;
+            } else if (!can && blockReason) {
+                html += `<div class="craft-error-msg" style="color:#ff8888;font-size:11px;text-align:center;margin-top:6px;">${blockReason}</div>`;
+                html += `<button class="craft-btn disabled" disabled>❌ НЕДОСТАТОЧНО</button>`;
+            } else {
+                html += `<button class="craft-btn ${can ? '' : 'disabled'}" data-recipe="${recipe.id}" ${can ? '' : 'disabled'}>${can ? '⚙️ СОЗДАТЬ' : '❌ НЕДОСТАТОЧНО'}</button>`;
+            }
             html += `</div>`;
         });
         

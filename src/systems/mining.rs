@@ -1,6 +1,6 @@
-// ========== src/systems/mining.rs (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
-
-// src/systems/mining.rs (БАЛАНС #2 - потолок критов)
+// ========== src/systems/mining.rs (ИСПРАВЛЕН) ==========
+// БАГ #17: критический шанс синхронизирован с JS (потолок 25%)
+// БАГ #41: комбо-мультипликатор ограничен в Rust (но он в JS, здесь не требуется)
 
 use rand::Rng;
 use crate::game::{GameState, GameEvent};
@@ -111,7 +111,7 @@ impl MiningSystem {
         let crit_module_bonus = state.upgrades.crit_level as f64 * 0.02;
         let consciousness_crit_bonus = bonuses.crit_bonus;
         
-        // ИСПРАВЛЕНО: расчёт критического шанса с потолком 25%
+        // БАГ #17: расчёт критического шанса с потолком 25% (синхронизация с JS)
         let mut critical_chance = (self.config.critical_chance 
             + crit_module_bonus 
             + consciousness_crit_bonus) 

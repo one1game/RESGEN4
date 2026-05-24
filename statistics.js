@@ -1,4 +1,8 @@
-// ======== statistics.js (ИСПРАВЛЕНА - НОРМАЛИЗАЦИЯ ПРОЦЕНТОВ) ========
+// ======== statistics.js (ИСПРАВЛЕНА) ========
+// БАГ #19: resetUserStatistics использует кастомный модальный диалог вместо confirm()
+// БАГ #20: updateStatisticsFromRust использует ?? вместо ||
+// БАГ #37: loadUserStatistics правильно восстанавливает playTime
+// БАГ #46: sessionsCount инкрементируется только один раз
 
 export let gameStats = {
     totalClicks: 0, maxPowerReached: 0, nightsSurvived: 0, rebelAttacks: 0,
@@ -11,6 +15,8 @@ export let gameStats = {
     miningLevel: 0, defenseLevel: 0, defenseActive: false,
     computationalPower: 0, currentAiMode: 'Обычный',
     consecutiveDefenses: 0, longestDefenseStreak: 0, prestige: 0,
+    accumulatedPlayTime: 0,  // БАГ #37: отдельное хранение накопленного времени
+    _sessionCounted: false,   // БАГ #46: флаг для однократного инкремента сессии
 };
 
 export function initStatistics() {
@@ -20,38 +26,121 @@ export function initStatistics() {
 
 export function loadUserStatistics(userStats) {
     if (!userStats) return;
-    Object.keys(gameStats).forEach(key => { if (key in userStats) gameStats[key] = userStats[key]; });
-    gameStats.sessionsCount = (userStats.sessionsCount || 0) + 1;
+    
+    // БАГ #46: инкрементировать sessionsCount только при первой загрузке
+    if (!gameStats._sessionCounted) {
+        gameStats.sessionsCount = (userStats.sessionsCount || 0) + 1;
+        gameStats._sessionCounted = true;
+    } else {
+        gameStats.sessionsCount = userStats.sessionsCount || gameStats.sessionsCount;
+    }
+    
     gameStats.lastSessionDate = new Date().toISOString();
-    gameStats.startTime = Date.now() - ((userStats.playTime || 0) * 1000);
+    
+    // БАГ #37: восстанавливаем накопленное время
+    gameStats.accumulatedPlayTime = userStats.playTime || 0;
+    gameStats.startTime = Date.now();
+    
+    // Остальные поля
+    Object.keys(gameStats).forEach(key => {
+        if (key in userStats && !['startTime', '_sessionCounted', 'accumulatedPlayTime'].includes(key)) {
+            gameStats[key] = userStats[key];
+        }
+    });
+    
     updateStatisticsDisplay();
+}
+
+// БАГ #19: кастомный модальный диалог вместо confirm()
+function showConfirmDialog(message, onConfirm, onCancel) {
+    const existing = document.querySelector('.custom-confirm-dialog');
+    if (existing) existing.remove();
+    
+    const dialog = document.createElement('div');
+    dialog.className = 'custom-confirm-dialog';
+    dialog.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10002;
+        font-family: monospace;
+    `;
+    
+    const content = document.createElement('div');
+    content.style.cssText = `
+        background: #1a1a1a;
+        border: 2px solid #ffaa44;
+        border-radius: 16px;
+        padding: 24px;
+        max-width: 320px;
+        text-align: center;
+    `;
+    content.innerHTML = `
+        <div style="font-size: 18px; margin-bottom: 16px;">⚠️ ${message}</div>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+            <button id="confirm-yes" style="background: #ff4444; border: none; padding: 8px 20px; border-radius: 8px; color: white; cursor: pointer;">ДА</button>
+            <button id="confirm-no" style="background: #444444; border: none; padding: 8px 20px; border-radius: 8px; color: white; cursor: pointer;">НЕТ</button>
+        </div>
+    `;
+    
+    dialog.appendChild(content);
+    document.body.appendChild(dialog);
+    
+    const onYes = () => {
+        dialog.remove();
+        if (onConfirm) onConfirm();
+    };
+    const onNo = () => {
+        dialog.remove();
+        if (onCancel) onCancel();
+    };
+    
+    document.getElementById('confirm-yes').onclick = onYes;
+    document.getElementById('confirm-no').onclick = onNo;
 }
 
 export function resetUserStatistics() {
-    if (!confirm('Сбросить статистику?')) return false;
-    const preserved = { sessionsCount: gameStats.sessionsCount };
-    Object.keys(gameStats).forEach(k => {
-        if (typeof gameStats[k] === 'number') gameStats[k] = 0;
-        else if (typeof gameStats[k] === 'boolean') gameStats[k] = false;
-        else if (typeof gameStats[k] === 'string') gameStats[k] = '';
+    showConfirmDialog('Сбросить статистику?', () => {
+        const preserved = { 
+            sessionsCount: gameStats.sessionsCount,
+            accumulatedPlayTime: gameStats.accumulatedPlayTime,
+            _sessionCounted: true
+        };
+        Object.keys(gameStats).forEach(k => {
+            if (typeof gameStats[k] === 'number') gameStats[k] = 0;
+            else if (typeof gameStats[k] === 'boolean') gameStats[k] = false;
+            else if (typeof gameStats[k] === 'string') gameStats[k] = '';
+        });
+        gameStats.sessionsCount = preserved.sessionsCount;
+        gameStats.accumulatedPlayTime = preserved.accumulatedPlayTime;
+        gameStats._sessionCounted = true;
+        gameStats.startTime = Date.now();
+        gameStats.lastSessionDate = new Date().toISOString();
+        gameStats.currentAiMode = 'Обычный';
+        updateStatisticsDisplay();
+        
+        document.dispatchEvent(new CustomEvent('resetUserStats', { detail: { stats: gameStats } }));
+        return true;
     });
-    gameStats.sessionsCount = preserved.sessionsCount;
-    gameStats.startTime = Date.now();
-    gameStats.lastSessionDate = new Date().toISOString();
-    gameStats.currentAiMode = 'Обычный';
-    updateStatisticsDisplay();
-    return true;
+    return false;
 }
 
+// БАГ #20: использование ?? вместо ||
 export function updateStatisticsFromRust(rustStats) {
     if (!rustStats) return;
     gameStats.totalMined = rustStats.total_mined || 0;
-    gameStats.coalMined = rustStats.coal_mined || rustStats.total_coal_mined || gameStats.coalMined;
-    gameStats.trashMined = rustStats.trash_mined || rustStats.total_trash_mined || gameStats.trashMined;
-    gameStats.plasmaMined = rustStats.plasma_mined || rustStats.total_plasma_mined || gameStats.plasmaMined;
-    gameStats.oreMined = rustStats.ore_mined || rustStats.total_ore_mined || gameStats.oreMined;
-    gameStats.coalBurned = rustStats.coal_burned || rustStats.total_coal_burned || gameStats.coalBurned;
-    gameStats.coalStolen = rustStats.coal_stolen || rustStats.total_coal_stolen || gameStats.coalStolen;
+    gameStats.coalMined = rustStats.coal_mined ?? rustStats.total_coal_mined ?? gameStats.coalMined;
+    gameStats.trashMined = rustStats.trash_mined ?? rustStats.total_trash_mined ?? gameStats.trashMined;
+    gameStats.plasmaMined = rustStats.plasma_mined ?? rustStats.total_plasma_mined ?? gameStats.plasmaMined;
+    gameStats.oreMined = rustStats.ore_mined ?? rustStats.total_ore_mined ?? gameStats.oreMined;
+    gameStats.coalBurned = rustStats.coal_burned ?? rustStats.total_coal_burned ?? gameStats.coalBurned;
+    gameStats.coalStolen = rustStats.coal_stolen ?? rustStats.total_coal_stolen ?? gameStats.coalStolen;
     gameStats.nightsSurvived = rustStats.nights_survived || gameStats.nightsSurvived;
     gameStats.rebelAttacks = rustStats.rebel_attacks_count || gameStats.rebelAttacks;
     gameStats.attacksDefended = rustStats.attacks_defended || gameStats.attacksDefended;
@@ -60,8 +149,6 @@ export function updateStatisticsFromRust(rustStats) {
     gameStats.currentAiMode = rustStats.current_ai_mode || 'Обычный';
     gameStats.neuroEvolution = rustStats.neuro_evolution || 0;
     
-    // ИСПРАВЛЕНО: Rust возвращает значение 0.0-1.0 (доли)
-    // Если значение > 1.0, значит пришло как проценты - нормализуем
     let neuroConsciousnessValue = rustStats.neuro_consciousness || 0;
     if (neuroConsciousnessValue > 1.0) {
         neuroConsciousnessValue = neuroConsciousnessValue / 100.0;
@@ -105,10 +192,7 @@ export function updateStatisticsDisplay() {
     set('defenseActive', gameStats.defenseActive ? '✅ Активна' : '❌ Неактивна');
     set('blueprintsUnlocked', (gameStats.blueprintsUnlocked || 0) + '/3');
     set('neuroEvolution', gameStats.neuroEvolution || 0);
-    
-    // ИСПРАВЛЕНО: преобразуем доли (0.0-1.0) в проценты для отображения
     set('neuroConsciousness', ((gameStats.neuroConsciousness || 0) * 100).toFixed(1) + '%');
-    
     set('neuroScore', gameStats.neuroScore || 0);
     set('sessionsCount', gameStats.sessionsCount || 1);
     set('lastSessionDate', gameStats.lastSessionDate ? new Date(gameStats.lastSessionDate).toLocaleString('ru') : '—');
@@ -132,7 +216,11 @@ function formatTime(seconds) {
 let playTimeInterval;
 function startPlayTimeTracker() {
     if (playTimeInterval) clearInterval(playTimeInterval);
-    playTimeInterval = setInterval(() => { gameStats.playTime += 1; }, 1000);
+    playTimeInterval = setInterval(() => {
+        // БАГ #37: правильный расчёт playTime
+        const sessionSeconds = Math.floor((Date.now() - gameStats.startTime) / 1000);
+        gameStats.playTime = gameStats.accumulatedPlayTime + sessionSeconds;
+    }, 1000);
 }
 
 function setupStatisticsEventListeners() {

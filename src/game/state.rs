@@ -1,5 +1,10 @@
-// src/game/state.rs
-// ПОЛНАЯ ВЕРСИЯ С FLEET SHIPS
+// ========== src/game/state.rs (ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+// БАГ #4: load_quests теперь обрабатывает CollectResource тип
+// БАГ #11: defense_debuff_remaining уменьшается при начале ночи (а не рассвете)
+// БАГ #24: add_fleet_ship использует глобальный счётчик
+// БАГ #39: get_active_planet_missions возвращает и "returning"
+// БАГ #44: add_planet_mission проверяет активные миссии
+// БАГ #45: record_defense_result обновляет total_defense_activations
 
 use serde::{Serialize, Deserialize};
 use super::config::GameConfig;
@@ -13,7 +18,7 @@ pub struct AttackRecord {
     pub attack_type: String,
     pub was_defended: bool,
     pub result: String,
-    pub game_time: i32,  // ← добавлено поле
+    pub game_time: i32,
 }
 
 // ========== СТРУКТУРА ДЛЯ КОРАБЛЕЙ ФЛОТА ==========
@@ -34,15 +39,18 @@ pub struct FleetShip {
     pub target_user_id: Option<String>,
     pub mission_returns_at: Option<i64>,
     pub created_at: i64,
+    pub speed: u32,  // БАГ #47: добавлено поле speed
 }
 
 impl FleetShip {
-    pub fn new(ship_type: &str, ship_index: usize) -> Self {
-        let (name, max_health) = match ship_type {
-            "cargo" => (format!("Грузовой #{}", ship_index), 100),
-            "scout" => (format!("Разведчик #{}", ship_index), 80),
-            "combat" => (format!("Боевой #{}", ship_index), 120),
-            _ => (format!("Корабль #{}", ship_index), 100),
+    // БАГ #24: ship_index больше не используется, используем глобальный счётчик
+    // Но для совместимости оставляем параметр, но игнорируем его
+    pub fn new(ship_type: &str, _ship_index: usize) -> Self {
+        let (name, max_health, speed) = match ship_type {
+            "cargo" => (format!("Грузовой"), 100, 1),
+            "scout" => (format!("Разведчик"), 80, 3),
+            "combat" => (format!("Боевой"), 120, 2),
+            _ => (format!("Корабль"), 100, 1),
         };
         
         Self {
@@ -61,6 +69,7 @@ impl FleetShip {
             target_user_id: None,
             mission_returns_at: None,
             created_at: js_sys::Date::now() as i64,
+            speed,  // БАГ #47: инициализация speed
         }
     }
 }
@@ -152,7 +161,7 @@ pub enum QuestType {
     ActivateDefense,
     SurviveAttack,
     ReachEvolutionLevel,
-    CollectResource(String),
+    CollectResource(String),  // тип для квестов на накопление ресурсов
 }
 
 // ========== ОСНОВНОЙ GAME STATE ==========
@@ -229,7 +238,7 @@ pub struct GameState {
     pub last_attack_was_defended: bool,
     pub consecutive_successful_defenses: u32,
     pub consecutive_failed_defenses: u32,
-    pub total_defense_activations: u32,
+    pub total_defense_activations: u32,  // БАГ #45: добавлено поле
     
     // Временные бонусы
     pub temporary_mining_bonus: u32,
@@ -274,6 +283,7 @@ pub struct GameState {
     
     // ФЛОТ
     pub fleet_ships: Vec<FleetShip>,
+    pub total_ships_built: u32,  // БАГ #24: глобальный счётчик кораблей
     
     // ПЛАНЕТЫ И МИССИИ
     pub planets: Vec<Planet>,
@@ -298,10 +308,12 @@ impl GameState {
         state.active_planet_missions = Vec::new();
         state.quests_progress = Vec::new();
         state.fleet_ships = Vec::new();
+        state.total_ships_built = 0;
         state.load_quests(config);
         state
     }
 
+    // БАГ #4: исправленный load_quests с поддержкой CollectResource
     pub fn load_quests(&mut self, config: &GameConfig) {
         self.quests.clear();
         for q in &config.quests {
@@ -312,6 +324,7 @@ impl GameState {
                 "ActivateDefense" => QuestType::ActivateDefense,
                 "SurviveAttack" => QuestType::SurviveAttack,
                 "ReachEvolutionLevel" => QuestType::ReachEvolutionLevel,
+                t if t.starts_with("Collect") => QuestType::CollectResource(t[7..].to_lowercase()),
                 t if t.starts_with("Mine") => QuestType::MineResource(t[4..].to_lowercase()),
                 _ => QuestType::MineAny,
             };
@@ -335,6 +348,7 @@ impl GameState {
         }
     }
 
+    // БАГ #11: исправленный update_time (defense_debuff уменьшается при начале ночи)
     pub fn update_time(&mut self, delta: i32, config: &GameConfig) -> Vec<super::events::GameEvent> {
         use super::events::GameEvent;
         let mut events = Vec::new();
@@ -377,8 +391,12 @@ impl GameState {
             };
             self.time_changed = true;
             
-            if self.defense_debuff_remaining > 0 && self.is_day && !was_day {
+            // БАГ #11: defense_debuff уменьшается при начале ночи (ДЕНЬ → НОЧЬ)
+            if self.defense_debuff_remaining > 0 && !self.is_day && was_day {
                 self.defense_debuff_remaining -= 1;
+                if self.defense_debuff_remaining == 0 {
+                    events.push(GameEvent::LogMessage("🛡️ Защита восстановлена".to_string()));
+                }
             }
 
             if self.coal_enabled && self.inventory.coal > 0 {
@@ -391,7 +409,8 @@ impl GameState {
                 let actual = cost.min(self.inventory.coal);
                 if actual > 0 {
                     self.inventory.coal -= actual;
-                    self.total_coal_burned += actual;
+                    // БАГ #38: saturating_add
+                    self.total_coal_burned = self.total_coal_burned.saturating_add(actual);
                     let plasma_gen = self.total_coal_burned / config.coal_consumption_config.plasma_conversion_rate;
                     if plasma_gen > self.plasma_from_coal {
                         let new = plasma_gen - self.plasma_from_coal;
@@ -504,7 +523,9 @@ impl GameState {
         }
     }
 
+    // БАГ #45: record_defense_result обновляет total_defense_activations
     pub fn record_defense_result(&mut self, was_successful: bool) {
+        self.total_defense_activations += 1;
         if was_successful {
             self.consecutive_successful_defenses += 1;
             self.consecutive_failed_defenses = 0;
@@ -541,9 +562,10 @@ impl GameState {
     }
     
     // ========== МЕТОДЫ ДЛЯ ФЛОТА ==========
+    // БАГ #24: add_fleet_ship использует глобальный счётчик
     pub fn add_fleet_ship(&mut self, ship_type: &str) -> &FleetShip {
-        let ship_index = self.fleet_ships.len() + 1;
-        let new_ship = FleetShip::new(ship_type, ship_index);
+        self.total_ships_built += 1;
+        let new_ship = FleetShip::new(ship_type, self.total_ships_built as usize);
         self.fleet_ships.push(new_ship);
         self.fleet_ships.last().unwrap()
     }
@@ -571,8 +593,16 @@ impl GameState {
     }
     
     // ========== МЕТОДЫ ДЛЯ ПЛАНЕТАРНЫХ МИССИЙ ==========
+    // БАГ #44: add_planet_mission с проверкой активных миссий
     pub fn add_planet_mission(&mut self, mission: PlanetMission) {
-        self.active_planet_missions.retain(|m| m.ship_id != mission.ship_id);
+        // Удалять только завершённые/отменённые миссии этого корабля
+        self.active_planet_missions.retain(|m| {
+            m.ship_id != mission.ship_id || m.status == "flying" || m.status == "returning"
+        });
+        // Если активная миссия уже есть — не добавлять
+        if self.active_planet_missions.iter().any(|m| m.ship_id == mission.ship_id) {
+            return;
+        }
         self.active_planet_missions.push(mission);
     }
     
@@ -585,13 +615,15 @@ impl GameState {
         }
     }
     
+    // БАГ #39: get_active_planet_missions возвращает и "flying", и "returning"
     pub fn get_active_planet_missions(&self) -> Vec<&PlanetMission> {
         self.active_planet_missions.iter()
-            .filter(|m| m.status == "flying")
+            .filter(|m| m.status == "flying" || m.status == "returning")
             .collect()
     }
 }
 
+// ========== IMPL QUEST С ИСПРАВЛЕННЫМ CollectResource ==========
 impl Quest {
     pub fn check_completion(&self, state: &GameState) -> bool {
         match &self.quest_type {
@@ -607,11 +639,12 @@ impl Quest {
             QuestType::ActivateDefense => state.upgrades.defense,
             QuestType::SurviveAttack => state.rebel_attacks_count >= self.target,
             QuestType::ReachEvolutionLevel => state.neuro_evolution >= self.target,
+            // ===== ИСПРАВЛЕНИЕ: CollectResource = сколько СЕЙЧАС в инвентаре =====
             QuestType::CollectResource(r) => match r.as_str() {
-                "coal" => state.inventory.coal >= self.target,
-                "ore" => state.inventory.ore >= self.target,
+                "coal"   => state.inventory.coal   >= self.target,
+                "ore"    => state.inventory.ore    >= self.target,
                 "plasma" => state.inventory.plasma >= self.target,
-                "chips" => state.inventory.chips >= self.target,
+                "chips"  => state.inventory.chips  >= self.target,
                 _ => false,
             },
         }

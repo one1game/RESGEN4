@@ -1,6 +1,4 @@
-// ========== src/systems/rebel.rs ==========
-// ПОЛНОСТЬЮ ПЕРЕРАБОТАННАЯ ВЕРСИЯ — НАСТОЯЩИЙ ИИ ПОВСТАНЦЕВ
-
+// ========== src/systems/rebel.rs (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
 use crate::game::{GameState, GameEvent};
 use crate::game::config::GameConfig;
 use crate::game::state::AttackRecord;
@@ -9,7 +7,6 @@ use rand::seq::SliceRandom;
 use std::collections::{HashMap, VecDeque};
 use serde::{Serialize, Deserialize};
 
-// ─── ГЕНЕТИЧЕСКАЯ ТАКТИКА ─────────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TacticGenome {
     pub weights: [f64; 6],
@@ -63,7 +60,6 @@ impl TacticGenome {
     fn get_weight(&self, idx: usize) -> f64 { self.weights[idx.min(5)] }
 }
 
-// ─── SARSA-АГЕНТ ФРАКЦИИ ─────────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SarsaAgent {
     pub q_table: Vec<[f64; 6]>,
@@ -134,7 +130,6 @@ impl SarsaAgent {
     }
 }
 
-// ─── ОСНОВНЫЕ СТРУКТУРЫ ──────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct RebelFaction {
     pub id: String,
@@ -239,12 +234,12 @@ pub enum OperationStatus {
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub enum AttackType {
-    ResourceRaid,     // 0
-    PowerSabotage,    // 1
-    DirectAssault,    // 2
-    Psychological,    // 3
-    Stealth,          // 4
-    Technological,    // 5
+    ResourceRaid,
+    PowerSabotage,
+    DirectAssault,
+    Psychological,
+    Stealth,
+    Technological,
 }
 
 impl AttackType {
@@ -294,44 +289,6 @@ pub enum AttackTarget {
     System { system: String, damage: u32 },
     Moral { demoralization: f64 },
     Intelligence { data_loss: u32 },
-}
-
-// ─── ГЛАВНАЯ СТРУКТУРА RebelSystem ───────────────────────────────────────────
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct RebelSystem {
-    pub factions: HashMap<String, RebelFaction>,
-    pub active_faction: Option<String>,
-    pub evolution_level: u32,
-    pub evolution_score: u32,
-    pub adaptation_level: u32,
-    pub morale: f64,
-    pub aggression: f64,
-    pub strategic_intelligence: f64,
-    pub ai_adaptation: AIAdaptation,
-    pub last_ai_level: u32,
-    pub ai_threat_perception: f64,
-    pub operation_queue: VecDeque<Operation>,
-    pub active_operations: HashMap<String, ActiveOperation>,
-    pub tactic_preferences: TacticPreferences,
-    pub last_major_operation: i32,
-    pub last_attack_time: i32,
-    pub last_strategy_switch: i32,
-    pub stats: RebelStats,
-    #[serde(skip)]
-    pub available_forces_cache: usize,
-    pub current_night_type: String,
-    pub genome_population: Vec<TacticGenome>,
-    pub best_genome: TacticGenome,
-    pub sa_temperature: f64,
-    pub sarsa_agents: HashMap<String, SarsaAgent>,
-    pub nash_strategy: [f64; 6],
-    pub coalition_matrix: HashMap<(String, String), f64>,
-    pub htn_plans: VecDeque<HierarchicalPlan>,
-    pub current_campaign: Option<Campaign>,
-    pub attack_type_success: HashMap<usize, (u32, u32)>,
-    pub target_value_estimate: HashMap<String, f64>,
-    pub genome_switch_cooldown: i32,
-    pub psych_pressure: f64,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -446,6 +403,43 @@ impl RebelFaction {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct RebelSystem {
+    pub factions: HashMap<String, RebelFaction>,
+    pub active_faction: Option<String>,
+    pub evolution_level: u32,
+    pub evolution_score: u32,
+    pub adaptation_level: u32,
+    pub morale: f64,
+    pub aggression: f64,
+    pub strategic_intelligence: f64,
+    pub ai_adaptation: AIAdaptation,
+    pub last_ai_level: u32,
+    pub ai_threat_perception: f64,
+    pub operation_queue: VecDeque<Operation>,
+    pub active_operations: HashMap<String, ActiveOperation>,
+    pub tactic_preferences: TacticPreferences,
+    pub last_major_operation: i32,
+    pub last_attack_time: i32,
+    pub last_strategy_switch: i32,
+    pub stats: RebelStats,
+    pub available_forces_cache: usize,
+    pub current_night_type: String,
+    pub genome_population: Vec<TacticGenome>,
+    pub best_genome: TacticGenome,
+    pub sa_temperature: f64,
+    pub sarsa_agents: HashMap<String, SarsaAgent>,
+    pub nash_strategy: [f64; 6],
+    pub coalition_matrix: HashMap<(String, String), f64>,
+    pub htn_plans: VecDeque<HierarchicalPlan>,
+    pub current_campaign: Option<Campaign>,
+    pub attack_type_success: HashMap<usize, (u32, u32)>,
+    pub target_value_estimate: HashMap<String, f64>,
+    pub genome_switch_cooldown: i32,
+    pub psych_pressure: f64,
+    pub prng_counter: u64,
+}
+
 impl RebelSystem {
     pub fn new() -> Self {
         let mut factions = HashMap::new();
@@ -513,24 +507,23 @@ impl RebelSystem {
             target_value_estimate: HashMap::new(),
             genome_switch_cooldown: 0,
             psych_pressure: 0.0,
+            prng_counter: 0,
         }
     }
 
-    // ДОБАВЛЕННЫЙ МЕТОД after_deserialize
     pub fn after_deserialize(&mut self) {
-        // Пересчитываем лучший геном из популяции
         if let Some(best) = self.genome_population.iter()
             .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap()) {
             self.best_genome = best.clone();
         }
-        // Обновляем предпочтения
         self.sync_preferences_from_genome();
     }
 
-    fn prng(&self, seed: u64) -> f64 {
+    fn prng(&mut self, seed: u64) -> f64 {
+        self.prng_counter += 1;
         let a: u64 = 2862933555777941757;
         let c: u64 = 3037000493;
-        let r = seed.wrapping_mul(a).wrapping_add(c);
+        let r = seed.wrapping_mul(a).wrapping_add(c).wrapping_add(self.prng_counter);
         (r >> 32) as f64 / u32::MAX as f64
     }
 
@@ -630,7 +623,7 @@ impl RebelSystem {
         if self.htn_plans.len() > 5 { self.htn_plans.pop_front(); }
     }
 
-    fn select_attack_type_ai(&self, state: &GameState, time: u64) -> AttackType {
+    fn select_attack_type_ai(&mut self, state: &GameState, time: u64) -> AttackType {
         let genome_w = &self.best_genome.weights;
         let nash_w = &self.nash_strategy;
         
@@ -772,7 +765,7 @@ impl RebelSystem {
                              reward: f64, next_state: usize, time: u64) {
         if let Some(agent) = self.sarsa_agents.get_mut(faction_id) {
             let rng = agent.total_reward as u64 + time;
-            let a = agent.last_action;
+            let _a = agent.last_action;
             let next_action = agent.choose_action(next_state, (rng % 1000) as f64 / 1000.0);
             agent.update(state, action, reward, next_state, next_action);
         }
@@ -991,75 +984,84 @@ impl RebelSystem {
         }
 
         if state.rebel_activity >= 5 { p = p.max(0.18); }
-        p.min(config.rebels.max_attack_chance + 0.15).max(0.04)
+        p.min(config.rebels.max_attack_chance).max(0.04)
     }
 
     fn prepare_attack_ai(&mut self, state: &GameState, _config: &GameConfig, time: u64) -> AttackPlan {
-        let attack_type = self.select_attack_type_ai(state, time);
-        let faction = self.attempt_coalition_attack(&attack_type)
-            .unwrap_or_else(|| self.select_attacking_faction(&attack_type));
+    let attack_type = self.select_attack_type_ai(state, time);
+    let faction = self.attempt_coalition_attack(&attack_type)
+        .unwrap_or_else(|| self.select_attacking_faction(&attack_type));
 
-        let targets = if let Some(plan) = self.htn_plans.front() {
-            if let Some(task) = plan.subtasks.front() {
-                self.select_targets_from_htn(state, &attack_type, &task.target)
-            } else {
-                self.select_targets(state, &attack_type)
-            }
+    // ИСПРАВЛЕНО: забираем план ДО вызова select_targets_from_htn
+    let htn_target = if let Some(plan) = self.htn_plans.front() {
+        if let Some(task) = plan.subtasks.front() {
+            Some(task.target.clone())
         } else {
-            self.select_targets(state, &attack_type)
-        };
-
-        if let Some(plan) = self.htn_plans.front_mut() {
-            plan.subtasks.pop_front();
+            None
         }
-        self.htn_plans.retain(|p| !p.subtasks.is_empty());
+    } else {
+        None
+    };
 
-        let stealth = if self.ai_adaptation.prediction_evasion > 0.3 {
-            (0.5 + self.ai_adaptation.prediction_evasion * 0.4).min(0.9)
-        } else { 0.3 };
+    let targets = if let Some(ref target) = htn_target {
+        self.select_targets_from_htn(state, &attack_type, target)
+    } else {
+        self.select_targets(state, &attack_type)
+    };
 
-        AttackPlan {
-            id: format!("attack_{}_{}", faction, state.game_time),
-            attack_type: attack_type.clone(),
-            faction,
-            targets,
-            success_probability: self.calculate_success_probability_ai(state, &attack_type),
-            stealth_level: stealth,
-            expected_gain: self.calculate_expected_gain(state, &attack_type),
-        }
+    if let Some(plan) = self.htn_plans.front_mut() {
+        plan.subtasks.pop_front();
     }
+    self.htn_plans.retain(|p| !p.subtasks.is_empty());
 
-    fn select_targets_from_htn(&self, state: &GameState, attack_type: &AttackType, htn_target: &str) -> Vec<AttackTarget> {
-        let mut targets = self.select_targets(state, attack_type);
-        if htn_target == "plasma" && state.inventory.plasma > 0 {
-            targets.insert(0, AttackTarget::Resource {
-                resource: "plasma".to_string(),
-                amount: ((state.inventory.plasma as f64 * 0.2).round() as u32).min(5).max(1),
-            });
-        }
-        targets
+    let stealth = if self.ai_adaptation.prediction_evasion > 0.3 {
+        (0.5 + self.ai_adaptation.prediction_evasion * 0.4).min(0.9)
+    } else { 0.3 };
+
+    AttackPlan {
+        id: format!("attack_{}_{}", faction, state.game_time),
+        attack_type: attack_type.clone(),
+        faction,
+        targets,
+        success_probability: self.calculate_success_probability_ai(state, &attack_type),
+        stealth_level: stealth,
+        expected_gain: self.calculate_expected_gain(state, &attack_type),
     }
+}
 
-    fn select_attacking_faction(&self, attack_type: &AttackType) -> String {
-        let available: Vec<(&String, &RebelFaction)> = self.factions.iter()
-            .filter(|(_, f)| f.personnel.operatives > 0)
-            .collect();
-        if available.is_empty() { return "unknown".to_string(); }
-
-        let specialized = available.iter().find(|(_, f)| match attack_type {
-            AttackType::Stealth => f.specializations.contains(&"stealth".to_string()),
-            AttackType::Technological => f.specializations.contains(&"technology".to_string()),
-            AttackType::Psychological => f.specializations.contains(&"psychological".to_string()),
-            _ => false,
-        }).map(|(id, _)| *id);
-
-        if let Some(id) = specialized { return id.clone(); }
-
-        let rng_val = self.prng(self.stats.total_attacks as u64 * 7 + self.evolution_score as u64);
-        available[(rng_val * available.len() as f64) as usize % available.len()].0.clone()
+    fn select_targets_from_htn(&mut self, state: &GameState, attack_type: &AttackType, htn_target: &str) -> Vec<AttackTarget> {
+    let mut targets = self.select_targets(state, attack_type);
+    if htn_target == "plasma" && state.inventory.plasma > 0 {
+        targets.insert(0, AttackTarget::Resource {
+            resource: "plasma".to_string(),
+            amount: ((state.inventory.plasma as f64 * 0.2).round() as u32).min(5).max(1),
+        });
     }
+    targets
+}
 
-    fn select_targets(&self, state: &GameState, attack_type: &AttackType) -> Vec<AttackTarget> {
+    fn select_attacking_faction(&mut self, attack_type: &AttackType) -> String {
+    // ВЫНОСИМ prng вызов САМЫМ ПЕРВЫМ
+    let rng_val = self.prng(self.stats.total_attacks as u64 * 7 + self.evolution_score as u64);
+    
+    let available: Vec<(&String, &RebelFaction)> = self.factions.iter()
+        .filter(|(_, f)| f.personnel.operatives > 0)
+        .collect();
+    if available.is_empty() { return "unknown".to_string(); }
+
+    let specialized = available.iter().find(|(_, f)| match attack_type {
+        AttackType::Stealth => f.specializations.contains(&"stealth".to_string()),
+        AttackType::Technological => f.specializations.contains(&"technology".to_string()),
+        AttackType::Psychological => f.specializations.contains(&"psychological".to_string()),
+        _ => false,
+    }).map(|(id, _)| *id);
+
+    if let Some(id) = specialized { return id.clone(); }
+
+    available[(rng_val * available.len() as f64) as usize % available.len()].0.clone()
+}
+
+    fn select_targets(&mut self, state: &GameState, attack_type: &AttackType) -> Vec<AttackTarget> {
         let mut targets = Vec::new();
         let rng_val = self.prng(self.stats.total_attacks as u64 + state.game_time as u64);
 
@@ -1178,14 +1180,29 @@ impl RebelSystem {
             else if state.rebel_activity > 7 { (base_cooldown - 1).max(6) }
             else { base_cooldown };
 
-        if state.game_time - self.last_attack_time < attack_cooldown { return events; }
+        if state.game_time - self.last_attack_time < attack_cooldown as i32 { return events; }
 
         let attack_probability = self.calculate_attack_probability_ai(state, config);
-
         let rng_val = self.prng(state.game_time as u64 * 97 + self.stats.total_attacks as u64);
+        
         if rng_val < attack_probability {
             let time_seed = state.game_time as u64 * 1000 + self.stats.total_attacks as u64;
             let attack = self.prepare_attack_ai(state, config, time_seed);
+            
+            if state.attack_warning.is_empty() && rng_val < 0.6 {
+                let warning = format!(
+                    "⚠️ СКАНЕР: {} готовит атаку типа {}",
+                    attack.faction, attack.attack_type
+                );
+                state.attack_warning = warning.clone();
+                state.attack_warning_faction = attack.faction.clone();
+                events.push(GameEvent::LogMessage(warning));
+                self.last_attack_time = state.game_time - attack_cooldown + 1;
+                return events;
+            }
+            state.attack_warning.clear();
+            state.attack_warning_faction.clear();
+            
             let attack_events = self.execute_attack(state, config, &attack);
 
             if !attack_events.is_empty() {
@@ -1215,9 +1232,6 @@ impl RebelSystem {
                     self.stats.successful_attacks += 1;
                     self.morale = (self.morale + 0.06).min(1.0);
                     self.psych_pressure = (self.psych_pressure + 0.05).min(1.0);
-                    self.target_value_estimate.insert(
-                        "last_attack".to_string(), attack.expected_gain as f64
-                    );
                 } else {
                     self.stats.failed_attacks += 1;
                     self.morale = (self.morale - 0.04).max(0.2);
@@ -1331,7 +1345,6 @@ impl RebelSystem {
                 details: format!("Успешная атака! {} нанес урон", faction_display),
             });
 
-            self.stats.successful_attacks += 1;
             self.morale = (self.morale + 0.06).min(1.0);
         } else {
             events.push(GameEvent::LogMessage(format!("🛡️ Атака {} отражена!", attack.faction)));
@@ -1352,7 +1365,7 @@ impl RebelSystem {
                 else if result_details.is_empty() { "нанесён урон системам".to_string() }
                 else { result_details }
             } else { "отражена".to_string() },
-            game_time: state.game_time,  // ← добавлено поле
+            game_time: state.game_time,
         };
 
         state.attack_history.push_back(record);
@@ -1391,7 +1404,6 @@ impl RebelSystem {
         let mut events = Vec::new();
         let mut completed = Vec::new();
 
-        // Исправленная итерация по mutable borrow
         let op_list: Vec<(String, ActiveOperation)> = self.active_operations.iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -1448,7 +1460,6 @@ impl RebelSystem {
         manpower_ok && self.active_operations.len() < 4
     }
 
-    // ========== ГЕТТЕРЫ ==========
     pub fn get_faction_info(&self) -> Vec<String> {
         self.factions.values()
             .filter(|f| f.personnel.operatives > 0)

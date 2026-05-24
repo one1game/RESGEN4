@@ -1,5 +1,11 @@
 // game.js
 // ИСПРАВЛЕННАЯ ВЕРСИЯ - добавлена загрузка прогресса квестов и защита от конфликтов
+// ПАТЧ 3.3: добавлен единый ключ сохранения и миграция
+// БАГ #6: добавлена функция applyPendingLoot при инициализации
+// БАГ #12: исправлен расчёт подсказки по углю (читает из конфига)
+// БАГ #13: handleLogout очищает corebox_pending_loot
+// БАГ #36: designModule?.updateComputationalPower?.() с проверкой
+// БАГ #41: ограничен комбо-мультипликатор
 
 import init, { start_game, apply_config_from_admin } from './pkg/corebox_rs.js';
 import { initStatistics, updateStatisticsDisplay, switchTab, gameStats, loadUserStatistics, resetUserStatistics, updateStatisticsFromRust } from './statistics.js';
@@ -11,6 +17,7 @@ import { Sounds } from './sounds.js';
 import { initAuth, logout, getCurrentUser, login, register } from './auth.js';
 import { saveGameToCloud, loadGameFromCloud, syncStatisticsToCloud } from './save.js';
 import { supabase } from './supabase.js';
+import { GameBus, EVENTS } from './game-events.js';
 import {
     sendShip,
     processArrivedMissions,
@@ -34,6 +41,36 @@ const BASE_TRADES = [
 
 const RES_ICON = { coal: '🪨', ore: '⛏️', chips: '🎛️', plasma: '⚡', trash: '🗑️' };
 const RES_NAME = { coal: 'уголь', ore: 'руда', chips: 'чип', plasma: 'плазма' };
+
+const SAVE_KEY = (userId) => `corebox_v2_${userId || 'local'}`;
+
+function migrateLegacySaves(userId) {
+    const legacyKeys = ['corebox_save', 'corebox_save_universal', 'corebox_save_backup'];
+    let bestSave = null;
+    let bestTs = 0;
+    
+    for (const key of legacyKeys) {
+        try {
+            const raw = localStorage.getItem(key);
+            if (!raw) continue;
+            const parsed = JSON.parse(raw);
+            const ts = parsed.timestamp || parsed._savedAt || 0;
+            if (ts > bestTs) {
+                bestTs = ts;
+                bestSave = parsed;
+            }
+        } catch(e) {}
+    }
+    
+    if (bestSave) {
+        const newKey = SAVE_KEY(userId);
+        localStorage.setItem(newKey, JSON.stringify(bestSave));
+        legacyKeys.forEach(k => localStorage.removeItem(k));
+        console.log('✅ Мигрировано старое сохранение');
+        return bestSave;
+    }
+    return null;
+}
 
 let activeDiscount = null;
 let lastDiscountNight = -1;
@@ -71,6 +108,20 @@ let _universalChannel = null;
 let _keepAliveChannel = null;
 
 let cachedRustStats = null;
+
+// БАГ #6: функция применения отложенного лута
+async function applyPendingLoot() {
+    const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
+    if (Object.keys(pending).length === 0) return;
+    if (!game) return;
+    
+    if (pending.ore > 0) game.add_resource('ore', pending.ore);
+    if (pending.chips > 0) game.add_resource('chips', pending.chips);
+    if (pending.plasma > 0) game.add_resource('plasma', pending.plasma);
+    
+    addToLog(`📦 Восстановлен лут из предыдущей сессии`);
+    localStorage.removeItem('corebox_pending_loot');
+}
 
 function rollNightDiscount(nightIndex) {
     if (nightIndex === lastDiscountNight) return;
@@ -162,7 +213,6 @@ function stopLastSeenUpdater() {
     }
 }
 
-// БАГ #6 ИСПРАВЛЕНИЕ: cloudSaveNow с восстановлением флота, чертежей и планетарных миссий при конфликте
 async function cloudSaveNow(force = false) {
     if (!currentUser || !game) return;
     if (_isSaving && !force) return;
@@ -189,13 +239,13 @@ async function cloudSaveNow(force = false) {
                 setTimeout(() => { indicator.style.opacity = '0'; }, 2000);
             }
             console.log('✅ Облачное сохранение успешно');
+            GameBus.emit(EVENTS.CLOUD_SAVE_DONE, { timestamp: Date.now() });
         } else if (result.error === "Конфликт: облако новее" && result.server_save) {
             addToLog("⚠️ Обнаружен конфликт сохранений, выполняем объединение данных", "warning");
             
             try {
                 game.load_game_state(JSON.stringify(result.server_save));
                 
-                // БАГ #6: объединение флота
                 if (result.server_save.fleet && Array.isArray(result.server_save.fleet) && window.fleetModule) {
                     const cloudFleet = result.server_save.fleet;
                     const localFleet = currentFleetBackup || window.fleetModule.ships || [];
@@ -212,7 +262,6 @@ async function cloudSaveNow(force = false) {
                     }
                 }
                 
-                // БАГ #6: восстановление планетарных миссий из облака при конфликте
                 if (result.server_save.active_planet_missions && window.fleetModule && window.spaceModule) {
                     try {
                         const cloudMissions = result.server_save.active_planet_missions;
@@ -248,7 +297,6 @@ async function cloudSaveNow(force = false) {
                     }
                 }
                 
-                // БАГ #6: объединение чертежей
                 if (result.server_save.blueprints && window.designModule) {
                     const cloudBlueprints = result.server_save.blueprints;
                     const localBlueprints = window.designModule.blueprints || [];
@@ -671,6 +719,8 @@ function syncUIAfterCloudLoad(cloudSave) {
         localStorage.setItem('corebox_autoclicking', cloudSave.auto_clicking ? 'true' : 'false');
     }
     
+    const unifiedKey = SAVE_KEY(currentUser?.id);
+    localStorage.setItem(unifiedKey, JSON.stringify(cloudSave));
     localStorage.setItem('corebox_save_backup', JSON.stringify(cloudSave));
     localStorage.setItem('corebox_save_universal', JSON.stringify({
         inventory: cloudSave.inventory,
@@ -681,7 +731,6 @@ function syncUIAfterCloudLoad(cloudSave) {
     }));
 }
 
-// БАГ #3 ИСПРАВЛЕНИЕ: функция восстановления планетарных миссий
 window._restorePlanetMissions = function() {
     if (!game || !window.fleetModule) return;
     try {
@@ -715,6 +764,7 @@ window._restorePlanetMissions = function() {
 async function loadFromCloudAndMerge() {
     if (!currentUser || !game) return null;
     
+    const unifiedKey = SAVE_KEY(currentUser.id);
     const localBackup = localStorage.getItem('corebox_save_backup');
     const localUniversal = localStorage.getItem('corebox_save_universal');
     
@@ -723,8 +773,17 @@ async function loadFromCloudAndMerge() {
         
         if (cloudSave) {
             let localTimestamp = 0;
+            
+            const unifiedRaw = localStorage.getItem(unifiedKey);
+            if (unifiedRaw) {
+                try {
+                    const unified = JSON.parse(unifiedRaw);
+                    localTimestamp = Math.max(localTimestamp, unified.timestamp || 0);
+                } catch(e) {}
+            }
+            
             if (localBackup) {
-                try { localTimestamp = JSON.parse(localBackup).timestamp || 0; } catch(e) {}
+                try { localTimestamp = Math.max(localTimestamp, JSON.parse(localBackup).timestamp || 0); } catch(e) {}
             }
             if (localUniversal) {
                 try {
@@ -765,6 +824,7 @@ async function loadFromCloudAndMerge() {
                             max_computational_power: cloudSave.max_computational_power || 1000,
                             nights_survived: cloudSave.nights_survived || 0,
                             manual_clicks: cloudSave.total_mined || 0,
+                            total_mined: cloudSave.total_mined || cloudSave.manual_clicks || 0,
                             neuro_evolution: cloudSave.neuro?.evolution || 0,
                             neuro_consciousness: cloudSave.neuro?.consciousness || 0,
                             neuro_score: cloudSave.neuro?.score || 0,
@@ -799,7 +859,6 @@ async function loadFromCloudAndMerge() {
                     game.load_game_state(JSON.stringify(rustFormatSave));
                     addToLog(`💾 Загружено облачное сохранение (${new Date(cloudSave.timestamp).toLocaleString()})`);
                     
-                    // БАГ #3: восстанавливаем флот из облачного сохранения
                     if (cloudSave.fleet && Array.isArray(cloudSave.fleet) && window.fleetModule) {
                         const storageKey = window.fleetModule._getStorageKey();
                         localStorage.setItem(storageKey, JSON.stringify(cloudSave.fleet));
@@ -810,7 +869,6 @@ async function loadFromCloudAndMerge() {
                         console.log(`✅ Флот восстановлен из облака: ${cloudSave.fleet.length} кораблей`);
                     }
                     
-                    // БАГ #3: восстанавливаем планетарные миссии
                     if (window._restorePlanetMissions) {
                         setTimeout(() => window._restorePlanetMissions(), 500);
                     }
@@ -841,6 +899,8 @@ async function loadFromCloudAndMerge() {
                             window.spaceModule.renderPlanets();
                         }, 500);
                     }
+                    
+                    GameBus.emit(EVENTS.CLOUD_LOAD_DONE, { save: cloudSave });
                 }, 100);
                 
                 if (cloudSave.blueprints) {
@@ -1290,6 +1350,9 @@ function initializeAuth() {
     initAuth(
         async (user) => {
             currentUser = user;
+            
+            const migrated = migrateLegacySaves(user.id);
+            
             showGameUI();
             updateUserDisplay(user);
             document.getElementById('userInfo').style.display = 'block';
@@ -1303,10 +1366,12 @@ function initializeAuth() {
             
             if (cloudSave) {
                 addToLog(`✅ Загружено облачное сохранение (уровень нейро: ${cloudSave.neuro?.evolution || 0})`);
+            } else if (migrated) {
+                addToLog(`✅ Загружено мигрированное сохранение`);
             }
             
             if (!isGameInitialized) {
-                await initializeGame(cloudSave);
+                await initializeGame(cloudSave || migrated);
             } else {
                 _initMultiplayer(user);
             }
@@ -1330,6 +1395,7 @@ function initializeAuth() {
             currentUser = null;
             showAuthUI();
             isGameInitialized = false;
+            GameBus.clear();
         }
     );
 }
@@ -1478,13 +1544,17 @@ async function handleLogout() {
     if (_fleetUITimer) { clearInterval(_fleetUITimer); _fleetUITimer = null; }
     offlineProgressShown = false;
     
+    // БАГ #13: очистка pending_loot при выходе
+    localStorage.removeItem('corebox_pending_loot');
+    
     if (currentUser && game) {
         addToLog("💾 Сохраняем прогресс перед выходом...");
         await cloudSaveNow(true);
         
         const state = getCurrentGameState();
         if (state) {
-            localStorage.setItem('corebox_save', JSON.stringify(state));
+            const unifiedKey = SAVE_KEY(currentUser.id);
+            localStorage.setItem(unifiedKey, JSON.stringify(state));
             addToLog("💾 Локальное сохранение создано");
         }
         
@@ -1559,6 +1629,7 @@ function updatePowerGlow() {
     else if (percent > 0) btn.classList.add('power-low');
 }
 
+// БАГ #10: исправлен updateTurbineStatus (убраны ложные "Перегрев")
 function updateTurbineStatus(stats) {
     const heat = stats?.turbine_heat ?? 0;
     const isCooling = stats?.turbine_cooling ?? false;
@@ -1577,20 +1648,21 @@ function updateTurbineStatus(stats) {
         const secsToZero = ticksToZero;
         if (hint) hint.textContent = `Добыча заблокирована. Остынет через ~${secsToZero} сек`;
     } else if (isCooling) {
-        bar.classList.add('turbine-warm');
+        const colorClass = heat >= 70 ? 'turbine-hot' : heat >= 40 ? 'turbine-warm' : 'turbine-cool';
+        bar.classList.add(colorClass);
         label.textContent = `🌡️ Остывание: ${heat}%`;
         if (hint) hint.textContent = '';
     } else if (heat >= 70) {
         bar.classList.add('turbine-hot');
-        label.textContent = `🌡️ Перегрев: ${heat}%`;
+        label.textContent = `🌡️ Нагрев: ${heat}%`;
         if (hint) hint.textContent = '';
     } else if (heat >= 40) {
         bar.classList.add('turbine-warm');
-        label.textContent = `🌡️ Перегрев: ${heat}%`;
+        label.textContent = `🌡️ Нагрев: ${heat}%`;
         if (hint) hint.textContent = '';
     } else {
         bar.classList.add('turbine-cool');
-        label.textContent = `🌡️ Перегрев: ${heat}%`;
+        label.textContent = `🌡️ Температура: ${heat}%`;
         if (hint) hint.textContent = '';
     }
 }
@@ -1655,8 +1727,10 @@ function updateNeuroStatus(rustStats = null) {
             
             if (rustStats.coal_inventory !== undefined) {
                 const coalLeft = rustStats.coal_inventory;
-                const avgNightCost = 2;
-                const avgDayCost = 1;
+                // БАГ #12: чтение из конфига
+                const cfg = window.gameConfig?.coal_consumption_config;
+                const avgNightCost = cfg ? (cfg.night_coal_min + cfg.night_coal_max) / 2 : 2;
+                const avgDayCost = cfg ? (cfg.day_coal_min + cfg.day_coal_max) / 2 : 1;
                 const cyclesLeft = Math.floor(coalLeft / (avgNightCost + avgDayCost));
                 const coalHintEl = document.getElementById('coalNightsHint');
                 if (coalHintEl) {
@@ -1668,8 +1742,11 @@ function updateNeuroStatus(rustStats = null) {
             }
             
             if (rustStats.computational_power !== undefined) {
-                designModule.updateComputationalPower(rustStats.computational_power);
+                // БАГ #36: проверка существования
+                designModule?.updateComputationalPower?.(rustStats.computational_power);
             }
+            
+            GameBus.emit(EVENTS.STATS_UPDATED, rustStats);
         }
     } catch(e) {}
 }
@@ -1721,16 +1798,28 @@ function updateAttackHistory(history) {
 function updateFactionPanel(factions, lastAttacker) {
     const container = document.getElementById('factionPanel');
     if (!container || !factions?.length) { if (container) container.innerHTML = '<div class="faction-empty">Нет данных о фракциях</div>'; return; }
-    container.innerHTML = factions.map(f => `<div class="faction-row ${f.includes(lastAttacker) && lastAttacker ? 'faction-active' : ''}">${escapeHtml(f)}</div>`).join('');
+    // БАГ #21: экранирование перед includes
+    const escapedLastAttacker = escapeHtml(lastAttacker || '');
+    container.innerHTML = factions.map(f => {
+        const escaped = escapeHtml(f);
+        const isActive = lastAttacker && f.includes(lastAttacker);
+        return `<div class="faction-row ${isActive ? 'faction-active' : ''}">${escaped}</div>`;
+    }).join('');
 }
 
+// БАГ #17: исправлен getCritChance (синхронизация с Rust)
 function getCritChance(stats) {
-    return 0.05 + Math.min((stats?.neuro_evolution || 0) / 500, 0.1) + getPrestigeBonus().critBonus + ((stats?.crit_level || 0) * 0.02);
+    const baseCrit = window.gameConfig?.mining_config?.critical_chance ?? 0.09;
+    const heatPenalty = 1.0 - Math.min((stats?.turbine_heat || 0) / 200, 1.0);
+    const critModule = (stats?.crit_level || 0) * 0.02;
+    const neuroCrit = Math.min((stats?.neuro_evolution || 0) / 500, 0.1);
+    return Math.min((baseCrit + critModule + neuroCrit) * heatPenalty + getPrestigeBonus().critBonus, 0.25);
 }
 
+// БАГ #41: ограничен комбо-мультипликатор
 function getComboMultiplier() {
     const evol = game?.get_neuro_evolution ? game.get_neuro_evolution() : 0;
-    return 1 + Math.min(evol / 200, 1.5) + getPrestigeBonus().comboBonus;
+    return Math.min(1 + Math.min(evol / 200, 1.5) + getPrestigeBonus().comboBonus, 5.0);
 }
 
 function updateStatsFromGame(rustStats) {
@@ -2236,6 +2325,7 @@ window.executeTrade = function(tradeId) {
         Sounds.trade && Sounds.trade();
         renderTradeTab();
         scheduleCloudSave();
+        GameBus.emit(EVENTS.TRADE_DONE, { trade: t, amount: t.toAmt });
     } catch(e) { addToLog('❌ Недостаточно ресурсов'); Sounds.error(); }
 };
 
@@ -2302,6 +2392,7 @@ function setupEventListeners() {
             notif.textContent = e.detail.success ? e.detail.message : e.detail.error;
             document.body.appendChild(notif);
             setTimeout(() => notif.remove(), 2000);
+            if (e.detail.success) GameBus.emit(EVENTS.CRAFT_DONE, e.detail);
         }
     });
     document.addEventListener('designResult', (e) => { 
@@ -2356,6 +2447,8 @@ async function loadConfig() {
             lastConfigHash = hash;
             try { apply_config_from_admin(configStr); } catch(e) {}
             if (game) game.reload_config();
+            // Сохраняем конфиг в глобальную переменную для доступа из других модулей
+            try { window.gameConfig = JSON.parse(configStr); } catch(e) {}
         }
     } catch(e) {
         addToLog('⚠️ Конфиг не обновлён (нет соединения)', 'warning');
@@ -2373,6 +2466,9 @@ async function initializeGame(existingSave = null) {
         game = start_game();
         window.game = game;
         window.fleetModule = fleetModule;
+        
+        // БАГ #6: применение отложенного лута
+        await applyPendingLoot();
         
         let loadedFromCloud = false;
         
@@ -2400,6 +2496,7 @@ async function initializeGame(existingSave = null) {
                         max_computational_power: existingSave.max_computational_power || 1000,
                         nights_survived: existingSave.nights_survived || 0,
                         manual_clicks: existingSave.total_mined || 0,
+                        total_mined: existingSave.total_mined || existingSave.manual_clicks || 0,
                         neuro_evolution: existingSave.neuro?.evolution || 0,
                         neuro_consciousness: (() => {
                             let c = existingSave.neuro?.consciousness || 0;
@@ -2574,7 +2671,6 @@ async function initializeGame(existingSave = null) {
             }
         }, 5000);
         
-        // БАГ #3: вызов восстановления планетарных миссий
         setTimeout(() => {
             if (window._restorePlanetMissions) {
                 window._restorePlanetMissions();
@@ -2745,7 +2841,7 @@ async function initializeGame(existingSave = null) {
                 rollNightDiscount(cachedRustStats.nights_survived);
             }
             
-            const fleetCombat = fleetModule.getFleetDefenseContribution();
+            const fleetCombat = fleetModule.getFleetDefenseContribution(cachedRustStats.defense_debuff_remaining || 0);
             const fleetCargo = fleetModule.getCargoMiningBonus();
             try {
                 if (typeof game.set_fleet_defense_bonus === 'function' && fleetCombat > 0) game.set_fleet_defense_bonus(Math.floor(fleetCombat / 50));
@@ -2849,7 +2945,11 @@ window.addEventListener('beforeunload', () => {
             game.save_current_state();
         }
         const state = getCurrentGameState();
-        if (state) localStorage.setItem('corebox_save_backup', JSON.stringify(state));
+        const unifiedKey = SAVE_KEY(currentUser?.id);
+        if (state) {
+            localStorage.setItem(unifiedKey, JSON.stringify(state));
+            localStorage.setItem('corebox_save_backup', JSON.stringify(state));
+        }
         saveCurrentUserStatistics();
         updateLastSeen();
     }

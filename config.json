@@ -46,8 +46,6 @@
     "mining_cost_multiplier": 3,
     "mining_max_level": 10,
     "defense_activation_cost": 1,
-    "defense_base_power": 45,
-    "defense_level_bonus": 14,
     "defense_max_level": 5
   },
 
@@ -176,7 +174,7 @@
     "initial_plasma": 0,
     "initial_ore": 0,
     "max_inventory_stack": 9999,
-    "rebel_protection_cost": 80,
+    "rebel_protection_cost": 100,
     "base_mining_bonus": 3,
     "coal_mining_bonus": 2,
     "ore_mining_bonus": 2

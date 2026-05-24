@@ -72,6 +72,24 @@ export class CoreGame {
         wasm.coregame_clear_log(this.__wbg_ptr);
     }
     /**
+     * @param {string} mission_id
+     * @returns {string}
+     */
+    complete_planet_mission(mission_id) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(mission_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.coregame_complete_planet_mission(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * @returns {string}
      */
     craft_cargo_ship() {
@@ -424,6 +442,24 @@ export class CoreGame {
     sync_blueprints(cargo, scout, combat) {
         wasm.coregame_sync_blueprints(this.__wbg_ptr, cargo, scout, combat);
     }
+    /**
+     * @param {string} fleet_json
+     * @returns {string}
+     */
+    sync_fleet_from_js(fleet_json) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ptr0 = passStringToWasm0(fleet_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.coregame_sync_fleet_from_js(this.__wbg_ptr, ptr0, len0);
+            deferred2_0 = ret[0];
+            deferred2_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
     toggle_coal() {
         wasm.coregame_toggle_coal(this.__wbg_ptr);
     }
@@ -724,9 +760,6 @@ function __wbg_get_imports() {
         __wbg_versions_276b2795b1c6a219: function(arg0) {
             const ret = arg0.versions;
             return ret;
-        },
-        __wbg_warn_c4e0780980765a86: function(arg0) {
-            console.warn(arg0);
         },
         __wbindgen_cast_0000000000000001: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.

@@ -1,4 +1,7 @@
-// ========== mobile-patch.js (ИСПРАВЛЕННАЯ ВЕРСИЯ + БАГ #10) ==========
+// ========== mobile-patch.js (ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+// БАГ #31: исправлена проверка lastTouchTarget для двойного тапа
+// БАГ #32: MutationObserver для fixInputZoom теперь отключается
+// БАГ #33: bodyObserver использует subtree: true
 
 /**
  * CoreBox 3.2 — МОБИЛЬНЫЙ JS-ПАТЧ
@@ -69,7 +72,7 @@
     }
   }, { passive: true });
 
-  // Плавающая кнопка с long-press (ИСПРАВЛЕНА)
+  // Плавающая кнопка с long-press
   function patchFloatingButton() {
     const oldBtn = document.getElementById('floatingMineBtn');
     if (!oldBtn) return null;
@@ -199,6 +202,7 @@
     return btn;
   }
 
+  // БАГ #33: bodyObserver использует subtree: true
   function watchGameNotifications () {
     const bodyObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
@@ -220,7 +224,7 @@
         }
       }
     });
-    bodyObserver.observe(document.body, { childList: true, subtree: false });
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
 
     const warningEl = document.getElementById('attackWarning');
     if (warningEl) {
@@ -275,6 +279,7 @@
     }, 100);
   }
 
+  // БАГ #31: исправлена проверка lastTouchTarget
   function preventDoubleTapZoom () {
     let lastTouch = 0;
     let lastTouchTarget = null;
@@ -285,7 +290,12 @@
       const now = Date.now();
       const delta = now - lastTouch;
       
-      if (delta < 300 && delta > 0 && lastTouchTarget === e.target) {
+      // БАГ #31: проверка на contains для дочерних элементов
+      const isSameElement = lastTouchTarget === e.target || 
+                           (lastTouchTarget && lastTouchTarget.contains(e.target)) ||
+                           (e.target && e.target.contains(lastTouchTarget));
+      
+      if (delta < 300 && delta > 0 && isSameElement) {
         if (e.target.closest('button, .tab, .status-tab, .craft-btn, .design-btn, .ship-btn, .upgrade-btn, .stat-btn, .log-btn, .auth-btn, .trade-mode-btn, .toggle-btn, .logout-btn')) {
           e.preventDefault();
         }
@@ -323,6 +333,9 @@
     }, { passive: false });
   }
 
+  // БАГ #32: MutationObserver теперь отключается
+  let _inputZoomObserver = null;
+  
   function fixInputZoom () {
     document.querySelectorAll('input, select, textarea').forEach(el => {
       if (parseFloat(getComputedStyle(el).fontSize) < 16) {
@@ -330,15 +343,27 @@
       }
     });
     
-    const observer = new MutationObserver(() => {
+    if (_inputZoomObserver) {
+      _inputZoomObserver.disconnect();
+    }
+    
+    _inputZoomObserver = new MutationObserver(() => {
       document.querySelectorAll('input, select, textarea').forEach(el => {
         if (parseFloat(getComputedStyle(el).fontSize) < 16) {
           el.style.fontSize = '16px';
         }
       });
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    _inputZoomObserver.observe(document.body, { childList: true, subtree: true });
   }
+  
+  // Функция для отключения observer при выходе
+  window._disconnectInputZoomObserver = function() {
+    if (_inputZoomObserver) {
+      _inputZoomObserver.disconnect();
+      _inputZoomObserver = null;
+    }
+  };
 
   function optimizePerformance() {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {

@@ -1,4 +1,11 @@
 // fleet.js - ИСПРАВЛЕННАЯ ВЕРСИЯ (добавлены таймеры и правильное сохранение)
+// БАГ #2: исправлено двойное начисление опыта в setShipMissionStatus
+// БАГ #6: добавлена функция applyPendingLoot при инициализации
+// БАГ #7: сохранение _lastCombatResult в sessionStorage
+// БАГ #16: cargo корабль читает travel_time_sec из конфига
+// БАГ #29: getFleetDefenseContribution учитывает defense_debuff
+// БАГ #40: _renderCommandCenter с ограничением попыток
+// БАГ #47: getScoutReconBonus исправлен (speed fallback)
 
 import { supabase } from './supabase.js';
 
@@ -18,7 +25,7 @@ export const fleetModule = {
     activePvpMissions: [],
     commandLog: [],
     _flightLineInterval: null,
-    _shipTimerInterval: null,      // БАГ #1: интервал для обновления таймеров в карточках
+    _shipTimerInterval: null,
     _currentTab: 'inventory',
     
     _lastScoutResult: null,
@@ -117,18 +124,27 @@ export const fleetModule = {
         this._loadDefenseShip();
         this._loadFleetLog();
         
-        const key = `corebox_pvp_missions_${userId || 'anon'}`;
-        const saved = localStorage.getItem(key);
+        // БАГ #7: восстановление _lastCombatResult из sessionStorage
+        const saved = sessionStorage.getItem('last_combat_result');
         if (saved) {
+            this._lastCombatResult = JSON.parse(saved);
+            if (Date.now() - this._lastCombatResult.timestamp > 10 * 60 * 1000) {
+                this._lastCombatResult = null;
+                sessionStorage.removeItem('last_combat_result');
+            }
+        }
+        
+        const key = `corebox_pvp_missions_${userId || 'anon'}`;
+        const savedMissions = localStorage.getItem(key);
+        if (savedMissions) {
             try {
-                this.activePvpMissions = JSON.parse(saved);
+                this.activePvpMissions = JSON.parse(savedMissions);
                 console.log(`🔄 Восстановлено ${this.activePvpMissions.length} PvP-миссий из localStorage`);
             } catch(e) {}
         }
         
         console.log('🚀 Модуль флота инициализирован, кораблей:', this.ships.length);
         
-        // БАГ #1: запускаем таймер обновления карточек кораблей
         this._startShipTimers();
         
         setTimeout(() => {
@@ -228,7 +244,6 @@ export const fleetModule = {
         ).join('');
     },
     
-    // БАГ #1: saveFleet с немедленным облачным сохранением
     saveFleet() {
         const key = this._getStorageKey();
         localStorage.setItem(key, JSON.stringify(this.ships));
@@ -820,7 +835,9 @@ export const fleetModule = {
                 combatShip.targetUserId = null;
                 this.saveFleet();
                 this._addFleetLog(`⚔️ Боевой корабль ${combatShip.name} вернулся. Победа! Можно отправить грузовой.`);
-                this._lastCombatResult = { targetUserId, won: true, completed: true };
+                // БАГ #7: сохранение результата боя
+                this._lastCombatResult = { targetUserId, won: true, completed: true, timestamp: Date.now() };
+                sessionStorage.setItem('last_combat_result', JSON.stringify(this._lastCombatResult));
                 this._renderFleetTab();
             }, travelSec * 1000);
             
@@ -845,7 +862,8 @@ export const fleetModule = {
     },
     
     async sendCargoShipToPlayer(targetUserId) {
-        if (!this._lastCombatResult?.won || this._lastCombatResult.targetUserId !== targetUserId) {
+        // БАГ #7: проверка completed
+        if (!this._lastCombatResult?.won || !this._lastCombatResult?.completed || this._lastCombatResult.targetUserId !== targetUserId) {
             window.showNotif?.('❌ Сначала победите в бою!', true);
             return { success: false, error: 'Сначала победите в бою' };
         }
@@ -860,7 +878,8 @@ export const fleetModule = {
             return { success: false, error: msg };
         }
         
-        const travelSec = 40;
+        // БАГ #16: чтение travel_time_sec из конфига
+        const travelSec = window.gameConfig?.fleet_config?.cargo?.travel_time_sec ?? 40;
         const capacity = 0.50;
         const now = Date.now();
         
@@ -981,12 +1000,17 @@ export const fleetModule = {
         }
     },
     
-    async _renderCommandCenter() {
+    // БАГ #40: _renderCommandCenter с ограничением попыток
+    async _renderCommandCenter(attempt = 0) {
         const el = document.getElementById('commandCenterLog');
         if (!el) return;
         
         if (this.isInitializing) {
-            setTimeout(() => this._renderCommandCenter(), 500);
+            if (attempt > 20) {
+                console.error('Командный пункт: таймаут инициализации');
+                return;
+            }
+            setTimeout(() => this._renderCommandCenter(attempt + 1), 500);
             return;
         }
         
@@ -1030,9 +1054,16 @@ export const fleetModule = {
         }
     },
     
+    // БАГ #2: исправлено начисление опыта
     setShipMissionStatus(shipId, onMission, missionId = null, mission = null) {
         const ship = this.ships.find(s => s.id === shipId);
         if (!ship) return;
+        
+        // БАГ #2: начислять опыт ТОЛЬКО если это финальный вызов и missionId совпадает
+        if (!onMission && ship.currentMissionId !== null && ship.currentMissionId === (missionId || ship.currentMissionId)) {
+            ship.missions = (ship.missions || 0) + 1;
+            ship.experience = (ship.experience || 0) + 10;
+        }
         
         ship.onMission = onMission;
         ship.missionStartedAt = onMission ? Date.now() : null;
@@ -1048,10 +1079,6 @@ export const fleetModule = {
             ship.targetPlanetId = null;
         }
         
-        if (!onMission && ship.currentMissionId !== null) {
-            ship.missions = (ship.missions || 0) + 1;
-            ship.experience = (ship.experience || 0) + 10;
-        }
         if (!onMission) {
             ship.currentMissionId = null;
         }
@@ -1131,10 +1158,15 @@ export const fleetModule = {
             }));
     },
     
-    getFleetDefenseContribution() {
+    // БАГ #29: getFleetDefenseContribution учитывает дебафф защиты
+    getFleetDefenseContribution(defenseDebuffRemaining = 0) {
         let total = this.ships
             .filter(s => s.type === 'combat' && !s.onMission)
             .reduce((total, ship) => total + Math.floor(ship.combat * (ship.health / ship.maxHealth)), 0);
+        
+        if (defenseDebuffRemaining > 0) {
+            total = Math.floor(total * 0.5);
+        }
         
         if (this.alertMultiplier > 1) {
             total = Math.floor(total * this.alertMultiplier);
@@ -1142,10 +1174,14 @@ export const fleetModule = {
         return total;
     },
     
+    // БАГ #47: исправлен getScoutReconBonus
     getScoutReconBonus() {
         return this.ships
             .filter(s => s.type === 'scout' && !s.onMission)
-            .reduce((total, ship) => total + Math.floor(ship.speed * 2 * (ship.health / ship.maxHealth)), 0);
+            .reduce((total, ship) => {
+                const speed = ship.speed ?? 1;
+                return total + Math.floor(speed * 2 * (ship.health / ship.maxHealth));
+            }, 0);
     },
     
     getCargoMiningBonus() {
@@ -1316,12 +1352,10 @@ export const fleetModule = {
         this.saveFleet();
     },
     
-    // БАГ #1: функция запуска таймеров кораблей (обновляет время в карточках)
     _startShipTimers() {
         if (this._shipTimerInterval) clearInterval(this._shipTimerInterval);
         
         this._shipTimerInterval = setInterval(() => {
-            // Обновляем только если вкладка флота активна
             const fleetTab = document.getElementById('fleet-tab');
             const isFleetTabActive = fleetTab && fleetTab.style.display !== 'none';
             
@@ -1333,7 +1367,6 @@ export const fleetModule = {
             this.ships.forEach(ship => {
                 if (!ship.onMission) return;
                 
-                // Проверяем время возврата или прибытия
                 const targetTime = ship.missionReturnsAt || ship.missionArrivesAt;
                 if (!targetTime) return;
                 
@@ -1342,7 +1375,6 @@ export const fleetModule = {
                 const diffSec = Math.floor((diffMs % 60000) / 1000);
                 const timeStr = diffMin > 0 ? `${diffMin}м ${diffSec}с` : `${diffSec}с`;
                 
-                // Обновляем текст в карточке корабля
                 const shipCard = document.querySelector(`[data-ship-id="${ship.id}"]`);
                 if (shipCard) {
                     const statusEl = shipCard.querySelector('.ship-status');
@@ -1357,7 +1389,6 @@ export const fleetModule = {
                     }
                 }
                 
-                // Если время истекло - освобождаем корабль
                 if (diffMs <= 0 && ship.onMission) {
                     ship.onMission = false;
                     ship.currentMissionId = null;
@@ -1385,12 +1416,18 @@ export const fleetModule = {
         this._renderFleetLog();
         this._renderCommandCenter();
         
-        // БАГ #1: перезапускаем таймеры при перерисовке
         this._startShipTimers();
     },
     
     renderFleetUI() {
-        const defenseBonus = Math.floor(this.getFleetDefenseContribution() / 50);
+        // БАГ #29: получаем defense_debuff_remaining из game
+        let defenseDebuffRemaining = 0;
+        try {
+            const stats = JSON.parse(this.game.get_statistics());
+            defenseDebuffRemaining = stats.defense_debuff_remaining || 0;
+        } catch(e) {}
+        
+        const defenseBonus = Math.floor(this.getFleetDefenseContribution(defenseDebuffRemaining) / 50);
         const reconBonus = this.getScoutReconBonus();
         const cargoBonus = this.getCargoMiningBonus();
         const defenseShip = this.getDefenseShip();
@@ -1410,7 +1447,7 @@ export const fleetModule = {
                     <span>🚀 ФЛОТ</span>
                     <div class="fleet-stats">
                         <span>Кораблей: ${this.ships.length}/${this.maxFleetSize}</span>
-                        <span>⚔️ Боевая мощь: ${this.getFleetDefenseContribution()}</span>
+                        <span>⚔️ Боевая мощь: ${this.getFleetDefenseContribution(defenseDebuffRemaining)}</span>
                         <span>📦 Грузоподъемность: ${this.getTotalCapacity()}</span>
                     </div>
                 </div>
@@ -1561,7 +1598,7 @@ export const fleetModule = {
                         <button id="pvp-combat-btn" style="background:rgba(255,74,74,0.15);border:1px solid rgba(255,74,74,0.4);border-radius:6px;padding:6px 12px;color:#ff6a6a;cursor:pointer;">
                             ⚔️ АТАКОВАТЬ (БОЕВОЙ)
                         </button>
-                        ${this._lastCombatResult?.won ? `
+                        ${this._lastCombatResult?.won && this._lastCombatResult?.completed ? `
                         <button id="pvp-cargo-btn" style="background:rgba(255,170,0,0.15);border:1px solid rgba(255,170,0,0.4);border-radius:6px;padding:6px 12px;color:#ffaa44;cursor:pointer;">
                             📦 ОГРАБИТЬ (ГРУЗОВОЙ)
                         </button>
@@ -1660,7 +1697,7 @@ export const fleetModule = {
         const cargoBtn = document.getElementById('pvp-cargo-btn');
         if (cargoBtn) {
             cargoBtn.onclick = () => {
-                if (this._lastCombatResult) {
+                if (this._lastCombatResult && this._lastCombatResult.completed) {
                     this.sendCargoShipToPlayer(this._lastCombatResult.targetUserId);
                     setTimeout(() => this._renderFleetTab(), 500);
                 }
@@ -1672,6 +1709,7 @@ export const fleetModule = {
             resetBtn.onclick = () => {
                 this._lastScoutResult = null;
                 this._lastCombatResult = null;
+                sessionStorage.removeItem('last_combat_result');
                 this._renderFleetTab();
                 window.showNotif?.('🗑️ Цель сброшена', false);
             };
