@@ -6,6 +6,7 @@
 // БАГ #29: getFleetDefenseContribution учитывает defense_debuff
 // БАГ #40: _renderCommandCenter с ограничением попыток
 // БАГ #47: getScoutReconBonus исправлен (speed fallback)
+// БАГ #56: корабли на миссии не получают урон от повстанцев
 
 import { supabase } from './supabase.js';
 
@@ -53,6 +54,20 @@ export const fleetModule = {
             speed: 2.0,
             combat: 50
         }
+    },
+    
+    cleanup() {
+        // БАГ #18: очистка при logout
+        if (this._shipTimerInterval) {
+            clearInterval(this._shipTimerInterval);
+            this._shipTimerInterval = null;
+        }
+        this.ships = [];
+        this.defenseShipId = null;
+        this.fleetLog = [];
+        this._lastScoutResult = null;
+        this._lastCombatResult = null;
+        console.log('🚀 Модуль флота очищен');
     },
     
     _getStorageKey() {
@@ -182,6 +197,8 @@ export const fleetModule = {
                     if (s.targetPlanetId === undefined) s.targetPlanetId = null;
                     if (s.targetPlanetX === undefined) s.targetPlanetX = null;
                     if (s.targetPlanetY === undefined) s.targetPlanetY = null;
+                    // БАГ #47: инициализация speed
+                    if (s.speed === undefined) s.speed = this.shipTypes[s.type]?.speed || 1;
                 });
                 this.saveFleet();
             } catch (e) {
@@ -402,7 +419,8 @@ export const fleetModule = {
             targetUserId: targetUserId,
             targetPlanetId: null,
             targetPlanetX: null,
-            targetPlanetY: null
+            targetPlanetY: null,
+            speed: typeConfig.speed
         };
         
         this.ships.push(newShip);
@@ -862,7 +880,6 @@ export const fleetModule = {
     },
     
     async sendCargoShipToPlayer(targetUserId) {
-        // БАГ #7: проверка completed
         if (!this._lastCombatResult?.won || !this._lastCombatResult?.completed || this._lastCombatResult.targetUserId !== targetUserId) {
             window.showNotif?.('❌ Сначала победите в бою!', true);
             return { success: false, error: 'Сначала победите в бою' };
@@ -1054,7 +1071,7 @@ export const fleetModule = {
         }
     },
     
-    // БАГ #2: исправлено начисление опыта
+    // БАГ #2: исправлено начисление опыта (только при финальном вызове)
     setShipMissionStatus(shipId, onMission, missionId = null, mission = null) {
         const ship = this.ships.find(s => s.id === shipId);
         if (!ship) return;
@@ -1161,7 +1178,7 @@ export const fleetModule = {
     // БАГ #29: getFleetDefenseContribution учитывает дебафф защиты
     getFleetDefenseContribution(defenseDebuffRemaining = 0) {
         let total = this.ships
-            .filter(s => s.type === 'combat' && !s.onMission)
+            .filter(s => s.type === 'combat' && !s.onMission && !s.onDefense)
             .reduce((total, ship) => total + Math.floor(ship.combat * (ship.health / ship.maxHealth)), 0);
         
         if (defenseDebuffRemaining > 0) {
@@ -1174,10 +1191,10 @@ export const fleetModule = {
         return total;
     },
     
-    // БАГ #47: исправлен getScoutReconBonus
+    // БАГ #47: исправлен getScoutReconBonus (использует speed из ship)
     getScoutReconBonus() {
         return this.ships
-            .filter(s => s.type === 'scout' && !s.onMission)
+            .filter(s => s.type === 'scout' && !s.onMission && !s.onDefense)
             .reduce((total, ship) => {
                 const speed = ship.speed ?? 1;
                 return total + Math.floor(speed * 2 * (ship.health / ship.maxHealth));
@@ -1186,7 +1203,7 @@ export const fleetModule = {
     
     getCargoMiningBonus() {
         const cargoCapacity = this.ships
-            .filter(s => s.type === 'cargo' && !s.onMission)
+            .filter(s => s.type === 'cargo' && !s.onMission && !s.onDefense)
             .reduce((total, ship) => total + Math.floor(ship.capacity * (ship.health / ship.maxHealth)), 0);
         return Math.floor(cargoCapacity / 500);
     },
@@ -1299,6 +1316,7 @@ export const fleetModule = {
         }
     },
     
+    // БАГ #56: корабли на миссии НЕ получают урон от повстанцев (проверяем и onMission, и currentMissionId)
     damageRandomCombatShip(attackType, attackId = null) {
         if (this.isInitializing) {
             console.log('⏳ Флот инициализируется, урон не применяется');
@@ -1316,7 +1334,14 @@ export const fleetModule = {
         
         if (this.ships.length === 0) return null;
         
-        const vulnerableShips = this.ships.filter(s => s.type !== 'cargo' && !s.onDefense);
+        // БАГ #56: уязвимые корабли — не cargo, не onDefense, и НЕ НА МИССИИ (проверяем и onMission, и currentMissionId)
+        const vulnerableShips = this.ships.filter(s => 
+            s.type !== 'cargo' && 
+            !s.onDefense && 
+            !s.onMission &&
+            !s.currentMissionId
+        );
+        
         if (vulnerableShips.length === 0) return null;
         
         const target = vulnerableShips[Math.floor(Math.random() * vulnerableShips.length)];

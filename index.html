@@ -1,4 +1,4 @@
-<!-- index.html (ИСПРАВЛЕНА: добавлен контейнер для зума и кнопки) -->
+<!-- index.html (ИСПРАВЛЕНА: добавлены стили для новых визуальных эффектов) -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -18,6 +18,8 @@
             .inventory-grid { grid-template-columns: repeat(3, 1fr); }
             .stat-card-large { min-width: auto; }
         }
+        
+        /* Уведомления */
         .notification {
             position: fixed;
             bottom: 20px;
@@ -45,6 +47,8 @@
             70% { opacity: 1; }
             100% { opacity: 0; transform: translateX(-50%) translateY(-20px); visibility: hidden; }
         }
+        
+        /* Оффлайн попап */
         .offline-popup {
             position: fixed;
             top: 50%;
@@ -70,16 +74,16 @@
             font-weight: bold;
             border-radius: 8px;
         }
-        .fade-out {
-            transition: opacity 0.5s ease-out;
-            opacity: 0;
-        }
-        .craft-btn.processing, .design-btn.processing, .ship-btn.processing {
-            opacity: 0.5;
-            cursor: wait;
-        }
+        
+        /* Анимации */
+        .fade-out { transition: opacity 0.5s ease-out; opacity: 0; }
+        .craft-btn.processing, .design-btn.processing, .ship-btn.processing { opacity: 0.5; cursor: wait; }
+        
+        /* Авторизация */
         .auth-message.error { color: #ff4444; background: #330000; padding: 8px; border-radius: 6px; margin-top: 10px; }
         .auth-message.success { color: #44ff44; background: #003300; padding: 8px; border-radius: 6px; margin-top: 10px; }
+        
+        /* Автокликер */
         .auto-clicking {
             box-shadow: 0 0 20px #0f0, 0 0 40px #0f0 !important;
             animation: pulse 1s infinite;
@@ -98,14 +102,176 @@
             25% { transform: translateX(-5px); }
             75% { transform: translateX(5px); }
         }
+        
+        /* Мощность */
         .power-full { box-shadow: 0 0 15px #ffaa00; }
         .power-high { box-shadow: 0 0 10px #ff7700; }
         .power-medium { box-shadow: 0 0 5px #ff5500; }
         .power-low { box-shadow: 0 0 2px #ff3300; }
+        
+        /* Турбина */
         .turbine-critical { background: #f00 !important; box-shadow: 0 0 10px red; }
         .turbine-hot { background: #ff6600; }
         .turbine-warm { background: #ffcc00; }
         .turbine-cool { background: #00aaff; }
+        
+        /* ВИЗУАЛ V-1: Живой фон турбины */
+        :root { --turbine-hue: 200; }
+        #floatingMineBtn {
+            background: hsl(var(--turbine-hue), 80%, 15%);
+            transition: background 0.3s ease;
+        }
+        #floatingMineBtn.overheated {
+            animation: overheated-pulse 0.5s infinite;
+        }
+        @keyframes overheated-pulse {
+            0%, 100% { opacity: 1; background: hsl(0, 80%, 20%); }
+            50% { opacity: 0.7; background: hsl(0, 80%, 30%); }
+        }
+        
+        /* ВИЗУАЛ V-2: Пульс угрозы */
+        .rebel-pulse-container {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #rebelPulse {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            animation: pulse-low 2s infinite;
+        }
+        .pulse-low { background: #44ff44; box-shadow: 0 0 5px #44ff44; }
+        .pulse-medium { background: #ffaa44; box-shadow: 0 0 8px #ffaa44; animation: pulse-medium 1s infinite; }
+        .pulse-high { background: #ff4444; box-shadow: 0 0 12px #ff4444; animation: pulse-high 0.5s infinite; }
+        @keyframes pulse-low { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+        @keyframes pulse-medium { 0%,100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
+        @keyframes pulse-high { 0%,100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.6); } }
+        
+        /* ВИЗУАЛ V-6: Прогресс-кольцо */
+        .power-ring {
+            position: absolute;
+            top: -4px;
+            left: -4px;
+            width: calc(100% + 8px);
+            height: calc(100% + 8px);
+            pointer-events: none;
+        }
+        .ring-back {
+            stroke: rgba(255,255,255,0.15);
+            fill: none;
+            stroke-width: 2;
+        }
+        .ring-fill {
+            stroke: #4aff9d;
+            fill: none;
+            stroke-width: 2;
+            stroke-dasharray: 283;
+            stroke-dashoffset: 283;
+            transition: stroke-dashoffset 0.2s linear;
+            filter: drop-shadow(0 0 3px #4aff9d);
+        }
+        .ring-fill.ring-flash {
+            animation: ring-flash 0.3s ease-out;
+        }
+        @keyframes ring-flash {
+            0% { stroke: #4aff9d; stroke-width: 2; }
+            50% { stroke: #ffffff; stroke-width: 4; }
+            100% { stroke: #4aff9d; stroke-width: 2; }
+        }
+        
+        /* ВИЗУАЛ V-4: Карточки кораблей */
+        .ship-card.on-mission .ship-icon {
+            animation: fly 1.5s ease-in-out infinite alternate;
+        }
+        @keyframes fly {
+            from { transform: translateX(-4px); }
+            to { transform: translateX(4px); }
+        }
+        .ship-card.returning .ship-icon {
+            animation: fly-return 1.2s ease-in-out infinite alternate;
+            transform: scaleX(-1);
+        }
+        @keyframes fly-return {
+            from { transform: translateX(4px) scaleX(-1); }
+            to { transform: translateX(-4px) scaleX(-1); }
+        }
+        .ship-card.defense-mode .ship-icon {
+            animation: shield-glow 1s ease-in-out infinite alternate;
+        }
+        @keyframes shield-glow {
+            from { filter: drop-shadow(0 0 4px #4af); }
+            to { filter: drop-shadow(0 0 12px #4af); }
+        }
+        .ship-card.critical-health {
+            animation: critical-shake 0.3s ease-in-out infinite;
+            border-color: #ff4444 !important;
+        }
+        @keyframes critical-shake {
+            0%,100% { transform: translateX(0); }
+            50% { transform: translateX(2px); }
+        }
+        
+        /* ВИЗУАЛ КАРТА-V3: Иконки игроков по уровню нейро */
+        @keyframes glow-pulse {
+            0%,100% { filter: drop-shadow(0 0 4px #ff44ff); }
+            50% { filter: drop-shadow(0 0 12px #ff44ff); }
+        }
+        
+        /* ВИЗУАЛ КАРТА-V5: Угроза в зоне влияния */
+        .other-player-marker.threat-in-range {
+            filter: drop-shadow(0 0 6px #ffaa44);
+            animation: threat-pulse 1s infinite;
+        }
+        @keyframes threat-pulse {
+            0%,100% { opacity: 0.7; }
+            50% { opacity: 1; filter: drop-shadow(0 0 12px #ffaa44); }
+        }
+        
+        /* ВИЗУАЛ КАРТА-V7: Анимация открытия планеты */
+        .planet-new {
+            animation: planet-materialize 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+        }
+        @keyframes planet-materialize {
+            0% { transform: translate(-50%, -50%) scale(0) rotate(-180deg); opacity: 0; filter: brightness(3); }
+            60% { transform: translate(-50%, -50%) scale(1.2) rotate(10deg); opacity: 1; filter: brightness(1.5); }
+            100% { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; filter: brightness(1); }
+        }
+        
+        /* ВИЗУАЛ КАРТА-V2: Звёздный фон с параллаксом */
+        .stars-layer-slow, .stars-layer-medium, .stars-layer-fast {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            transition: transform 0.1s ease-out;
+        }
+        
+        /* ВИЗУАЛ КАРТА-V6: Мини-карта */
+        #space-minimap {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            border: 1px solid rgba(74,255,157,0.27);
+            border-radius: 4px;
+            background: #050505;
+            z-index: 30;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+        }
+        #space-minimap:hover { opacity: 1; }
+        
+        /* КАРТА G-2: Сигнатуры угроз */
+        .threat-pulse {
+            animation: threat-pulse-fast 0.5s infinite;
+        }
+        @keyframes threat-pulse-fast {
+            0%,100% { r: 4px; opacity: 0.8; fill: #ff4444; }
+            50% { r: 8px; opacity: 0.4; fill: #ff8888; }
+        }
+        
+        /* Прочие стили */
         .system-offline { filter: grayscale(0.8); opacity: 0.6; }
         .offline-msg { color: #ff8888; font-size: 12px; text-align: center; margin-top: 8px; }
         .blueprint-required { color: #ffaa00; font-size: 11px; text-align: center; margin-top: 6px; }
@@ -117,11 +283,11 @@
         .trade-card { position: relative; }
         
         /* Стили для карты */
-        .space-planet {
+        .space-planet, .space-station {
             cursor: pointer;
             transition: transform 0.2s;
         }
-        .space-planet:hover {
+        .space-planet:hover, .space-station:hover {
             transform: translate(-50%, -50%) scale(1.15);
         }
         .other-player-marker {
@@ -136,11 +302,25 @@
             overflow: hidden;
             position: relative;
         }
+        .stars-layer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .map-viewport {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transform-origin: 0 0;
+            z-index: 2;
+        }
         
-        /* Стили для флота и командного пункта */
+        /* Флот и командный пункт */
         .fleet-log-entry { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
-        .fleet-log-entry:last-child { border-bottom: none; }
-        
         .cmd-log-entry { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
         .cmd-warning { color: #ff8844; }
         .cmd-result  { color: #4aff9d; }
@@ -162,31 +342,15 @@
             border-radius: 4px;
             margin-left: 6px;
         }
-        
-        .defense-mode {
-            border-left: 2px solid #4aff9d !important;
-        }
-        
-        .defense-active {
-            background: rgba(74,255,157,0.15);
-            color: #4aff9d;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }
-        
-        .defense-inactive {
-            background: rgba(255,74,74,0.1);
-            color: #ff6a6a;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }
+        .defense-mode { border-left: 2px solid #4aff9d !important; }
+        .defense-active { background: rgba(74,255,157,0.15); color: #4aff9d; padding: 2px 6px; border-radius: 4px; }
+        .defense-inactive { background: rgba(255,74,74,0.1); color: #ff6a6a; padding: 2px 6px; border-radius: 4px; }
         
         #floatingMineBtn.turbine-critical {
             background: radial-gradient(circle at center, rgba(255,34,68,0.3) 0%, rgba(8,13,24,0.98) 72%);
             border-color: #ff2244;
             animation: critical-pulse 0.8s infinite;
         }
-        
         @keyframes critical-pulse {
             0%, 100% { transform: scale(1); box-shadow: 0 0 15px #ff2244; }
             50% { transform: scale(0.98); box-shadow: 0 0 30px rgba(255,34,68,0.5); }
@@ -202,17 +366,31 @@
             text-align: center;
         }
         
-        #space-players-list {
-            max-height: 200px;
-            overflow-y: auto;
+        #space-players-list { max-height: 200px; overflow-y: auto; }
+        
+        /* Кастомный тултип */
+        .space-tooltip {
+            position: fixed;
+            background: #0a0a0a;
+            border: 1px solid rgba(74,255,157,0.27);
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 10px;
+            font-family: monospace;
+            z-index: 9999;
+            pointer-events: none;
+            max-width: 180px;
+            backdrop-filter: blur(4px);
+            display: none;
+        }
+        .tooltip-inner .tooltip-name {
+            font-weight: bold;
+            margin-bottom: 4px;
         }
     </style>
 </head>
 <body>
-    
-    <!-- ============================================ -->
-    <!-- ФОРМА АВТОРИЗАЦИИ (Supabase)                 -->
-    <!-- ============================================ -->
+    <!-- Форма авторизации -->
     <div id="authOverlay" class="auth-overlay">
         <div class="auth-container">
             <div class="auth-header">
@@ -258,9 +436,7 @@
         </div>
     </div>
 
-    <!-- ============================================ -->
-    <!-- ОСНОВНОЙ КОНТЕНТ ИГРЫ                        -->
-    <!-- ============================================ -->
+    <!-- Основной контент игры -->
     <div id="gameContent" style="display: none;">
         <div class="header">
             <h1>⚙️ CoreBox 3.2 <span style="font-size: 14px;">| Нейро-эволюция</span></h1>
@@ -279,14 +455,14 @@
         </div>
 
         <div class="main">
-            <!-- ВКЛАДКИ СИСТЕМНЫЙ СТАТУС / СТАТИСТИКА / ЛИДЕРЫ -->
+            <!-- Вкладки системный статус / статистика / лидеры -->
             <div class="status-tabs">
                 <div class="status-tab active" id="system-status-tab">🖥️ СИСТЕМНЫЙ СТАТУС</div>
                 <div class="status-tab" id="statistics-tab">📊 СТАТИСТИКА</div>
                 <div class="status-tab" id="leaderboard-tab">🏆 ЛИДЕРЫ</div>
             </div>
             
-            <!-- СЕКЦИЯ СИСТЕМНЫЙ СТАТУС -->
+            <!-- Секция системный статус -->
             <div id="system-status-section" class="status-section">
                 <div class="panel">
                     <div class="panel-title">
@@ -313,10 +489,13 @@
                             <div class="status-line">
                                 <div class="status-label">🌙 УГРОЗА ПОВСТАНЦЕВ:</div>
                                 <div class="status-value" id="rebelStatus">НИЗКИЙ УРОВЕНЬ</div>
-                                <div class="threat-level low"></div>
+                                <div class="rebel-pulse-container">
+                                    <div id="rebelPulse" class="pulse-low"></div>
+                                    <div class="threat-level low"></div>
+                                </div>
                             </div>
 
-                            <!-- ТУРБИНА -->
+                            <!-- Турбина -->
                             <div class="turbine-container">
                                 <div class="stat-label" id="turbineHeatLabel">🌡️ Перегрев турбины: 0%</div>
                                 <div class="turbine-bar">
@@ -353,7 +532,7 @@
                     </div>
                 </div>
                 
-                <!-- СИСТЕМНЫЙ ЖУРНАЛ -->
+                <!-- Системный журнал -->
                 <div class="panel">
                     <div class="panel-title">
                         <span>📜 СИСТЕМНЫЙ ЖУРНАЛ (Лог)</span>
@@ -370,7 +549,7 @@
 
                 <div class="mining-action">
                     <div class="click-system">
-                        <!-- ШКАЛЫ МОЩНОСТИ -->
+                        <!-- Шкалы мощности -->
                         <div class="power-section">
                             <div class="power-label">
                                 <span>⚡ ВЫЧИСЛИТЕЛЬНАЯ МОЩНОСТЬ:</span>
@@ -395,7 +574,7 @@
                             </div>
                         </div>
                         
-                        <!-- АВТОКЛИКЕР -->
+                        <!-- Автокликер -->
                         <div class="auto-click-section">
                             <div class="auto-click-status">
                                 <span>🤖 АВТОМАТИЧЕСКАЯ ДОБЫЧА:</span>
@@ -428,7 +607,7 @@
                 </div>
             </div>
             
-            <!-- СЕКЦИЯ СТАТИСТИКИ -->
+            <!-- Секция статистики -->
             <div id="statistics-section" class="status-section" style="display: none;">
                 <div class="panel">
                     <div class="panel-title">
@@ -497,7 +676,7 @@
                 </div>
             </div>
 
-            <!-- СЕКЦИЯ ЛИДЕРОВ -->
+            <!-- Секция лидеров -->
             <div id="leaderboard-section" class="status-section" style="display: none;">
                 <div class="panel">
                     <div class="panel-title">
@@ -544,9 +723,7 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
-                        <div class="upgrade-container" id="upgradesContainer">
-                            <!-- Динамическая загрузка через JS -->
-                        </div>
+                        <div class="upgrade-container" id="upgradesContainer"></div>
                     </div>
                 </div>
             </div>
@@ -613,21 +790,11 @@
                     </div>
                 </div>
 
-                <!-- БЛОК КОМАНДНОГО ПУНКТА -->
                 <div class="command-center-section" style="margin-top: 16px;">
                     <div style="font-size: 12px; color: #4aff9d; font-family: monospace; margin-bottom: 8px; font-weight: bold;">
                         🖥️ КОМАНДНЫЙ ПУНКТ
                     </div>
-                    <div id="commandCenterLog" style="
-                        background: rgba(0,0,0,0.4);
-                        border: 1px solid rgba(255,74,74,0.3);
-                        border-radius: 8px;
-                        padding: 10px;
-                        max-height: 250px;
-                        overflow-y: auto;
-                        font-family: monospace;
-                        font-size: 11px;
-                    ">
+                    <div id="commandCenterLog" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,74,74,0.3); border-radius: 8px; padding: 10px; max-height: 250px; overflow-y: auto; font-family: monospace; font-size: 11px;">
                         <div style="color: #888;">Ожидание данных...</div>
                     </div>
                 </div>
@@ -668,26 +835,15 @@
                     </div>
                 </div>
                 
-                <!-- БЛОК ЛОГА ФЛОТА -->
                 <div class="fleet-log-section" style="margin-top: 16px;">
                     <div style="font-size: 11px; color: #888; margin-bottom: 6px; font-family: monospace;">
                         📋 ПОСЛЕДНИЕ ДЕЙСТВИЯ ФЛОТА
                     </div>
-                    <div id="fleetLogBox" style="
-                        background: rgba(0,0,0,0.3);
-                        border: 1px solid rgba(74,255,157,0.2);
-                        border-radius: 8px;
-                        padding: 8px;
-                        max-height: 200px;
-                        overflow-y: auto;
-                        font-family: monospace;
-                        font-size: 10px;
-                        color: #ccc;
-                    "></div>
+                    <div id="fleetLogBox" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(74,255,157,0.2); border-radius: 8px; padding: 8px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 10px; color: #ccc;"></div>
                 </div>
             </div>
             
-            <!-- ВКЛАДКА КАРТА (ИСПРАВЛЕНА: добавлен viewport для зума и кнопки) -->
+            <!-- Вкладка карта -->
             <div class="tab-content" id="space-tab">
                 <div class="panel">
                     <div class="panel-title">
@@ -696,79 +852,45 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content" style="padding:0;">
-                        <!-- Ресурсы и статус -->
                         <div id="space-status-bar" style="display:flex;gap:12px;padding:10px 12px;background:rgba(0,0,0,0.3);flex-wrap:wrap;">
-                            <div style="font-size:11px;opacity:0.7;">
-                                ⚡ <span id="space-power-current">0</span>/<span id="space-power-max">1000</span>
-                            </div>
+                            <div style="font-size:11px;opacity:0.7;">⚡ <span id="space-power-current">0</span>/<span id="space-power-max">1000</span></div>
                             <div style="font-size:11px;opacity:0.7;" id="space-day-status">☀️ ДЕНЬ</div>
                             <div style="font-size:11px;opacity:0.7;">🧠 Ур.<span id="space-neuro-level">0</span></div>
                             <div style="font-size:11px;opacity:0.7;">🚀 <span id="space-ships-count">0</span> кораблей</div>
                         </div>
 
-                        <!-- Звёздная карта с поддержкой зума -->
-                        <div class="star-map" id="space-star-map" style="
-                            position: relative;
-                            width: 100%;
-                            height: 55vw;
-                            min-height: 260px;
-                            max-height: 400px;
-                            overflow: hidden;
-                            touch-action: none;
-                            cursor: grab;
-                        ">
-                            <div id="space-map-viewport" style="
-                                position: absolute;
-                                width: 100%;
-                                height: 100%;
-                                transform-origin: 0 0;
-                                transform: scale(1) translate(0px, 0px);
-                                transition: none;
-                            ">
-                                <div id="space-stars-layer"></div>
+                        <div class="star-map" id="space-star-map" style="position: relative; width: 100%; height: 55vw; min-height: 260px; max-height: 400px; overflow: hidden; touch-action: none; cursor: grab;">
+                            <!-- Слой звёзд -->
+                            <div id="space-stars-layer" class="stars-layer"></div>
+                            
+                            <!-- Viewport для масштабируемых объектов -->
+                            <div id="space-map-viewport" class="map-viewport" style="transform-origin: 0 0; transform: scale(1) translate(0px, 0px); transition: none;">
                                 <div id="space-objects-layer">
-                                    <div style="
-                                        position:absolute;left:50%;top:50%;
-                                        transform:translate(-50%,-50%);
-                                        text-align:center;cursor:pointer;
-                                    " id="space-base-planet">
+                                    <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;cursor:pointer;" id="space-base-planet">
                                         <span style="font-size:28px;">🏠</span>
                                         <div style="font-size:9px;color:#4aff9d;margin-top:2px;">БАЗА</div>
                                     </div>
                                 </div>
                             </div>
+                            
+                            <!-- SVG для линий полёта -->
+                            <svg id="space-flight-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:20;"></svg>
                         </div>
                         
                         <!-- Кнопки зума -->
                         <div style="position:relative;margin-top:-36px;margin-bottom:8px;padding-right:12px;display:flex;justify-content:flex-end;">
                             <div style="display:flex;gap:4px;">
-                                <button id="map-zoom-in" style="
-                                    width:32px;height:32px;background:rgba(0,0,0,0.7);
-                                    border:1px solid rgba(74,255,157,0.4);border-radius:6px;
-                                    color:#4aff9d;font-size:18px;cursor:pointer;line-height:1;">+</button>
-                                <button id="map-zoom-reset" style="
-                                    width:32px;height:24px;background:rgba(0,0,0,0.7);
-                                    border:1px solid rgba(255,255,255,0.2);border-radius:6px;
-                                    color:#888;font-size:9px;cursor:pointer;">1:1</button>
-                                <button id="map-zoom-out" style="
-                                    width:32px;height:32px;background:rgba(0,0,0,0.7);
-                                    border:1px solid rgba(74,255,157,0.4);border-radius:6px;
-                                    color:#4aff9d;font-size:18px;cursor:pointer;line-height:1;">−</button>
+                                <button id="map-zoom-in" style="width:32px;height:32px;background:rgba(0,0,0,0.7);border:1px solid rgba(74,255,157,0.4);border-radius:6px;color:#4aff9d;font-size:18px;cursor:pointer;line-height:1;">+</button>
+                                <button id="map-zoom-reset" style="width:32px;height:24px;background:rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:#888;font-size:9px;cursor:pointer;">1:1</button>
+                                <button id="map-zoom-out" style="width:32px;height:32px;background:rgba(0,0,0,0.7);border:1px solid rgba(74,255,157,0.4);border-radius:6px;color:#4aff9d;font-size:18px;cursor:pointer;line-height:1;">−</button>
                             </div>
                         </div>
 
-                        <!-- Кнопка исследования -->
                         <div style="padding:10px 12px;">
-                            <button id="space-research-btn" style="
-                                width:100%;padding:10px;
-                                background:rgba(74,158,255,0.1);
-                                border:1px solid rgba(74,158,255,0.3);
-                                border-radius:8px;color:#4a9eff;
-                                font-family:monospace;font-size:12px;cursor:pointer;
-                            ">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
+                            <button id="space-research-btn" style="width:100%;padding:10px;background:rgba(74,158,255,0.1);border:1px solid rgba(74,158,255,0.3);border-radius:8px;color:#4a9eff;font-family:monospace;font-size:12px;cursor:pointer;">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
                         </div>
 
-                        <!-- Список игроков онлайн (увеличен лимит и добавлен скролл) -->
+                        <!-- Список игроков онлайн -->
                         <div style="padding:0 12px 12px;">
                             <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
                             <div id="space-players-list" style="max-height:200px;overflow-y:auto;"></div>
@@ -778,44 +900,36 @@
             </div>
         </div>
         
-        <!-- ПЛАВАЮЩАЯ КНОПКА ДОБЫЧИ -->
-        <div id="floatingMineBtn" class="floating-mine-btn" onclick="window.handleClick && window.handleClick()">
+        <!-- Плавающая кнопка добычи с прогресс-кольцом -->
+        <div id="floatingMineBtn" class="floating-mine-btn">
+            <svg class="power-ring" viewBox="0 0 100 100">
+                <circle class="ring-back" cx="50" cy="50" r="45" fill="none" stroke-width="2" />
+                <circle class="ring-fill" cx="50" cy="50" r="45" fill="none" stroke-width="2" />
+            </svg>
             <span class="btn-icon">⚙️</span>
             <span class="btn-text">ДОБЫЧА</span>
             <span id="miningBonusFloat" class="mining-bonus">+0%</span>
         </div>
     </div>
    
-    <!-- ============================================ -->
-    <!-- ПОДКЛЮЧЕНИЕ СКРИПТОВ                        -->
-    <!-- ============================================ -->
-    
-    <!-- 1. Supabase библиотека -->
+    <!-- Подключение скриптов -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    
-    <!-- 2. Основной файл игры -->
     <script type="module" src="./game.js"></script>
     
-    <!-- ============================================ -->
-    <!-- АУДИО ЭЛЕМЕНТЫ (Фоновые звуки)               -->
-    <!-- ============================================ -->
+    <!-- Аудио элементы -->
     <audio id="clickSound" preload="none" style="display: none;">
         <source src="music/click.mp3" type="audio/mpeg">
     </audio>
-    
     <audio id="errorSound" preload="none" style="display: none;">
         <source src="music/error.mp3" type="audio/mpeg">
     </audio>
-    
     <audio id="upgradeSound" preload="none" style="display: none;">
         <source src="music/upgrade.mp3" type="audio/mpeg">
     </audio>
-    
     <audio id="bgMusic" autoplay loop preload="none" style="display: none;">
         <source src="music/game-music.mp3" type="audio/mpeg">
     </audio>
 
-    <!-- Инициализация музыки и совместимости -->
     <script>
     (function() {
         window.onload = function() {
@@ -834,9 +948,7 @@
             const sounds = ['clickSound', 'errorSound', 'upgradeSound'];
             sounds.forEach(soundId => {
                 const sound = document.getElementById(soundId);
-                if (sound) {
-                    sound.load();
-                }
+                if (sound) sound.load();
             });
         };
         

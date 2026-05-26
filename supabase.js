@@ -4,7 +4,6 @@
 const SUPABASE_URL = "https://xnbtizdqhpyvafftnlcb.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhuYnRpemRxaHB5dmFmZnRubGNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwODM3NTUsImV4cCI6MjA5MTY1OTc1NX0.9qrJJctl5o6q_stFSqMmtLbKyZzR8rrpiQppaG1f72o";
 
-// Ленивая инициализация — создаём клиент только при первом обращении
 let _supabaseClient = null;
 let _initError = null;
 
@@ -33,7 +32,6 @@ function getSupabaseClient() {
     return _supabaseClient;
 }
 
-// Функция для проверки доступности Supabase (можно вызывать перед операциями)
 export async function checkSupabaseConnection() {
     try {
         const client = getSupabaseClient();
@@ -47,7 +45,6 @@ export async function checkSupabaseConnection() {
     }
 }
 
-// Прокси для ленивого доступа к методам клиента
 export const supabase = new Proxy({}, {
     get(_, prop) {
         try {
@@ -59,7 +56,6 @@ export const supabase = new Proxy({}, {
             return value;
         } catch (e) {
             console.error(`Ошибка доступа к supabase.${String(prop)}:`, e);
-            // Возвращаем заглушку для методов, чтобы не падало
             if (typeof prop === 'string' && ['from', 'channel', 'auth', 'rpc'].includes(prop)) {
                 return () => {
                     console.warn(`Supabase метод ${prop} вызван, но клиент не инициализирован`);

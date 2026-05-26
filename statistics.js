@@ -1,8 +1,4 @@
-// ======== statistics.js (ИСПРАВЛЕНА) ========
-// БАГ #19: resetUserStatistics использует кастомный модальный диалог вместо confirm()
-// БАГ #20: updateStatisticsFromRust использует ?? вместо ||
-// БАГ #37: loadUserStatistics правильно восстанавливает playTime
-// БАГ #46: sessionsCount инкрементируется только один раз
+
 
 export let gameStats = {
     totalClicks: 0, maxPowerReached: 0, nightsSurvived: 0, rebelAttacks: 0,
@@ -15,8 +11,8 @@ export let gameStats = {
     miningLevel: 0, defenseLevel: 0, defenseActive: false,
     computationalPower: 0, currentAiMode: 'Обычный',
     consecutiveDefenses: 0, longestDefenseStreak: 0, prestige: 0,
-    accumulatedPlayTime: 0,  // БАГ #37: отдельное хранение накопленного времени
-    _sessionCounted: false,   // БАГ #46: флаг для однократного инкремента сессии
+    accumulatedPlayTime: 0,
+    _sessionCounted: false,
 };
 
 export function initStatistics() {
@@ -27,21 +23,22 @@ export function initStatistics() {
 export function loadUserStatistics(userStats) {
     if (!userStats) return;
     
-    // БАГ #46: инкрементировать sessionsCount только при первой загрузке
-    if (!gameStats._sessionCounted) {
+    const sessionCountedKey = 'corebox_session_counted';
+    const sessionAlreadyCounted = sessionStorage.getItem(sessionCountedKey) === 'true';
+    
+    if (!gameStats._sessionCounted && !sessionAlreadyCounted) {
         gameStats.sessionsCount = (userStats.sessionsCount || 0) + 1;
         gameStats._sessionCounted = true;
+        sessionStorage.setItem(sessionCountedKey, 'true');
     } else {
         gameStats.sessionsCount = userStats.sessionsCount || gameStats.sessionsCount;
     }
     
     gameStats.lastSessionDate = new Date().toISOString();
     
-    // БАГ #37: восстанавливаем накопленное время
     gameStats.accumulatedPlayTime = userStats.playTime || 0;
     gameStats.startTime = Date.now();
     
-    // Остальные поля
     Object.keys(gameStats).forEach(key => {
         if (key in userStats && !['startTime', '_sessionCounted', 'accumulatedPlayTime'].includes(key)) {
             gameStats[key] = userStats[key];
@@ -51,7 +48,6 @@ export function loadUserStatistics(userStats) {
     updateStatisticsDisplay();
 }
 
-// БАГ #19: кастомный модальный диалог вместо confirm()
 function showConfirmDialog(message, onConfirm, onCancel) {
     const existing = document.querySelector('.custom-confirm-dialog');
     if (existing) existing.remove();
@@ -131,36 +127,35 @@ export function resetUserStatistics() {
     return false;
 }
 
-// БАГ #20: использование ?? вместо ||
 export function updateStatisticsFromRust(rustStats) {
     if (!rustStats) return;
-    gameStats.totalMined = rustStats.total_mined || 0;
+    gameStats.totalMined = rustStats.total_mined ?? 0;
     gameStats.coalMined = rustStats.coal_mined ?? rustStats.total_coal_mined ?? gameStats.coalMined;
     gameStats.trashMined = rustStats.trash_mined ?? rustStats.total_trash_mined ?? gameStats.trashMined;
     gameStats.plasmaMined = rustStats.plasma_mined ?? rustStats.total_plasma_mined ?? gameStats.plasmaMined;
     gameStats.oreMined = rustStats.ore_mined ?? rustStats.total_ore_mined ?? gameStats.oreMined;
     gameStats.coalBurned = rustStats.coal_burned ?? rustStats.total_coal_burned ?? gameStats.coalBurned;
     gameStats.coalStolen = rustStats.coal_stolen ?? rustStats.total_coal_stolen ?? gameStats.coalStolen;
-    gameStats.nightsSurvived = rustStats.nights_survived || gameStats.nightsSurvived;
-    gameStats.rebelAttacks = rustStats.rebel_attacks_count || gameStats.rebelAttacks;
-    gameStats.attacksDefended = rustStats.attacks_defended || gameStats.attacksDefended;
-    gameStats.rebelActivity = rustStats.rebel_activity || 0;
-    gameStats.computationalPower = rustStats.computational_power || 0;
-    gameStats.currentAiMode = rustStats.current_ai_mode || 'Обычный';
-    gameStats.neuroEvolution = rustStats.neuro_evolution || 0;
+    gameStats.nightsSurvived = rustStats.nights_survived ?? gameStats.nightsSurvived;
+    gameStats.rebelAttacks = rustStats.rebel_attacks_count ?? gameStats.rebelAttacks;
+    gameStats.attacksDefended = rustStats.attacks_defended ?? gameStats.attacksDefended;
+    gameStats.rebelActivity = rustStats.rebel_activity ?? 0;
+    gameStats.computationalPower = rustStats.computational_power ?? 0;
+    gameStats.currentAiMode = rustStats.current_ai_mode ?? 'Обычный';
+    gameStats.neuroEvolution = rustStats.neuro_evolution ?? 0;
     
-    let neuroConsciousnessValue = rustStats.neuro_consciousness || 0;
+    let neuroConsciousnessValue = rustStats.neuro_consciousness ?? 0;
     if (neuroConsciousnessValue > 1.0) {
         neuroConsciousnessValue = neuroConsciousnessValue / 100.0;
     }
     gameStats.neuroConsciousness = neuroConsciousnessValue;
     
-    gameStats.neuroScore = rustStats.neuro_score || 0;
-    gameStats.miningLevel = rustStats.upgrades?.mining || 0;
-    gameStats.defenseLevel = rustStats.upgrades?.defense_level || 0;
-    gameStats.defenseActive = rustStats.upgrades?.defense || false;
-    gameStats.consecutiveDefenses = rustStats.consecutive_successful_defenses || 0;
-    gameStats.longestDefenseStreak = rustStats.longest_defense_streak || 0;
+    gameStats.neuroScore = rustStats.neuro_score ?? 0;
+    gameStats.miningLevel = rustStats.upgrades?.mining ?? 0;
+    gameStats.defenseLevel = rustStats.upgrades?.defense_level ?? 0;
+    gameStats.defenseActive = rustStats.upgrades?.defense ?? false;
+    gameStats.consecutiveDefenses = rustStats.consecutive_successful_defenses ?? 0;
+    gameStats.longestDefenseStreak = rustStats.longest_defense_streak ?? 0;
     const bp = [rustStats.blueprint_cargo_unlocked, rustStats.blueprint_scout_unlocked, rustStats.blueprint_combat_unlocked];
     gameStats.blueprintsUnlocked = bp.filter(Boolean).length;
     updateStatisticsDisplay();
@@ -217,7 +212,6 @@ let playTimeInterval;
 function startPlayTimeTracker() {
     if (playTimeInterval) clearInterval(playTimeInterval);
     playTimeInterval = setInterval(() => {
-        // БАГ #37: правильный расчёт playTime
         const sessionSeconds = Math.floor((Date.now() - gameStats.startTime) / 1000);
         gameStats.playTime = gameStats.accumulatedPlayTime + sessionSeconds;
     }, 1000);

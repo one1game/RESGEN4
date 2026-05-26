@@ -202,9 +202,14 @@
     return btn;
   }
 
-  // БАГ #33: bodyObserver использует subtree: true
+  let _bodyObserver = null;
+  let _warningObserver = null;
+  let _floatObserver = null;
+
   function watchGameNotifications () {
-    const bodyObserver = new MutationObserver((mutations) => {
+    if (_bodyObserver) _bodyObserver.disconnect();
+    
+    _bodyObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
         for (const node of m.addedNodes) {
           if (!(node instanceof HTMLElement)) continue;
@@ -224,16 +229,17 @@
         }
       }
     });
-    bodyObserver.observe(document.body, { childList: true, subtree: true });
+    _bodyObserver.observe(document.body, { childList: true, subtree: true });
 
     const warningEl = document.getElementById('attackWarning');
     if (warningEl) {
-      const warningObserver = new MutationObserver(() => {
+      if (_warningObserver) _warningObserver.disconnect();
+      _warningObserver = new MutationObserver(() => {
         if (warningEl.style.display !== 'none' && warningEl.textContent.trim()) {
           Haptic.warning();
         }
       });
-      warningObserver.observe(warningEl, {
+      _warningObserver.observe(warningEl, {
         attributes: true,
         attributeFilter: ['style'],
         childList: true,
@@ -241,7 +247,8 @@
       });
     }
     
-    const floatObserver = new MutationObserver((mutations) => {
+    if (_floatObserver) _floatObserver.disconnect();
+    _floatObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
         for (const node of m.addedNodes) {
           if (node instanceof HTMLElement && node.classList && node.classList.contains('floating-text')) {
@@ -255,8 +262,16 @@
         }
       }
     });
-    floatObserver.observe(document.body, { childList: true, subtree: true });
+    _floatObserver.observe(document.body, { childList: true, subtree: true });
   }
+
+  window._disconnectMobileObservers = function() {
+    if (_bodyObserver) { _bodyObserver.disconnect(); _bodyObserver = null; }
+    if (_warningObserver) { _warningObserver.disconnect(); _warningObserver = null; }
+    if (_floatObserver) { _floatObserver.disconnect(); _floatObserver = null; }
+    if (_inputZoomObserver) { _inputZoomObserver.disconnect(); _inputZoomObserver = null; }
+    console.log('📱 Мобильные observer\'ы отключены');
+  };
 
   function scrollTabIntoView (tabEl) {
     if (!tabEl) return;
@@ -279,7 +294,6 @@
     }, 100);
   }
 
-  // БАГ #31: исправлена проверка lastTouchTarget
   function preventDoubleTapZoom () {
     let lastTouch = 0;
     let lastTouchTarget = null;
@@ -290,7 +304,6 @@
       const now = Date.now();
       const delta = now - lastTouch;
       
-      // БАГ #31: проверка на contains для дочерних элементов
       const isSameElement = lastTouchTarget === e.target || 
                            (lastTouchTarget && lastTouchTarget.contains(e.target)) ||
                            (e.target && e.target.contains(lastTouchTarget));
@@ -333,7 +346,6 @@
     }, { passive: false });
   }
 
-  // БАГ #32: MutationObserver теперь отключается
   let _inputZoomObserver = null;
   
   function fixInputZoom () {
@@ -357,7 +369,6 @@
     _inputZoomObserver.observe(document.body, { childList: true, subtree: true });
   }
   
-  // Функция для отключения observer при выходе
   window._disconnectInputZoomObserver = function() {
     if (_inputZoomObserver) {
       _inputZoomObserver.disconnect();

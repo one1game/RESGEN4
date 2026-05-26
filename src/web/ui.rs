@@ -115,8 +115,10 @@ impl GameUI {
     if let Some(el) = self.document.get_element_by_id("timeDisplay") {
         let icon = if state.is_day { "☀️" } else { "🌙" };
         let text = if state.is_day { "День" } else { "Ночь" };
-        // БАГ 1: визуальный таймер в виде полосы
-        let filled = (state.game_time as usize).min(24) / 2;
+        
+        // ИСПРАВЛЕНИЕ: правильный расчёт для дня (max 24) и ночи (max 16)
+        let max_time = if state.is_day { 24 } else { 16 };
+        let filled = ((state.game_time as usize) * 12 / max_time).min(12);
         let empty = 12usize.saturating_sub(filled);
         let bar = "█".repeat(filled);
         let empty_bar = "░".repeat(empty);

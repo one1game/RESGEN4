@@ -1,10 +1,11 @@
-// design.js - СИСТЕМА ЧЕРТЕЖЕЙ КОРАБЛЕЙ (ИСПРАВЛЕНА - ЕДИНЫЙ ИСТОЧНИК ИСТИНЫ)
+// design.js - СИСТЕМА ЧЕРТЕЖЕЙ КОРАБЛЕЙ (ИСПРАВЛЕНА - БЕЗ СПАМА В КОНСОЛЬ)
 
 export const designModule = {
     game: null,
     computationalPower: 0,
     maxComputationalPower: 1000,
     aiResearchBonus: 0,
+    _userId: null,  // КЭШИРОВАННЫЙ ID
     
     blueprints: [
         { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', designCost: 200, icon: '🚚', unlocked: false },
@@ -12,26 +13,82 @@ export const designModule = {
         { id: 'combat', name: 'Боевой корабль', desc: 'Защита флота и атака угроз', designCost: 800, icon: '⚔️', unlocked: false }
     ],
     
-    // БАГ #7 ИСПРАВЛЕНИЕ: единый метод получения ключа localStorage с userId
+    // ИСПРАВЛЕНО: получение userId без спама в консоль
+    _getUserId() {
+        if (this._userId) return this._userId;
+        
+        // Пытаемся получить из window.currentUser
+        if (window.currentUser?.id) {
+            this._userId = window.currentUser.id;
+            return this._userId;
+        }
+        
+        // Пытаемся получить из переданного userId
+        if (this.currentUserId) {
+            this._userId = this.currentUserId;
+            return this._userId;
+        }
+        
+        // Пытаемся получить из sessionStorage Supabase
+        try {
+            const sessionKey = 'sb-xnbtizdqhpyvafftnlcb-auth-token';
+            const sessionData = sessionStorage.getItem(sessionKey);
+            if (sessionData) {
+                const parsed = JSON.parse(sessionData);
+                if (parsed?.user?.id) {
+                    this._userId = parsed.user.id;
+                    // Синхронизируем с window.currentUser
+                    window.currentUser = { id: this._userId };
+                    return this._userId;
+                }
+            }
+        } catch(e) {}
+        
+        // ТИХО возвращаем null, БЕЗ warn
+        return null;
+    },
+    
     _getStorageKey() {
-        const userId = window.currentUser?.id;
+        const userId = this._getUserId();
+        // Возвращаем ключ БЕЗ ЛЮБЫХ warn/error/log
         return userId ? `corebox_ship_blueprints_${userId}` : 'corebox_ship_blueprints';
     },
     
-    init(game) {
+    init(game, userId = null) {
         this.game = game;
+        this._userId = userId || window.currentUser?.id || null;
+        this.currentUserId = this._userId;
+        
         this.loadBlueprints();
+        
         if (game && typeof game.get_computational_power === 'function') {
             this.computationalPower = game.get_computational_power() || 0;
         }
+        
         this.syncBlueprintsFromRust();
-        console.log('📐 Модуль дизайна инициализирован, мощность:', this.computationalPower);
+        
+        // Только один тихий лог при успешной инициализации
+        if (this._userId && this.computationalPower > 0) {
+            console.log('📐 Модуль дизайна инициализирован');
+        }
     },
     
-    // ИСПРАВЛЕНИЕ БАГА #1: единый метод синхронизации из Rust
+    cleanup() {
+        this.game = null;
+        this._userId = null;
+        this.currentUserId = null;
+        this.computationalPower = 0;
+        this.aiResearchBonus = 0;
+        console.log('📐 Модуль дизайна очищен');
+    },
+    
     syncBlueprintsFromRust() {
+        if (!this.game) return;
+        
         try {
             const statsJson = this.game.get_statistics();
+            if (!statsJson) return;
+            
             const stats = JSON.parse(statsJson);
             
             this.blueprints.forEach(bp => {
@@ -40,26 +97,27 @@ export const designModule = {
                 else if (bp.id === 'combat') bp.unlocked = stats.blueprint_combat_unlocked === true;
             });
             
-            // БАГ #13 ИСПРАВЛЕНИЕ: читаем ai_research_bonus из статистики
-            this.aiResearchBonus = stats.ai_research_bonus || Math.floor((stats.neuro_consciousness || 0) / 20);
+            const neuroConsc = stats.neuro_consciousness || 0;
+            this.aiResearchBonus = Math.floor(neuroConsc * 100 / 20);
             this.computationalPower = stats.computational_power || 0;
             
             this.saveBlueprints();
-            console.log('📐 Чертежи синхронизированы из Rust:', this.blueprints.map(b => `${b.id}:${b.unlocked}`).join(', '));
         } catch(e) {
-            console.warn('Не удалось синхронизировать чертежи с Rust:', e);
+            // Тихо игнорируем ошибки
         }
     },
     
-    // ИСПРАВЛЕНИЕ БАГА #1: публичный метод проверки статуса чертежа
     isBlueprintUnlocked(blueprintId) {
         const bp = this.blueprints.find(b => b.id === blueprintId);
         if (bp) return bp.unlocked === true;
         
-        // Fallback: пробуем из Rust напрямую
+        if (!this.game) return false;
+        
         try {
             const statsJson = this.game.get_statistics();
+            if (!statsJson) return false;
             const stats = JSON.parse(statsJson);
+            
             if (blueprintId === 'cargo') return stats.blueprint_cargo_unlocked === true;
             if (blueprintId === 'scout') return stats.blueprint_scout_unlocked === true;
             if (blueprintId === 'combat') return stats.blueprint_combat_unlocked === true;
@@ -77,15 +135,13 @@ export const designModule = {
                     const savedBp = parsed.find(s => s.id === bp.id);
                     return savedBp ? { ...bp, unlocked: savedBp.unlocked } : bp;
                 });
-            } catch (e) { console.error('Ошибка загрузки чертежей:', e); }
+            } catch (e) {}
         }
     },
     
-    // БАГ #10 ИСПРАВЛЕНИЕ: поддержка формата объекта и массива
     loadBlueprintsFromCloud(cloudBlueprints) {
         if (!cloudBlueprints) return;
         
-        // Формат: {cargo: true, scout: false, combat: false}
         if (typeof cloudBlueprints === 'object' && !Array.isArray(cloudBlueprints)) {
             this.blueprints.forEach(bp => {
                 if (cloudBlueprints[bp.id] !== undefined) {
@@ -103,7 +159,6 @@ export const designModule = {
         
         this.saveBlueprints();
         this.syncBlueprintsToRust();
-        console.log('📐 Чертежи загружены из облака');
     },
     
     saveBlueprints() {
@@ -112,34 +167,31 @@ export const designModule = {
         this.syncBlueprintsToRust();
     },
     
-    // ИСПРАВЛЕНИЕ: единый метод синхронизации в Rust
     syncBlueprintsToRust() {
+        if (!this.game) return;
+        
         try {
-            if (this.game && typeof this.game.sync_blueprints === 'function') {
+            if (typeof this.game.sync_blueprints === 'function') {
                 this.game.sync_blueprints(
                     this.blueprints.find(b => b.id === 'cargo')?.unlocked || false,
                     this.blueprints.find(b => b.id === 'scout')?.unlocked || false,
                     this.blueprints.find(b => b.id === 'combat')?.unlocked || false
                 );
             }
-        } catch(e) {
-            console.warn('Ошибка синхронизации чертежей в Rust:', e);
-        }
+        } catch(e) {}
     },
     
     updateComputationalPower(power) {
-        if (typeof power === 'object' && power !== null) this.computationalPower = power.power || 0;
-        else this.computationalPower = parseInt(power) || 0;
-        if (this.computationalPower === 0) {
-            console.warn('⚠️ computationalPower = 0 в designModule, возможно проблема загрузки');
+        if (typeof power === 'object' && power !== null) {
+            this.computationalPower = power.power || 0;
+        } else {
+            this.computationalPower = parseInt(power) || 0;
         }
     },
     
-    // БАГ #5 ИСПРАВЛЕНИЕ: убираем скидку ИИ для чертежей (оставляем только для крафта)
     getEffectiveCost(blueprintId) {
         const blueprint = this.blueprints.find(bp => bp.id === blueprintId);
         if (!blueprint) return Infinity;
-        // Убираем скидку ИИ на чертежи - только полная стоимость
         return blueprint.designCost;
     },
     
@@ -161,31 +213,33 @@ export const designModule = {
             return { success: false, error: `Недостаточно мощности (нужно: ${effectiveCost})` };
         }
         
+        if (!this.game) {
+            return { success: false, error: 'Игра не инициализирована' };
+        }
+        
         try {
             const result = this.game.design_ship(blueprintId);
             if (result === 'success') {
                 blueprint.unlocked = true;
                 this.saveBlueprints();
-                
-                // ИСПРАВЛЕНИЕ БАГА #3: принудительная синхронизация ВСЕХ систем
                 this.syncBlueprintsToRust();
                 
-                // Обновляем мощность
-                this.computationalPower = this.game.get_computational_power();
-                
-                // ИСПРАВЛЕНИЕ БАГА #3: обновляем craftModule
-                if (window.craftModule) {
-                    const stats = JSON.parse(this.game.get_statistics());
-                    window.craftModule.syncFromStats(stats);
-                    
-                    // Перерисовываем вкладку крафта, если она открыта
-                    const craftContainer = document.getElementById('craftContainer');
-                    if (craftContainer && craftContainer.style.display !== 'none') {
-                        if (window.updateCraftTab) window.updateCraftTab();
-                    }
+                if (this.game && typeof this.game.get_computational_power === 'function') {
+                    this.computationalPower = this.game.get_computational_power();
                 }
                 
-                // ИСПРАВЛЕНИЕ БАГА #3: обновляем fleetModule (на случай если корабли уже есть)
+                if (window.craftModule && this.game) {
+                    try {
+                        const stats = JSON.parse(this.game.get_statistics());
+                        window.craftModule.syncFromStats(stats);
+                        
+                        const craftContainer = document.getElementById('craftContainer');
+                        if (craftContainer && craftContainer.style.display !== 'none') {
+                            if (window.updateCraftTab) window.updateCraftTab();
+                        }
+                    } catch(e) {}
+                }
+                
                 if (window.fleetModule && window._refreshFleetWithMissions) {
                     window._refreshFleetWithMissions();
                 }
@@ -202,14 +256,22 @@ export const designModule = {
     
     setupEventListeners(container) {
         if (!container) return;
-        container.onclick = null;
-        container.onclick = (e) => {
+        
+        if (container._clickHandler) {
+            container.removeEventListener('click', container._clickHandler);
+            delete container._clickHandler;
+        }
+        
+        const clickHandler = (e) => {
             const btn = e.target.closest('.design-btn:not(.disabled)');
             if (!btn) return;
+            
             const blueprintId = btn.dataset.blueprint;
             if (!blueprintId) return;
+            
             btn.classList.add('processing');
             btn.innerHTML = '⏳ РАЗРАБОТКА...';
+            
             setTimeout(() => {
                 const result = this.handleDesignClick(blueprintId);
                 if (this.game && result.success) {
@@ -219,6 +281,10 @@ export const designModule = {
                 this.refreshUI(container);
             }, 300);
         };
+        
+        container.addEventListener('click', clickHandler);
+        container._clickHandler = clickHandler;
+        
         return container;
     },
     

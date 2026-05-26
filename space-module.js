@@ -1,9 +1,3 @@
-// ========== space.js (space-module.js) (ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
-// БАГ #8: исправлен прогресс полёта корабля (добавлен started_at)
-// БАГ #26: исправлен closeOnOutside слушатель
-// БАГ #27: исправлен renderFlightLines (очистка интервала перед созданием)
-// БАГ #30: добавлена проверка scout.scout_data
-// БАГ #39: get_active_planet_missions возвращает и "returning"
 
 import { supabase } from './supabase.js';
 import { GameBus, EVENTS } from './game-events.js';
@@ -23,10 +17,21 @@ export const spaceModule = {
     _playerPositions: {},
     _currentPopup: null,
     _flightLineInterval: null,
+    _flightLineDebounce: null,
     _missionCheckInterval: null,
+    _missionTimerInterval: null,
     _presenceChannel: null,
     _multiplayerChannel: null,
     _starsGenerated: false,
+    _needsPlayerReload: false,
+    _onlinePlayerIds: [],
+    
+    // Нейтральные станции
+    neutralStations: [],
+    
+    // Статические данные для тултипа
+    _tooltipElement: null,
+    _tooltipTimeout: null,
 
     PLANET_TYPES: {
         'earth':   { icon: '🌍', name: 'Землеподобная',  color: '#4aff9d' },
@@ -51,6 +56,7 @@ export const spaceModule = {
         }
 
         this.loadPlanetsFromRust();
+        this.loadNeutralStations();
         
         if (!this._starsGenerated) {
             this.generateStars();
@@ -58,14 +64,86 @@ export const spaceModule = {
         }
         
         this.setupMultiplayer();
+        this.setupPresence();
         this.initialized = true;
         
         this.initMapZoom();
         this._startMissionCheckInterval();
+        this.setupTooltip();
 
         this._subscribeToEvents();
 
         console.log('🌌 Space модуль инициализирован');
+    },
+
+    loadNeutralStations() {
+        // Загрузка станций из конфига или создание дефолтных
+        try {
+            const saved = localStorage.getItem('corebox_neutral_stations');
+            if (saved) {
+                this.neutralStations = JSON.parse(saved);
+            } else {
+                this.neutralStations = [
+                    { id: 'st1', name: 'Станция Альфа', x: 25, y: 75, bonus_type: 'mining_boost', cost_trash: 50, cooldown_until: 0, icon: '🛸' },
+                    { id: 'st2', name: 'Станция Бета', x: 75, y: 25, bonus_type: 'defense_boost', cost_trash: 80, cooldown_until: 0, icon: '🛸' },
+                    { id: 'st3', name: 'Станция Гамма', x: 80, y: 80, bonus_type: 'power_boost', cost_trash: 100, cooldown_until: 0, icon: '🛸' }
+                ];
+                localStorage.setItem('corebox_neutral_stations', JSON.stringify(this.neutralStations));
+            }
+        } catch(e) {
+            console.warn('Ошибка загрузки станций:', e);
+        }
+    },
+
+    saveNeutralStations() {
+        try {
+            localStorage.setItem('corebox_neutral_stations', JSON.stringify(this.neutralStations));
+        } catch(e) {}
+    },
+
+    setupTooltip() {
+        let tooltip = document.getElementById('space-tooltip');
+        if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.id = 'space-tooltip';
+            tooltip.className = 'space-tooltip';
+            tooltip.style.cssText = `
+                position: fixed;
+                background: #0a0a0a;
+                border: 1px solid rgba(74,255,157,0.27);
+                border-radius: 8px;
+                padding: 8px;
+                font-size: 10px;
+                font-family: monospace;
+                z-index: 9999;
+                pointer-events: none;
+                max-width: 180px;
+                backdrop-filter: blur(4px);
+                display: none;
+                transition: opacity 0.15s;
+            `;
+            document.body.appendChild(tooltip);
+        }
+        this._tooltipElement = tooltip;
+    },
+
+    showTooltip(content, x, y) {
+        if (!this._tooltipElement) return;
+        this._tooltipElement.innerHTML = content;
+        this._tooltipElement.style.display = 'block';
+        this._tooltipElement.style.left = (x + 15) + 'px';
+        this._tooltipElement.style.top = (y + 15) + 'px';
+        this._tooltipElement.style.opacity = '1';
+    },
+
+    hideTooltip() {
+        if (!this._tooltipElement) return;
+        this._tooltipElement.style.display = 'none';
+    },
+
+    scheduleTooltipHide() {
+        if (this._tooltipTimeout) clearTimeout(this._tooltipTimeout);
+        this._tooltipTimeout = setTimeout(() => this.hideTooltip(), 100);
     },
 
     _subscribeToEvents() {
@@ -218,7 +296,7 @@ export const spaceModule = {
         }, { passive: false });
 
         starMap.addEventListener('mousedown', (e) => {
-            if (e.target.closest('.space-planet, .other-player-marker, #space-base-planet, button')) return;
+            if (e.target.closest('.space-planet, .space-station, .other-player-marker, #space-base-planet, button')) return;
             isDragging = true;
             lastX = e.clientX;
             lastY = e.clientY;
@@ -245,7 +323,7 @@ export const spaceModule = {
                     e.touches[0].clientY - e.touches[1].clientY
                 );
             } else if (e.touches.length === 1) {
-                if (e.target.closest('.space-planet, .other-player-marker, #space-base-planet, button')) return;
+                if (e.target.closest('.space-planet, .space-station, .other-player-marker, #space-base-planet, button')) return;
                 isDragging = true;
                 lastX = e.touches[0].clientX;
                 lastY = e.touches[0].clientY;
@@ -315,6 +393,103 @@ export const spaceModule = {
         });
     },
 
+    // ВИЗУАЛ КАРТА-V2: генерация звёзд с параллаксом
+    generateStars() {
+        const container = document.getElementById('space-stars-layer');
+        if (!container) return;
+        
+        if (container.children.length > 0) return;
+        
+        container.innerHTML = '';
+        
+        // Создаём три слоя для параллакса
+        const layers = [
+            { count: 150, sizeBase: 0.8, sizeVar: 0.5, opacityBase: 0.3, speed: 0.3, className: 'stars-layer-slow' },
+            { count: 100, sizeBase: 1.2, sizeVar: 0.8, opacityBase: 0.5, speed: 0.6, className: 'stars-layer-medium' },
+            { count: 50,  sizeBase: 2,   sizeVar: 1.5, opacityBase: 0.8, speed: 1.0, className: 'stars-layer-fast' }
+        ];
+        
+        const margin = 0.15;
+        const totalWidth = 1 + margin * 2;
+        
+        layers.forEach((layer, idx) => {
+            const layerDiv = document.createElement('div');
+            layerDiv.className = layer.className;
+            layerDiv.style.cssText = `
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+            `;
+            
+            for (let i = 0; i < layer.count; i++) {
+                const star = document.createElement('div');
+                const x = -margin * 100 + Math.random() * totalWidth * 100;
+                const y = -margin * 100 + Math.random() * totalWidth * 100;
+                const size = layer.sizeBase + Math.random() * layer.sizeVar;
+                const opacity = layer.opacityBase * (0.5 + Math.random() * 0.5);
+                const hue = Math.random() < 0.3 ? `hsl(${200 + Math.random()*40}, 80%, 90%)` 
+                          : Math.random() < 0.2 ? `hsl(${40 + Math.random()*20}, 60%, 90%)`
+                          : '#ffffff';
+                
+                star.style.cssText = `
+                    position: absolute;
+                    left: ${x}%;
+                    top: ${y}%;
+                    width: ${size}px;
+                    height: ${size}px;
+                    background: ${hue};
+                    border-radius: 50%;
+                    opacity: ${opacity};
+                    box-shadow: 0 0 ${size * 2}px ${hue};
+                    animation: starTwinkle ${2 + Math.random() * 4}s ${Math.random() * 4}s infinite alternate ease-in-out;
+                `;
+                layerDiv.appendChild(star);
+            }
+            container.appendChild(layerDiv);
+        });
+        
+        // ВИЗУАЛ КАРТА-V2: параллакс при движении мыши
+        const starMap = document.getElementById('space-star-map');
+        if (starMap) {
+            starMap.addEventListener('mousemove', (e) => {
+                const rect = starMap.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width - 0.5;
+                const y = (e.clientY - rect.top) / rect.height - 0.5;
+                
+                const slowLayer = container.querySelector('.stars-layer-slow');
+                const mediumLayer = container.querySelector('.stars-layer-medium');
+                const fastLayer = container.querySelector('.stars-layer-fast');
+                
+                if (slowLayer) slowLayer.style.transform = `translate(${x * 5}px, ${y * 5}px)`;
+                if (mediumLayer) mediumLayer.style.transform = `translate(${x * 12}px, ${y * 12}px)`;
+                if (fastLayer) fastLayer.style.transform = `translate(${x * 25}px, ${y * 25}px)`;
+            });
+        }
+        
+        console.log('✨ Звёзды сгенерированы с параллаксом');
+    },
+
+    // БАГ КАРТА-1: детерминированная позиция игрока на основе ID
+    _getPlayerPosition(userId) {
+        if (!this._playerPositions[userId]) {
+            let hash = 0;
+            for (let i = 0; i < userId.length; i++) {
+                hash = ((hash << 5) - hash) + userId.charCodeAt(i);
+                hash |= 0;
+            }
+            const goldenAngle = 2.399963;
+            const angle = Math.abs(hash % 100) * goldenAngle;
+            const r = 15 + (Math.abs(hash % 5)) * 9;
+            this._playerPositions[userId] = {
+                x: Math.max(8, Math.min(92, 50 + Math.cos(angle) * r)),
+                y: Math.max(8, Math.min(92, 50 + Math.sin(angle) * r))
+            };
+        }
+        return this._playerPositions[userId];
+    },
+
     onTabActivated() {
         if (!this.initialized) return;
         this.isTabActive = true;
@@ -323,11 +498,17 @@ export const spaceModule = {
         this.renderPlanets();
         this.renderPlayers();
         this.renderFlightLines();
+        this.renderMinimap();
         this.updateStatusBar();
         
         this.syncFromGame();
         
         this._reconnectMultiplayer();
+        
+        if (this._needsPlayerReload) {
+            this._needsPlayerReload = false;
+            this._forceLoadPlayers();
+        }
 
         const researchBtn = document.getElementById('space-research-btn');
         if (researchBtn && !researchBtn._handlerSet) {
@@ -373,6 +554,10 @@ export const spaceModule = {
         if (this.multiplayerInterval) {
             clearInterval(this.multiplayerInterval);
             this.multiplayerInterval = null;
+        }
+        if (this._missionTimerInterval) {
+            clearInterval(this._missionTimerInterval);
+            this._missionTimerInterval = null;
         }
     },
 
@@ -471,6 +656,7 @@ export const spaceModule = {
             const result = JSON.parse(resultJson);
             
             if (result.success) {
+                result.planet.discovered_at = Date.now();
                 this.planets.push(result.planet);
                 this.renderPlanets();
                 window.showNotif?.(`🪐 Открыта планета ${result.planet.name}!`, false);
@@ -495,39 +681,211 @@ export const spaceModule = {
         }, 1500);
     },
 
+    // ВИЗУАЛ КАРТА-V7: анимация открытия планеты
     renderPlanets() {
         const layer = document.getElementById('space-objects-layer');
         if (!layer) return;
 
         layer.querySelectorAll('.space-planet').forEach(el => el.remove());
 
+        // БАГ КАРТА-2: выносим загрузку миссий за пределы цикла
+        let activeMissions = [];
+        try {
+            activeMissions = JSON.parse(this.game.get_active_planet_missions());
+        } catch(e) {}
+
         this.planets.forEach(planet => {
             const cfg = this.PLANET_TYPES[planet.planet_type] ?? this.PLANET_TYPES['earth'];
             const totalRemaining = (planet.resources_remaining?.coal || 0) + 
                                    (planet.resources_remaining?.plasma || 0) + 
                                    (planet.resources_remaining?.ore || 0);
+            const isExhausted = totalRemaining === 0;
+            
+            // ВИЗУАЛ КАРТА-V7: анимация новой планеты
+            const isNew = planet.discovered_at && (Date.now() - planet.discovered_at < 3000);
+            const newClass = isNew ? 'planet-new' : '';
+            
+            const activeMission = activeMissions.find(m => m.planet_id === planet.id && m.status === 'flying');
+            const missionProgressHtml = activeMission ? this._renderPlanetMissionProgress(activeMission) : '';
             
             const el = document.createElement('div');
-            el.className = 'space-planet';
+            el.className = `space-planet ${newClass}`;
             el.style.cssText = `
                 position:absolute;left:${planet.x}%;top:${planet.y}%;
                 transform:translate(-50%,-50%);text-align:center;cursor:pointer;
                 z-index:5;
-                ${totalRemaining === 0 ? 'opacity:0.6;filter:grayscale(0.5);' : ''}
+                ${isExhausted ? 'opacity:0.6;filter:grayscale(0.5);' : ''}
             `;
-            
-            const activeMission = this._getActiveMissionForPlanet(planet.id);
-            const missionProgressHtml = activeMission ? this._renderPlanetMissionProgress(activeMission) : '';
             
             el.innerHTML = `
                 <span style="font-size:22px;">${cfg.icon}</span>
                 <div style="font-size:9px;color:${cfg.color};margin-top:2px;">${this.escapeHtml(planet.name)}</div>
                 ${missionProgressHtml}
-                ${totalRemaining === 0 ? '<div style="font-size:7px;color:#f88;">ИСЧЕРПАНА</div>' : ''}
+                ${isExhausted ? '<div style="font-size:7px;color:#f88;">ИСЧЕРПАНА</div>' : ''}
             `;
             el.onclick = () => this.showPlanetInfo(planet);
             layer.appendChild(el);
         });
+        
+        this.renderStations();
+        this.renderMinimap();
+    },
+
+    renderStations() {
+        const layer = document.getElementById('space-objects-layer');
+        if (!layer) return;
+        
+        layer.querySelectorAll('.space-station').forEach(el => el.remove());
+        
+        const now = Date.now();
+        this.neutralStations.forEach(station => {
+            const isOnCooldown = station.cooldown_until > now;
+            
+            const el = document.createElement('div');
+            el.className = 'space-station';
+            el.style.cssText = `
+                position:absolute;left:${station.x}%;top:${station.y}%;
+                transform:translate(-50%,-50%);text-align:center;cursor:pointer;
+                z-index:6;
+                ${isOnCooldown ? 'opacity:0.5;filter:grayscale(0.3);' : ''}
+            `;
+            
+            el.innerHTML = `
+                <span style="font-size:24px;">${station.icon}</span>
+                <div style="font-size:8px;color:#ffaa44;margin-top:2px;">${this.escapeHtml(station.name)}</div>
+                ${isOnCooldown ? '<div style="font-size:7px;color:#888;">ОСТЫВАЕТ</div>' : ''}
+            `;
+            el.onclick = () => this.showStationInfo(station);
+            layer.appendChild(el);
+        });
+    },
+
+    showStationInfo(station) {
+        if (this._currentPopup) { this._currentPopup.remove(); this._currentPopup = null; }
+        
+        const now = Date.now();
+        const isOnCooldown = station.cooldown_until > now;
+        let bonusText = '';
+        switch(station.bonus_type) {
+            case 'mining_boost': bonusText = '⚡ Ускорение добычи на 1 цикл'; break;
+            case 'defense_boost': bonusText = '🛡️ Временная защита на 2 ночи'; break;
+            case 'power_boost': bonusText = '💻 +50 вычислительной мощности'; break;
+            default: bonusText = '📦 Редкий бонус';
+        }
+        
+        const popup = document.createElement('div');
+        popup.className = 'station-popup';
+        popup.style.cssText = `
+            position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+            background:#0a0a0a;border:2px solid #ffaa44;
+            border-radius:16px;padding:20px;z-index:10001;
+            font-family:monospace;min-width:260px;max-width:90vw;
+            box-shadow:0 0 30px rgba(255,170,68,0.2);
+        `;
+        
+        popup.innerHTML = `
+            <div style="font-size:28px;text-align:center;">${station.icon}</div>
+            <div style="font-size:16px;font-weight:bold;color:#ffaa44;text-align:center;margin-bottom:8px;">
+                ${this.escapeHtml(station.name)}
+            </div>
+            <div style="font-size:11px;margin-bottom:12px;background:rgba(255,255,255,0.05);padding:8px;border-radius:8px;">
+                <div>🎁 Бонус: ${bonusText}</div>
+                <div>♻️ Стоимость: ${station.cost_trash} мусора</div>
+                ${isOnCooldown ? `<div style="color:#f88;margin-top:8px;">⏱️ Кулдаун: ${Math.ceil((station.cooldown_until - now) / 60000)} мин</div>` : ''}
+            </div>
+            ${!isOnCooldown ? `
+            <button id="station-btn-trade" style="width:100%;padding:10px;background:rgba(255,170,0,0.15);
+                border:1px solid rgba(255,170,0,0.4);border-radius:8px;color:#ffaa44;
+                font-family:monospace;font-size:12px;cursor:pointer;margin-bottom:8px;">
+                📦 ОТПРАВИТЬ КОРАБЛЬ ЗА БОНУСОМ
+            </button>
+            ` : ''}
+            <button id="station-btn-close" style="width:100%;padding:8px;background:transparent;
+                border:1px solid #555;border-radius:8px;color:#aaa;cursor:pointer;font-family:monospace;font-size:11px;">
+                ✕ ЗАКРЫТЬ
+            </button>
+        `;
+        
+        document.body.appendChild(popup);
+        this._currentPopup = popup;
+        
+        const closePopup = () => {
+            popup.remove();
+            this._currentPopup = null;
+            document.removeEventListener('click', closeOnOutside);
+            document.removeEventListener('keydown', onEsc);
+        };
+        
+        const closeOnOutside = (e) => {
+            if (!popup.contains(e.target)) closePopup();
+        };
+        const onEsc = (e) => {
+            if (e.key === 'Escape') closePopup();
+        };
+        
+        setTimeout(() => document.addEventListener('click', closeOnOutside), 100);
+        document.addEventListener('keydown', onEsc);
+        
+        popup.querySelector('#station-btn-close')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closePopup();
+        });
+        
+        if (!isOnCooldown) {
+            popup.querySelector('#station-btn-trade')?.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await this.tradeWithStation(station);
+                closePopup();
+            });
+        }
+    },
+
+    async tradeWithStation(station) {
+        let stats = null;
+        try { 
+            const j = this.game.get_statistics(); 
+            if (j) stats = JSON.parse(j); 
+        } catch(e) {}
+        
+        const trashCount = stats?.trash_inventory || 0;
+        
+        if (trashCount < station.cost_trash) {
+            window.showNotif?.(`❌ Недостаточно мусора (нужно ${station.cost_trash})`, true);
+            return;
+        }
+        
+        const cargoShip = window.fleetModule?.ships.find(s => s.type === 'cargo' && !s.onMission && !s.onDefense);
+        if (!cargoShip) {
+            window.showNotif?.('❌ Нет свободного грузового корабля', true);
+            return;
+        }
+        
+        this.game.subtract_resource('trash', station.cost_trash);
+        
+        switch(station.bonus_type) {
+            case 'mining_boost':
+                if (typeof this.game.set_temporary_mining_bonus === 'function') {
+                    this.game.set_temporary_mining_bonus(50);
+                }
+                window.addToLog?.(`🎁 Станция ${station.name}: +50% к добыче на 1 цикл!`, 'success');
+                break;
+            case 'defense_boost':
+                if (typeof this.game.add_temporary_defense === 'function') {
+                    this.game.add_temporary_defense(2);
+                }
+                window.addToLog?.(`🎁 Станция ${station.name}: временная защита на 2 ночи!`, 'success');
+                break;
+            case 'power_boost':
+                this.game.add_power(50);
+                window.addToLog?.(`🎁 Станция ${station.name}: +50 вычислительной мощности!`, 'success');
+                break;
+        }
+        
+        station.cooldown_until = Date.now() + 5 * 60 * 1000; // 5 минут кулдаун
+        this.saveNeutralStations();
+        this.renderStations();
+        
+        window.showNotif?.(`✅ Бонус от ${station.name} активирован!`, false);
     },
 
     _getActiveMissionForPlanet(planetId) {
@@ -541,7 +899,6 @@ export const spaceModule = {
     },
 
     _renderPlanetMissionProgress(mission) {
-        // БАГ #8: правильный расчёт прогресса с started_at
         const startedAt = mission.started_at || (mission.arrives_at - (mission.returns_at - mission.arrives_at));
         const totalDuration = mission.arrives_at - startedAt;
         const now = Date.now();
@@ -555,6 +912,7 @@ export const spaceModule = {
         `;
     },
 
+    // БАГ КАРТА-5: исчерпанная планета показывает информационный блок
     showPlanetInfo(planet) {
         const cfg = this.PLANET_TYPES[planet.planet_type] ?? {};
         const rem = planet.resources_remaining || planet.resources || {};
@@ -583,6 +941,8 @@ export const spaceModule = {
             font-family:monospace;min-width:280px;max-width:90vw;
             box-shadow:0 0 30px rgba(74,255,157,0.2);
         `;
+        
+        // БАГ КАРТА-5: для исчерпанных планет — информационный блок вместо кнопки
         popup.innerHTML = `
             <div style="font-size:28px;text-align:center;">${cfg.icon || '🪐'}</div>
             <div style="font-size:16px;font-weight:bold;color:${cfg.color};text-align:center;margin-bottom:8px;">
@@ -594,13 +954,18 @@ export const spaceModule = {
                 <div>⛏️ Руда: <b>${rem.ore || 0}</b></div>
                 ${isExhausted ? '<div style="color:#f88;margin-top:4px;">⚠️ Ресурсы исчерпаны</div>' : ''}
             </div>
-            <button id="planet-btn-cargo" style="width:100%;padding:10px;background:rgba(255,170,0,0.15);
-                border:1px solid rgba(255,170,0,0.4);border-radius:8px;color:#ffaa44;
-                font-family:monospace;font-size:12px;cursor:pointer;margin-bottom:8px;
-                ${isExhausted || !hasFreeCargo ? 'opacity:0.4;cursor:not-allowed;' : ''}"
-                ${isExhausted || !hasFreeCargo ? 'disabled' : ''}>
-                📦 ОТПРАВИТЬ ГРУЗОВОЙ КОРАБЛЬ (100 ед.)${!hasFreeCargo && !isExhausted ? '<br><small style="font-size:9px;">Нет свободного корабля</small>' : ''}
-            </button>
+            ${isExhausted ? 
+                `<div style="text-align:center;padding:10px;color:#f88;border:1px solid #f882;border-radius:8px;font-size:11px;margin-bottom:8px;">
+                    ⚠️ Планета полностью исчерпана.<br>Ресурсы не могут быть добыты.
+                </div>` :
+                `<button id="planet-btn-cargo" style="width:100%;padding:10px;background:rgba(255,170,0,0.15);
+                    border:1px solid rgba(255,170,0,0.4);border-radius:8px;color:#ffaa44;
+                    font-family:monospace;font-size:12px;cursor:pointer;margin-bottom:8px;
+                    ${!hasFreeCargo ? 'opacity:0.4;cursor:not-allowed;' : ''}"
+                    ${!hasFreeCargo ? 'disabled' : ''}>
+                    📦 ОТПРАВИТЬ ГРУЗОВОЙ КОРАБЛЬ (100 ед.)${!hasFreeCargo && !isExhausted ? '<br><small style="font-size:9px;">Нет свободного корабля</small>' : ''}
+                </button>`
+            }
             <button id="planet-btn-close" style="width:100%;padding:8px;background:transparent;
                 border:1px solid #555;border-radius:8px;color:#aaa;cursor:pointer;font-family:monospace;font-size:11px;">
                 ✕ ЗАКРЫТЬ
@@ -610,14 +975,14 @@ export const spaceModule = {
         document.body.appendChild(popup);
         this._currentPopup = popup;
 
-        popup.querySelector('#planet-btn-cargo').onclick = async (e) => {
-            e.stopPropagation();
-            if (isExhausted) return;
-            await this.sendShipToPlanet(planet, 'cargo');
-            popup.remove(); this._currentPopup = null;
-        };
+        if (!isExhausted) {
+            popup.querySelector('#planet-btn-cargo')?.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await this.sendShipToPlanet(planet, 'cargo');
+                popup.remove(); this._currentPopup = null;
+            });
+        }
         
-        // БАГ #26: единая функция закрытия
         const closePopup = () => {
             popup.remove();
             this._currentPopup = null;
@@ -625,21 +990,16 @@ export const spaceModule = {
             document.removeEventListener('keydown', onEsc);
         };
         
-        popup.querySelector('#planet-btn-close').onclick = (e) => {
+        popup.querySelector('#planet-btn-close').addEventListener('click', (e) => {
             e.stopPropagation();
             closePopup();
-        };
+        });
 
         const closeOnOutside = (e) => {
-            if (!popup.contains(e.target)) {
-                closePopup();
-            }
+            if (!popup.contains(e.target)) closePopup();
         };
-        
         const onEsc = (e) => {
-            if (e.key === 'Escape') {
-                closePopup();
-            }
+            if (e.key === 'Escape') closePopup();
         };
         
         setTimeout(() => document.addEventListener('click', closeOnOutside), 100);
@@ -803,66 +1163,57 @@ export const spaceModule = {
         }
     },
 
-    generateStars() {
-        const container = document.getElementById('space-stars-layer');
-        if (!container) return;
-        
-        if (container.children.length > 0) return;
-        
-        container.innerHTML = '';
-        const STAR_COUNT = 200;
-        const fragment = document.createDocumentFragment();
-        
-        for (let i = 0; i < STAR_COUNT; i++) {
-            const star = document.createElement('div');
-            
-            const tier = Math.random();
-            const size = tier > 0.95 ? (2 + Math.random() * 2)
-                       : tier > 0.7  ? (1 + Math.random())
-                       : (0.5 + Math.random() * 0.5);
-            
-            const x = Math.random() * 100;
-            const y = Math.random() * 100;
-            const opacity = 0.3 + Math.random() * 0.7;
-            const duration = 2 + Math.random() * 4;
-            const delay = Math.random() * 4;
-            
-            const hue = Math.random() < 0.3 ? `hsl(${200 + Math.random()*40}, 80%, 90%)` 
-                      : Math.random() < 0.2 ? `hsl(${40 + Math.random()*20}, 60%, 90%)`
-                      : '#ffffff';
-            
-            star.style.cssText = `
-                position: absolute;
-                left: ${x}%;
-                top: ${y}%;
-                width: ${size}px;
-                height: ${size}px;
-                background: ${hue};
-                border-radius: 50%;
-                opacity: ${opacity};
-                box-shadow: 0 0 ${size * 2}px ${hue};
-                animation: starTwinkle ${duration}s ${delay}s infinite alternate ease-in-out;
-                pointer-events: none;
-            `;
-            fragment.appendChild(star);
-        }
-        container.appendChild(fragment);
-        console.log('✨ Звёзды сгенерированы (кэшировано)');
-    },
-
+    // БАГ #49: setupMultiplayer с сохранением дескриптора интервала
     setupMultiplayer() {
         this._forceLoadPlayers();
         
         if (this.multiplayerInterval) clearInterval(this.multiplayerInterval);
         this.multiplayerInterval = setInterval(() => this.loadMultiplayerPlayers(), 30000);
         
-        setInterval(() => this.updateMissionTimers(), 1000);
+        if (this._missionTimerInterval) clearInterval(this._missionTimerInterval);
+        this._missionTimerInterval = setInterval(() => this.updateMissionTimers(), 1000);
         
         setTimeout(() => this._restorePlanetMissions(), 2000);
     },
 
+    // БАГ КАРТА-4: Supabase Presence для онлайна
+    setupPresence() {
+        if (!this.currentUser) return;
+        
+        if (this._presenceChannel) {
+            this._presenceChannel.unsubscribe();
+        }
+        
+        this._presenceChannel = supabase.channel('online_players', {
+            config: { presence: { key: this.currentUser.id } }
+        });
+        
+        this._presenceChannel
+            .on('presence', { event: 'sync' }, () => {
+                const state = this._presenceChannel.presenceState();
+                this._onlinePlayerIds = Object.keys(state);
+                this.renderPlayers();
+                this.renderPlayersOnMap();
+            })
+            .subscribe(async (status) => {
+                if (status === 'SUBSCRIBED') {
+                    await this._presenceChannel.track({
+                        userId: this.currentUser.id,
+                        username: this.currentUser.user_metadata?.username || 'Игрок',
+                        online_at: new Date().toISOString()
+                    });
+                }
+            });
+    },
+
+    // БАГ КАРТА-6: _forceLoadPlayers проверяет isTabActive
     async _forceLoadPlayers() {
         if (!this.currentUser) return;
+        if (!this.isTabActive) {
+            this._needsPlayerReload = true;
+            return;
+        }
+        
         try {
             const { data: saves, error } = await supabase
                 .from('game_saves')
@@ -882,6 +1233,14 @@ export const spaceModule = {
             this.otherPlayers = (saves ?? [])
                 .filter(s => s.user_id !== this.currentUser.id)
                 .map(s => ({ ...s, username: profileMap[s.user_id] ?? 'Игрок' }));
+
+            // БАГ КАРТА-1: очищаем позиции для удалённых игроков
+            const currentIds = new Set(this.otherPlayers.map(p => p.user_id));
+            for (const id in this._playerPositions) {
+                if (id !== this.currentUser?.id && !currentIds.has(id)) {
+                    delete this._playerPositions[id];
+                }
+            }
 
             this.renderPlayers();
             this.renderPlayersOnMap();
@@ -915,6 +1274,13 @@ export const spaceModule = {
                 .filter(s => s.user_id !== this.currentUser.id)
                 .map(s => ({ ...s, username: profileMap[s.user_id] ?? 'Игрок' }));
 
+            const currentIds = new Set(this.otherPlayers.map(p => p.user_id));
+            for (const id in this._playerPositions) {
+                if (id !== this.currentUser?.id && !currentIds.has(id)) {
+                    delete this._playerPositions[id];
+                }
+            }
+
             this.renderPlayers();
             this.renderPlayersOnMap();
             this.renderFlightLines();
@@ -924,8 +1290,8 @@ export const spaceModule = {
     },
 
     isOnline(player) {
-        if (!player.last_seen) return false;
         if (this._onlinePlayerIds && this._onlinePlayerIds.includes(player.user_id)) return true;
+        if (!player.last_seen) return false;
         return Date.now() - new Date(player.last_seen).getTime() < 5 * 60 * 1000;
     },
 
@@ -949,7 +1315,9 @@ export const spaceModule = {
                 display:flex;align-items:center;gap:8px;padding:6px 0;
                 border-bottom:1px solid rgba(255,255,255,0.05);
                 cursor:pointer;
-            " onclick="window.spaceModule?.showPlayerInfo('${this.escapeHtml(p.user_id)}')">
+            " onmouseenter="window.spaceModule?.showPlayerTooltip('${this.escapeHtml(p.user_id)}', event)"
+              onmouseleave="window.spaceModule?.scheduleTooltipHide()"
+              onclick="window.spaceModule?.showPlayerInfo('${this.escapeHtml(p.user_id)}')">
                 <span style="font-size:14px;">${this.isOnline(p) ? '🟢' : '⚫'}</span>
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:12px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
@@ -963,6 +1331,64 @@ export const spaceModule = {
         `).join('');
         
         this.renderFlightLines();
+    },
+
+    // ВИЗУАЛ КАРТА-V4: кастомный тултип
+    showPlayerTooltip(userId, event) {
+        const player = this.otherPlayers.find(p => p.user_id === userId);
+        if (!player) return;
+        
+        const isOnline = this.isOnline(player);
+        const lastSeenText = player.last_seen ? this._formatLastSeen(player.last_seen) : 'неизвестно';
+        
+        const tooltipContent = `
+            <div class="tooltip-inner">
+                <div class="tooltip-name" style="color:${isOnline ? '#4aff9d' : '#888'}">🏰 ${this.escapeHtml(player.username)}</div>
+                <div>🧠 Нейро: Ур.${player.neuro_evolution || 0} | ⛏️ ${(player.total_mined || 0).toLocaleString()} добыто</div>
+                <div>🛡️ Защитник: ${player.has_defense_ship ? `Да (ур.${player.defense_ship_level})` : 'Нет'}</div>
+                <div>⏱️ ${isOnline ? '🟢 Онлайн' : `⚫ Оффлайн · ${lastSeenText}`}</div>
+            </div>
+        `;
+        
+        this.showTooltip(tooltipContent, event.clientX, event.clientY);
+    },
+
+    // ВИЗУАЛ КАРТА-V3: иконки игроков по уровню нейро
+    getPlayerIcon(neuroEvolution) {
+        const evo = neuroEvolution || 0;
+        if (evo >= 10) return { icon: '👁️', size: 24, color: '#ff44ff', glow: true };
+        if (evo >= 8) return  { icon: '🗼', size: 22, color: '#ff6a6a', glow: false };
+        if (evo >= 6) return  { icon: '🏯', size: 20, color: '#ffaa44', glow: false };
+        if (evo >= 4) return  { icon: '🏛️', size: 18, color: '#4aff9d', glow: false };
+        if (evo >= 2) return  { icon: '🏠', size: 16, color: '#aaa',    glow: false };
+        return                { icon: '🏚️', size: 14, color: '#888',    glow: false };
+    },
+
+    // ВИЗУАЛ КАРТА-V5: зоны влияния
+    renderInfluenceZone() {
+        const svg = document.getElementById('space-flight-svg');
+        if (!svg) return;
+        
+        const existing = svg.querySelector('.influence-zone');
+        if (existing) existing.remove();
+        
+        const myPos = this._getMyPlanetPosition();
+        if (!myPos) return;
+        
+        const neuroLevel = this._lastStats?.neuro_evolution || 0;
+        const radius = 8 + neuroLevel * 1.5;
+        
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.classList.add('influence-zone');
+        circle.setAttribute('cx', `${myPos.x}%`);
+        circle.setAttribute('cy', `${myPos.y}%`);
+        circle.setAttribute('r', `${radius}%`);
+        circle.setAttribute('fill', 'rgba(74,255,157,0.04)');
+        circle.setAttribute('stroke', 'rgba(74,255,157,0.15)');
+        circle.setAttribute('stroke-width', '1');
+        circle.setAttribute('stroke-dasharray', '6 3');
+        
+        svg.insertBefore(circle, svg.firstChild);
     },
 
     renderPlayersOnMap() {
@@ -980,50 +1406,63 @@ export const spaceModule = {
             return `${Math.floor(hours / 24)} дн назад`;
         };
 
-        this.otherPlayers.slice(0, 20).forEach((player, index) => {
-            if (!this._playerPositions[player.user_id]) {
-                const goldenAngle = 2.399963;
-                const angle = index * goldenAngle;
-                const r = 18 + (index % 5) * 8;
-                this._playerPositions[player.user_id] = {
-                    x: Math.max(8, Math.min(92, 50 + Math.cos(angle) * r)),
-                    y: Math.max(8, Math.min(92, 50 + Math.sin(angle) * r))
-                };
+        const myPos = this._getMyPlanetPosition();
+        
+        this.otherPlayers.slice(0, 20).forEach((player) => {
+            const pos = this._getPlayerPosition(player.user_id);
+            
+            const isOnline = this.isOnline(player);
+            const { icon, size, color, glow } = this.getPlayerIcon(player.neuro_evolution);
+            const glowStyle = glow ? 'filter: drop-shadow(0 0 6px #ff44ff); animation: glow-pulse 2s infinite;' : '';
+            
+            // Проверка на нахождение в зоне влияния
+            let isInInfluence = false;
+            if (myPos && pos) {
+                const dx = pos.x - myPos.x;
+                const dy = pos.y - myPos.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                const neuroLevel = this._lastStats?.neuro_evolution || 0;
+                const influenceRadius = 8 + neuroLevel * 1.5;
+                isInInfluence = distance < influenceRadius;
             }
-            const { x, y } = this._playerPositions[player.user_id];
+            
+            const threatClass = isInInfluence ? 'threat-in-range' : '';
             
             const marker = document.createElement('div');
-            marker.className = 'other-player-marker';
+            marker.className = `other-player-marker ${threatClass}`;
             marker.style.cssText = `
-                position:absolute;left:${x}%;top:${y}%;
+                position:absolute;left:${pos.x}%;top:${pos.y}%;
                 transform:translate(-50%,-50%);text-align:center;cursor:pointer;
                 z-index:15;
             `;
-            const isOnline = this.isOnline(player);
-            
-            marker.title = `${player.username || 'Игрок'}\n` +
-                `🛡️ Защита: ${player.has_defense_ship ? `Да (ур. ${player.defense_ship_level})` : 'Нет'}\n` +
-                `⏱️ Последний онлайн: ${getTimeAgo(player.last_seen)}`;
             
             marker.innerHTML = `
-                <span style="font-size:18px;">🏰</span>
-                <div style="font-size:8px;color:${isOnline ? '#4aff9d' : '#888'};margin-top:1px;">
+                <span style="font-size:${size}px;${glowStyle}">${icon}</span>
+                <div style="font-size:8px;color:${color};margin-top:1px;">
                     ${this.escapeHtml(player.username?.slice(0,10) ?? 'Игрок')}
                 </div>
             `;
+            
+            marker.onmouseenter = (e) => {
+                this.showPlayerTooltip(player.user_id, e);
+            };
+            marker.onmouseleave = () => {
+                this.scheduleTooltipHide();
+            };
             marker.onclick = () => this.showPlayerInfo(player.user_id);
             layer.appendChild(marker);
         });
         
+        this.renderInfluenceZone();
         this.renderFlightLines();
     },
 
-    // БАГ #8: исправлен прогресс полёта корабля
+    // ВИЗУАЛ КАРТА-V1: живые SVG линии полёта + КАРТА G-2: сигнатуры угроз
     renderFlightLines() {
-        const layer = document.getElementById('space-objects-layer');
-        if (!layer) return;
+        const svg = document.getElementById('space-flight-svg');
+        if (!svg) return;
 
-        layer.querySelectorAll('.flight-line, .flight-ship-icon').forEach(el => el.remove());
+        svg.innerHTML = '';
 
         const myPos = this._getMyPlanetPosition();
         if (!myPos) return;
@@ -1038,6 +1477,7 @@ export const spaceModule = {
         
         const now = Date.now();
         
+        // Исходящие миссии (оранжевые)
         activeMissions.forEach(mission => {
             const targetPlanet = this.planets.find(p => p.id === mission.planet_id);
             if (!targetPlanet) return;
@@ -1047,60 +1487,94 @@ export const spaceModule = {
             const dy = targetPos.y - myPos.y;
             const length = Math.sqrt(dx * dx + dy * dy);
             const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-            const color = '#ffaa44';
             
-            // БАГ #8: правильный расчёт прогресса
             const startedAt = mission.started_at || (mission.arrives_at - (mission.returns_at - mission.arrives_at));
             const totalDuration = mission.arrives_at - startedAt;
             const elapsed = now - startedAt;
             let progress = Math.min(1.0, Math.max(0, elapsed / totalDuration));
             
-            // Если корабль уже должен был вернуться, фиксируем прогресс на 0.9
             if (now >= mission.returns_at) {
                 progress = 0.9;
             }
             
             const shipPosX = myPos.x + dx * progress;
             const shipPosY = myPos.y + dy * progress;
-
-            const line = document.createElement('div');
-            line.className = 'flight-line';
-            line.style.cssText = `
-                position: absolute; left: ${myPos.x}%; top: ${myPos.y}%;
-                width: ${length}%; height: 2px;
-                background: linear-gradient(90deg, ${color}, transparent);
-                transform-origin: 0 50%; transform: rotate(${angle}deg);
-                opacity: 0.7; pointer-events: none; z-index: 2;
-            `;
             
-            const shipEl = document.createElement('div');
-            shipEl.className = 'flight-ship-icon';
-            shipEl.style.cssText = `position:absolute;left:${shipPosX}%;top:${shipPosY}%;transform:translate(-50%,-50%);font-size:14px;z-index:10;text-shadow:0 0 3px black;`;
-            const isReturning = now > mission.arrives_at;
-            shipEl.textContent = `📦${isReturning ? '←' : '→'}`;
+            // Линия
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', `${myPos.x}%`);
+            line.setAttribute('y1', `${myPos.y}%`);
+            line.setAttribute('x2', `${targetPos.x}%`);
+            line.setAttribute('y2', `${targetPos.y}%`);
+            line.setAttribute('stroke', '#ffaa44');
+            line.setAttribute('stroke-width', '1');
+            line.setAttribute('stroke-dasharray', '4 4');
+            line.setAttribute('opacity', '0.6');
+            svg.appendChild(line);
             
-            layer.appendChild(line);
-            layer.appendChild(shipEl);
+            // Корабль (точка)
+            const shipPoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            shipPoint.setAttribute('r', '3');
+            shipPoint.setAttribute('fill', '#ffaa44');
+            shipPoint.setAttribute('cx', `${shipPosX}%`);
+            shipPoint.setAttribute('cy', `${shipPosY}%`);
+            svg.appendChild(shipPoint);
         });
-
-        // БАГ #27: очистка интервала перед созданием нового
-        if (activeMissions.length > 0 && !this._flightLineInterval && this.isTabActive) {
-            if (this._flightLineInterval) {
-                clearInterval(this._flightLineInterval);
-                this._flightLineInterval = null;
-            }
-            this._flightLineInterval = setInterval(() => {
-                if (this.isTabActive) {
-                    this.renderFlightLines();
-                } else {
-                    clearInterval(this._flightLineInterval);
-                    this._flightLineInterval = null;
+        
+        // КАРТА G-2: Входящие PvP-миссии (красные, сигнатуры угроз)
+        if (this.currentUser && window.fleetModule) {
+            const incomingMissions = window.fleetModule.activePvpMissions || [];
+            
+            incomingMissions.forEach(mission => {
+                if (mission.targetUserId !== this.currentUser.id) return;
+                if (mission.status !== 'flying') return;
+                
+                const attackerPos = this._getPlayerPosition(mission.targetUserId || mission.attackerId);
+                if (!attackerPos) return;
+                
+                const dx = attackerPos.x - myPos.x;
+                const dy = attackerPos.y - myPos.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+                
+                let progress = 0;
+                if (mission.arrivesAt) {
+                    const total = mission.arrivesAt - mission.startedAt;
+                    const elapsed = now - mission.startedAt;
+                    progress = Math.min(0.95, Math.max(0, elapsed / total));
                 }
-            }, 2000);
-        } else if (activeMissions.length === 0 && this._flightLineInterval) {
-            clearInterval(this._flightLineInterval);
-            this._flightLineInterval = null;
+                
+                const shipPosX = attackerPos.x + (myPos.x - attackerPos.x) * progress;
+                const shipPosY = attackerPos.y + (myPos.y - attackerPos.y) * progress;
+                const remainingMs = mission.arrivesAt - now;
+                const isUrgent = remainingMs < 60000;
+                
+                // Красная линия угрозы
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', `${attackerPos.x}%`);
+                line.setAttribute('y1', `${attackerPos.y}%`);
+                line.setAttribute('x2', `${myPos.x}%`);
+                line.setAttribute('y2', `${myPos.y}%`);
+                line.setAttribute('stroke', isUrgent ? '#ff4444' : '#ff6666');
+                line.setAttribute('stroke-width', isUrgent ? '2' : '1.5');
+                line.setAttribute('stroke-dasharray', isUrgent ? '2 2' : '6 4');
+                line.setAttribute('opacity', isUrgent ? '0.9' : '0.6');
+                svg.appendChild(line);
+                
+                // Пульсирующий маркер угрозы
+                const threatMarker = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                threatMarker.setAttribute('r', isUrgent ? '6' : '4');
+                threatMarker.setAttribute('fill', '#ff4444');
+                threatMarker.setAttribute('cx', `${shipPosX}%`);
+                threatMarker.setAttribute('cy', `${shipPosY}%`);
+                if (isUrgent) {
+                    threatMarker.setAttribute('class', 'threat-pulse');
+                }
+                svg.appendChild(threatMarker);
+            });
         }
+        
+        this.renderInfluenceZone();
     },
 
     _getMyPlanetPosition() {
@@ -1110,10 +1584,6 @@ export const spaceModule = {
         return { x: 50, y: 50 };
     },
 
-    _getPlayerPosition(userId) {
-        return this._playerPositions[userId] || null;
-    },
-    
     _hashString(str) {
         let hash = 0;
         for (let i = 0; i < str.length; i++) {
@@ -1133,6 +1603,9 @@ export const spaceModule = {
         const scoutAge = scout ? Math.floor((Date.now() - new Date(scout.created_at).getTime()) / 60000) : null;
         const scoutFresh = scoutAge !== null && scoutAge < 30;
         const isOnline = this.isOnline(player);
+        const repScore = player.reputation_score || 0;
+        const repColor = repScore >= 0 ? '#4aff9d' : '#ff6a6a';
+        const repSign = repScore >= 0 ? '+' : '';
 
         if (this._currentPopup) {
             this._currentPopup.remove();
@@ -1150,7 +1623,6 @@ export const spaceModule = {
             backdrop-filter:blur(4px);
         `;
 
-        // БАГ #30: проверка scout.scout_data
         const sd = scout?.scout_data || {};
 
         popup.innerHTML = `
@@ -1163,6 +1635,7 @@ export const spaceModule = {
                     <div style="font-size:11px;color:${isOnline ? '#4aff9d' : '#888'};">
                         ${isOnline ? '🟢 Онлайн' : '⚫ Оффлайн · ' + this._formatLastSeen(player.last_seen)}
                     </div>
+                    <div style="font-size:10px;color:${repColor};">🤝 Репутация: ${repSign}${repScore}</div>
                 </div>
             </div>
 
@@ -1263,13 +1736,18 @@ export const spaceModule = {
                     !result.success
                 );
             }
+            
+            if (result.success && shipType !== 'scout') {
+                // После атаки обновляем репутацию
+                const newRep = repScore - 2;
+                await this.updateReputation(player.user_id, newRep);
+            }
         };
 
         popup.querySelector('#space-btn-scout').onclick = (e) => { e.stopPropagation(); doSend('scout'); };
         popup.querySelector('#space-btn-combat').onclick = (e) => { e.stopPropagation(); doSend('combat'); };
         popup.querySelector('#space-btn-cargo').onclick = (e) => { e.stopPropagation(); doSend('cargo'); };
         
-        // БАГ #26: единая функция закрытия
         const closePopup = () => {
             popup.remove();
             this._currentPopup = null;
@@ -1280,19 +1758,32 @@ export const spaceModule = {
         popup.querySelector('#space-btn-close').onclick = (e) => { e.stopPropagation(); closePopup(); };
         
         const closeOnOutside = (e) => {
-            if (!popup.contains(e.target)) {
-                closePopup();
-            }
+            if (!popup.contains(e.target)) closePopup();
         };
-        
         const onEsc = (e) => {
-            if (e.key === 'Escape') {
-                closePopup();
-            }
+            if (e.key === 'Escape') closePopup();
         };
         
         setTimeout(() => document.addEventListener('click', closeOnOutside), 100);
         document.addEventListener('keydown', onEsc);
+    },
+
+    async updateReputation(userId, newScore) {
+        try {
+            await supabase
+                .from('player_reputation')
+                .upsert({
+                    user_id: this.currentUser.id,
+                    target_id: userId,
+                    score: Math.max(-5, Math.min(5, newScore)),
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'user_id,target_id' });
+            
+            const player = this.otherPlayers.find(p => p.user_id === userId);
+            if (player) player.reputation_score = newScore;
+        } catch(e) {
+            console.warn('Ошибка обновления репутации:', e);
+        }
     },
 
     _formatLastSeen(isoString) {
@@ -1303,6 +1794,86 @@ export const spaceModule = {
         const hours = Math.floor(mins / 60);
         if (hours < 24) return `${hours} ч назад`;
         return `${Math.floor(hours / 24)} дн назад`;
+    },
+
+    // ВИЗУАЛ КАРТА-V6: мини-карта
+    renderMinimap() {
+        const canvas = document.getElementById('space-minimap');
+        if (!canvas) return;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, 80, 80);
+        
+        // Фон
+        ctx.fillStyle = '#050505';
+        ctx.fillRect(0, 0, 80, 80);
+        
+        // Звёзды
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        for (let i = 0; i < 30; i++) {
+            ctx.fillRect(Math.random()*80, Math.random()*80, 1, 1);
+        }
+        
+        // Планеты
+        this.planets.forEach(p => {
+            ctx.fillStyle = '#ffaa44';
+            ctx.beginPath();
+            ctx.arc(p.x * 0.8, p.y * 0.8, 2, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        
+        // Нейтральные станции
+        this.neutralStations.forEach(s => {
+            ctx.fillStyle = '#ffaa44';
+            ctx.beginPath();
+            ctx.rect(s.x * 0.8 - 1, s.y * 0.8 - 1, 2, 2);
+            ctx.fill();
+        });
+        
+        // Игроки
+        this.otherPlayers.forEach(p => {
+            const pos = this._getPlayerPosition(p.user_id);
+            if (!pos) return;
+            ctx.fillStyle = this.isOnline(p) ? '#4aff9d' : '#555';
+            ctx.beginPath();
+            ctx.arc(pos.x * 0.8, pos.y * 0.8, 2, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        
+        // Моя база
+        const myPos = this._getMyPlanetPosition();
+        if (myPos) {
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(myPos.x * 0.8, myPos.y * 0.8, 3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Рамка вокруг базы
+            ctx.strokeStyle = '#4aff9d';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.arc(myPos.x * 0.8, myPos.y * 0.8, 4, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        
+        // Активные линии полёта на мини-карте
+        let activeMissions = [];
+        try {
+            const missionsJson = this.game.get_active_planet_missions();
+            activeMissions = JSON.parse(missionsJson);
+        } catch(e) {}
+        
+        activeMissions.forEach(mission => {
+            const targetPlanet = this.planets.find(p => p.id === mission.planet_id);
+            if (!targetPlanet || !myPos) return;
+            
+            ctx.beginPath();
+            ctx.moveTo(myPos.x * 0.8, myPos.y * 0.8);
+            ctx.lineTo(targetPlanet.x * 0.8, targetPlanet.y * 0.8);
+            ctx.strokeStyle = 'rgba(255,170,68,0.4)';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+        });
     },
 
     destroy() {
@@ -1324,9 +1895,17 @@ export const spaceModule = {
             clearInterval(this._flightLineInterval);
             this._flightLineInterval = null;
         }
+        if (this._flightLineDebounce) {
+            clearTimeout(this._flightLineDebounce);
+            this._flightLineDebounce = null;
+        }
         if (this._missionCheckInterval) {
             clearInterval(this._missionCheckInterval);
             this._missionCheckInterval = null;
+        }
+        if (this._missionTimerInterval) {
+            clearInterval(this._missionTimerInterval);
+            this._missionTimerInterval = null;
         }
     },
 

@@ -1,4 +1,4 @@
-// save.js - ИСПРАВЛЕННАЯ ВЕРСИЯ (фикс конфликта сохранений и приоритет fleetModule)
+
 
 import { supabase } from './supabase.js';
 
@@ -15,9 +15,20 @@ function getFleetStorageKey() {
     return userId ? `corebox_fleet_${userId}` : 'corebox_fleet';
 }
 
-// ИСПРАВЛЕНИЕ 1: getFleet с приоритетом из fleetModule
+export async function applyPendingLoot() {
+    const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
+    if (Object.keys(pending).length === 0) return;
+    if (!window.game) return;
+    
+    if (pending.ore > 0) window.game.add_resource('ore', pending.ore);
+    if (pending.chips > 0) window.game.add_resource('chips', pending.chips);
+    if (pending.plasma > 0) window.game.add_resource('plasma', pending.plasma);
+    
+    if (window.addToLog) window.addToLog(`📦 Восстановлен лут из предыдущей сессии`);
+    localStorage.removeItem('corebox_pending_loot');
+}
+
 function getFleet() {
-    // Приоритет — живой модуль fleetModule
     if (window.fleetModule && window.fleetModule.ships && window.fleetModule.ships.length > 0) {
         console.log(`📦 getFleet: возвращаем ${window.fleetModule.ships.length} кораблей из fleetModule`);
         return window.fleetModule.ships;
@@ -37,12 +48,10 @@ function getFleet() {
     return [];
 }
 
-// ИСПРАВЛЕНИЕ: restoreFleet с синхронизацией fleetModule
 function restoreFleet(fleet) {
     if (fleet && Array.isArray(fleet)) {
         const key = getFleetStorageKey();
         localStorage.setItem(key, JSON.stringify(fleet));
-        // Синхронизируем с fleetModule если он существует
         if (window.fleetModule) {
             window.fleetModule.ships = fleet;
             if (window.fleetModule._renderFleetTab) {
@@ -82,6 +91,10 @@ function restoreBlueprints(blueprints) {
     if (normalized && Array.isArray(normalized)) {
         const key = getBlueprintsStorageKey();
         localStorage.setItem(key, JSON.stringify(normalized));
+        
+        if (window.designModule) {
+            window.designModule.loadBlueprintsFromCloud(normalized);
+        }
     }
 }
 
@@ -91,11 +104,11 @@ function getPassiveRates() {
         if (cfg) {
             const pc = JSON.parse(cfg)?.mining_config?.passive_chances;
             if (pc) {
-                return { coal: pc.coal ?? 0.004, trash: pc.trash ?? 0.008, ore: pc.ore ?? 0.003 };
+                return { coal: pc.coal ?? 0.008, trash: pc.trash ?? 0.006, ore: pc.ore ?? 0.005 };
             }
         }
     } catch(e) {}
-    return { coal: 0.004, trash: 0.008, ore: 0.003 };
+    return { coal: 0.008, trash: 0.006, ore: 0.005 };
 }
 
 function getLocalSave() {
@@ -108,8 +121,14 @@ function getLocalSave() {
     return null;
 }
 
-function migrateSave(oldSave) {
+function migrateSave(oldSave, userId) {
     if (oldSave.version === SAVE_VERSION) {
+        return oldSave;
+    }
+    
+    const MIGRATION_KEY = 'corebox_migration_v3_done';
+    if (localStorage.getItem(MIGRATION_KEY) === 'true') {
+        console.log('Миграция уже выполнена ранее');
         return oldSave;
     }
     
@@ -149,7 +168,7 @@ function migrateSave(oldSave) {
             turbine_heat: oldSave.turbine_heat || 0,
             turbine_upgrade_level: oldSave.turbine_upgrade_level || 0,
             statistics: oldSave.statistics || {},
-            passive_rates: oldSave.passive_rates || { coal: 0.004, trash: 0.008, ore: 0.003 },
+            passive_rates: oldSave.passive_rates || { coal: 0.008, trash: 0.006, ore: 0.005 },
             last_ai_coal_threshold: oldSave.last_ai_coal_threshold || 0,
             current_night_type: oldSave.current_night_type || "",
             attack_history: oldSave.attack_history || [],
@@ -160,14 +179,36 @@ function migrateSave(oldSave) {
         };
         
         try {
-            const bpKey = `corebox_ship_blueprints`;
-            const bp = JSON.parse(localStorage.getItem(bpKey) || '[]');
-            if (bp.length) migrated.blueprints = bp;
-            console.log(`🔄 Миграция: восстановлено ${bp.length} чертежей из localStorage`);
+            const legacyBpKey = 'corebox_ship_blueprints';
+            const legacyBp = localStorage.getItem(legacyBpKey);
+            if (legacyBp) {
+                const bp = JSON.parse(legacyBp);
+                if (bp.length) migrated.blueprints = bp;
+                const userBpKey = userId ? `corebox_ship_blueprints_${userId}` : 'corebox_ship_blueprints';
+                localStorage.setItem(userBpKey, JSON.stringify(bp));
+                console.log(`🔄 Миграция: чертежи сохранены в ${userBpKey}`);
+                localStorage.removeItem(legacyBpKey);
+            }
         } catch(e) {
-            console.warn('Ошибка восстановления чертежей при миграции:', e);
+            console.warn('Ошибка миграции чертежей:', e);
         }
         
+        try {
+            const legacyFleetKey = 'corebox_fleet';
+            const legacyFleet = localStorage.getItem(legacyFleetKey);
+            if (legacyFleet) {
+                const fleet = JSON.parse(legacyFleet);
+                if (fleet.length) migrated.fleet = fleet;
+                const userFleetKey = userId ? `corebox_fleet_${userId}` : 'corebox_fleet';
+                localStorage.setItem(userFleetKey, JSON.stringify(fleet));
+                console.log(`🔄 Миграция: флот сохранён в ${userFleetKey}`);
+                localStorage.removeItem(legacyFleetKey);
+            }
+        } catch(e) {
+            console.warn('Ошибка миграции флота:', e);
+        }
+        
+        localStorage.setItem(MIGRATION_KEY, 'true');
         return migrated;
     }
     
@@ -219,7 +260,7 @@ function migrateSave(oldSave) {
             turbine_heat: 0,
             turbine_upgrade_level: 0,
             statistics: {},
-            passive_rates: { coal: 0.004, trash: 0.008, ore: 0.003 },
+            passive_rates: { coal: 0.008, trash: 0.006, ore: 0.005 },
             last_ai_coal_threshold: 0,
             current_night_type: "",
             attack_history: [],
@@ -230,11 +271,30 @@ function migrateSave(oldSave) {
         };
         
         try {
-            const bpKey = `corebox_ship_blueprints`;
-            const bp = JSON.parse(localStorage.getItem(bpKey) || '[]');
-            if (bp.length) migrated.blueprints = bp;
+            const legacyBpKey = 'corebox_ship_blueprints';
+            const legacyBp = localStorage.getItem(legacyBpKey);
+            if (legacyBp) {
+                const bp = JSON.parse(legacyBp);
+                if (bp.length) migrated.blueprints = bp;
+                const userBpKey = userId ? `corebox_ship_blueprints_${userId}` : 'corebox_ship_blueprints';
+                localStorage.setItem(userBpKey, JSON.stringify(bp));
+                localStorage.removeItem(legacyBpKey);
+            }
         } catch(e) {}
         
+        try {
+            const legacyFleetKey = 'corebox_fleet';
+            const legacyFleet = localStorage.getItem(legacyFleetKey);
+            if (legacyFleet) {
+                const fleet = JSON.parse(legacyFleet);
+                if (fleet.length) migrated.fleet = fleet;
+                const userFleetKey = userId ? `corebox_fleet_${userId}` : 'corebox_fleet';
+                localStorage.setItem(userFleetKey, JSON.stringify(fleet));
+                localStorage.removeItem(legacyFleetKey);
+            }
+        } catch(e) {}
+        
+        localStorage.setItem(MIGRATION_KEY, 'true');
         return migrated;
     }
     
@@ -269,7 +329,7 @@ function migrateSave(oldSave) {
         turbine_heat: 0,
         turbine_upgrade_level: 0,
         statistics: {},
-        passive_rates: { coal: 0.004, trash: 0.008, ore: 0.003 },
+        passive_rates: { coal: 0.008, trash: 0.006, ore: 0.005 },
         last_ai_coal_threshold: 0,
         current_night_type: "",
         attack_history: [],
@@ -280,7 +340,6 @@ function migrateSave(oldSave) {
     };
 }
 
-// ИСПРАВЛЕНИЕ: основная функция сохранения с улучшенной логикой конфликта
 export async function saveGameToCloud(gameInstance, force = false) {
     try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -295,7 +354,7 @@ export async function saveGameToCloud(gameInstance, force = false) {
         } catch(e) {}
 
         const blueprints = getBlueprints();
-        const fleet = getFleet(); // ИСПРАВЛЕНИЕ 1: теперь читает из fleetModule
+        const fleet = getFleet();
         
         const computationalPower = gameInstance.get_computational_power?.() ?? rustState?.computational_power ?? 0;
         const maxComputationalPower = gameInstance.get_max_computational_power?.() ?? rustState?.max_computational_power ?? 1000;
@@ -327,12 +386,12 @@ export async function saveGameToCloud(gameInstance, force = false) {
         const rebelProtectionActive = rustState?.rebel_protection_active ?? false;
         
         const statistics = {
-            total_coal_mined:   rustState?.coal_mined   || rustState?.total_coal_mined   || 0,
-            total_trash_mined:  rustState?.trash_mined  || rustState?.total_trash_mined  || 0,
-            total_plasma_mined: rustState?.plasma_mined || rustState?.total_plasma_mined || 0,
-            total_ore_mined:    rustState?.ore_mined    || rustState?.total_ore_mined    || 0,
-            total_coal_burned:  rustState?.coal_burned  || rustState?.total_coal_burned  || 0,
-            total_coal_stolen:  rustState?.coal_stolen  || rustState?.total_coal_stolen  || 0,
+            total_coal_mined:   rustState?.coal_mined   ?? rustState?.total_coal_mined   ?? 0,
+            total_trash_mined:  rustState?.trash_mined  ?? rustState?.total_trash_mined  ?? 0,
+            total_plasma_mined: rustState?.plasma_mined ?? rustState?.total_plasma_mined ?? 0,
+            total_ore_mined:    rustState?.ore_mined    ?? rustState?.total_ore_mined    ?? 0,
+            total_coal_burned:  rustState?.coal_burned  ?? rustState?.total_coal_burned  ?? 0,
+            total_coal_stolen:  rustState?.coal_stolen  ?? rustState?.total_coal_stolen  ?? 0,
             rebel_attacks:      rustState?.rebel_attacks_count || 0,
             attacks_defended:   rustState?.attacks_defended || 0
         };
@@ -353,41 +412,41 @@ export async function saveGameToCloud(gameInstance, force = false) {
             last_game_change: Date.now(),
             
             inventory: {
-                coal: rustState?.coal_inventory || 0,
-                ore: rustState?.ore_inventory || 0,
-                chips: rustState?.chips_inventory || 0,
-                plasma: rustState?.plasma_inventory || 0,
-                trash: rustState?.trash_inventory || 0
+                coal: rustState?.coal_inventory ?? 0,
+                ore: rustState?.ore_inventory ?? 0,
+                chips: rustState?.chips_inventory ?? 0,
+                plasma: rustState?.plasma_inventory ?? 0,
+                trash: rustState?.trash_inventory ?? 0
             },
             
             upgrades: {
-                mining: rustState?.mining_level || 0,
-                defense: rustState?.defense_active || false,
-                defense_level: rustState?.defense_level || 0,
-                crit_level: rustState?.crit_level || 0,
-                cooling_level: rustState?.cooling_level || 0
+                mining: rustState?.mining_level ?? 0,
+                defense: rustState?.defense_active ?? false,
+                defense_level: rustState?.defense_level ?? 0,
+                crit_level: rustState?.crit_level ?? 0,
+                cooling_level: rustState?.cooling_level ?? 0
             },
             
             computational_power: computationalPower,
             max_computational_power: maxComputationalPower,
-            nights_survived: rustState?.nights_survived || 0,
-            total_mined: rustState?.total_mined || rustState?.total_clicks || 0,
+            nights_survived: rustState?.nights_survived ?? 0,
+            total_mined: rustState?.total_mined ?? rustState?.total_clicks ?? 0,
             
             neuro: {
-                evolution: rustState?.neuro_evolution || 0,
+                evolution: rustState?.neuro_evolution ?? 0,
                 consciousness: neuroConsciousness,
-                score: rustState?.neuro_score || 0,
-                ai_mode: rustState?.current_ai_mode || "Обычный"
+                score: rustState?.neuro_score ?? 0,
+                ai_mode: rustState?.current_ai_mode ?? "Обычный"
             },
             
-            game_time: rustState?.game_time || 24,
+            game_time: rustState?.game_time ?? 24,
             is_day: rustState?.is_day !== undefined ? rustState.is_day : true,
-            coal_enabled: rustState?.coal_enabled || false,
-            rebel_activity: rustState?.rebel_activity || 0,
+            coal_enabled: rustState?.coal_enabled ?? false,
+            rebel_activity: rustState?.rebel_activity ?? 0,
             rebel_protection_nights: rebelProtectionNights,
             rebel_protection_active: rebelProtectionActive,
-            turbine_heat: rustState?.turbine_heat || 0,
-            turbine_upgrade_level: rustState?.turbine_upgrade_level || 0,
+            turbine_heat: rustState?.turbine_heat ?? 0,
+            turbine_upgrade_level: rustState?.turbine_upgrade_level ?? 0,
             
             statistics: statistics,
             
@@ -401,9 +460,9 @@ export async function saveGameToCloud(gameInstance, force = false) {
             
             prestige_level: parseInt(localStorage.getItem('corebox_prestige_level')) || 0,
             
-            last_ai_coal_threshold: rustState?.last_ai_coal_threshold || 0,
+            last_ai_coal_threshold: rustState?.last_ai_coal_threshold ?? 0,
             
-            current_night_type: rustState?.current_night_type || "",
+            current_night_type: rustState?.current_night_type ?? "",
             
             attack_history: attackHistory,
             
@@ -417,19 +476,15 @@ export async function saveGameToCloud(gameInstance, force = false) {
         
         localStorage.setItem('corebox_save_backup', JSON.stringify(saveData));
         
-        // ИСПРАВЛЕНИЕ: улучшенная логика конфликта
         if (!force) {
             const existing = await getLatestCloudSave(user.id);
             if (existing) {
                 const diff = existing.last_game_change - saveData.last_game_change;
-                // Проверяем наличие новых кораблей в локальном флоте
                 const hasNewShips = fleet.length > (existing.fleet?.length || 0);
                 
-                // Если в локальном флоте есть новые корабли, сохраняем даже если облако "новее"
                 if (hasNewShips && diff > 0) {
                     console.log(`🛡️ Обнаружены новые корабли (${fleet.length} vs ${existing.fleet?.length || 0}), сохраняем несмотря на конфликт`);
-                    // Не возвращаем ошибку, продолжаем сохранение
-                } else if (existing && diff > 60000) { // увеличил допуск до 60 секунд
+                } else if (existing && diff > 60000) {
                     console.warn("Облачное сохранение новее, пропускаем", { diff });
                     return { 
                         success: false, 
@@ -488,7 +543,7 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
         
         if (cloudSave.version !== SAVE_VERSION) {
             console.warn(`Версия сохранения не совпадает: ${cloudSave.version} vs ${SAVE_VERSION}`);
-            const migrated = migrateSave(cloudSave);
+            const migrated = migrateSave(cloudSave, user.id);
             if (!migrated) {
                 console.error('Миграция невозможна, используем пустое состояние');
                 return null;
@@ -501,6 +556,11 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
         }
         if (cloudSave.neuro && cloudSave.neuro.consciousness > 1.0) {
             cloudSave.neuro.consciousness = 1.0;
+        }
+        
+        // БАГ N-6: при загрузке сохранения сбрасываем trade_blocked если день
+        if (cloudSave.is_day === true) {
+            cloudSave.trade_blocked = false;
         }
         
         if (mergeWithLocal) {

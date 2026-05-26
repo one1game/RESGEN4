@@ -1,6 +1,7 @@
 // ========== src/systems/mining.rs (ИСПРАВЛЕН) ==========
 // БАГ #17: критический шанс синхронизирован с JS (потолок 25%)
 // БАГ #41: комбо-мультипликатор ограничен в Rust (но он в JS, здесь не требуется)
+// БАГ #50: пассивная добыча проверяет ore_unlocked
 
 use rand::Rng;
 use crate::game::{GameState, GameEvent};
@@ -157,7 +158,9 @@ impl MiningSystem {
             }
         }
 
-        if rng.gen::<f64>() < ore_chance {
+        // БАГ #50: проверка на ore_unlocked для руды в ручной добыче
+        // (в auto-добыче тоже проверяем, но в пассивной - отдельно)
+        if rng.gen::<f64>() < ore_chance && (is_auto || state.ore_unlocked) {
             let amount = multiplier;
             state.inventory.ore    += amount;
             state.total_mined      += amount;
@@ -183,6 +186,7 @@ impl MiningSystem {
         self.mine_resources_common(state, neuro, true)
     }
 
+    // БАГ #50: пассивная добыча с проверкой ore_unlocked
     pub fn passive_mining(&self, state: &mut GameState, neuro: &NeuroEcosystem) -> Vec<GameEvent> {
         if !state.is_passive_mining_active() {
             return Vec::new();
@@ -213,7 +217,8 @@ impl MiningSystem {
             state.trash_unlocked     = true;
         }
 
-        if rng.gen::<f64>() < self.config.passive_chances.ore * debuff * passive_multiplier {
+        // БАГ #50: пассивная руда ТОЛЬКО если разблокирована
+        if state.ore_unlocked && rng.gen::<f64>() < self.config.passive_chances.ore * debuff * passive_multiplier {
             state.inventory.ore    += 1;
             state.total_mined      += 1;
             state.total_ore_mined  += 1;

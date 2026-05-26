@@ -10,7 +10,6 @@ export const craftModule = {
     isDay: true, coalEnabled: false, aiProductionBonus: 0,
     computationalPower: 0,
     
-    // БАГ #23: геттер для актуальной проверки активности системы
     get isSystemActive() {
         if (!this.game) return false;
         try {
@@ -54,6 +53,17 @@ export const craftModule = {
         });
     },
     
+    cleanup() {
+        this.game = null;
+        this.resources = { ore: 0, coal: 0, plasma: 0, trash: 0, chips: 0 };
+        this.isDay = true;
+        this.coalEnabled = false;
+        this.aiProductionBonus = 0;
+        this.computationalPower = 0;
+        this._isProcessing = false;
+        console.log('🔨 Модуль крафта очищен');
+    },
+    
     syncFromStats(stats) {
         if (!stats) return;
         this.resources = {
@@ -86,7 +96,6 @@ export const craftModule = {
     },
     
     canCraft(recipe) {
-        // БАГ #23: используем геттер isSystemActive
         const systemInactive = !this.isSystemActive;
         if (systemInactive) {
             return { can: false, reason: '⚫ Система неактивна: ночь без ТЭЦ' };
@@ -265,7 +274,6 @@ export const craftModule = {
     },
     
     renderCraftUI() {
-        // БАГ #23: используем геттер isSystemActive
         const systemInactive = !this.isSystemActive;
         const aiBonus = this.aiProductionBonus > 0 ? `<div class="ai-bonus-craft">🧠 Бонус ИИ: -${this.aiProductionBonus}% к стоимости</div>` : '';
         const powerDisplay = `<div class="power-display-craft" style="font-size:11px;opacity:0.7;margin-bottom:4px;">⚡ Мощность: ${this.computationalPower}</div>`;

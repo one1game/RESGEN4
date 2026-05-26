@@ -71,7 +71,6 @@ async function playSpaceNoise({ duration = 0.5, volume = 0.1, filterFreq = 200, 
     } catch(e) {}
 }
 
-// ИСПРАВЛЕНО: функция теперь async
 async function playDigitalClick(volume = 0.12) {
     const ctx = await getAudioCtx();
     if (!ctx) return;

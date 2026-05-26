@@ -1,14 +1,17 @@
-// ======== src/systems/upgrades.rs (ДОБАВЛЕНЫ НОВЫЕ МЕТОДЫ И ОГРАНИЧЕНИЕ POWER_TIER) ========
+// ========== src/systems/upgrades.rs (ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+// БАГ #54: турбина может быть улучшена до 5 уровня (0→5, всего 5 уровней)
+// БАГ #55: критический модуль требует в основном чипы, остальные в 1/4 количества
 
 use crate::game::{GameState, GameEvent};
+use crate::game::config::UpgradeConfig;
 
 #[derive(Clone)]
 pub struct UpgradeSystem {
-    config: crate::game::config::UpgradeConfig,
+    config: UpgradeConfig,
 }
 
 impl UpgradeSystem {
-    pub fn new(config: crate::game::config::UpgradeConfig) -> Self {
+    pub fn new(config: UpgradeConfig) -> Self {
         Self { config }
     }
     
@@ -123,8 +126,8 @@ impl UpgradeSystem {
         events
     }
     
-    // ========== НОВЫЙ МЕТОД: КРИТ-МОДУЛЬ ==========
-    
+    // ========== КРИТ-МОДУЛЬ (БАГ #55) ==========
+    // Требует в основном чипы, остальные ресурсы — дополнительные
     pub fn upgrade_crit_module(&self, state: &mut GameState) -> Vec<GameEvent> {
         let mut events = Vec::new();
         let lvl = state.upgrades.crit_level;
@@ -134,35 +137,36 @@ impl UpgradeSystem {
             return events;
         }
         
-        let cost = (lvl + 1) * 2 + 4;
+        // БАГ #55: критический модуль требует в основном чипы, остальные в 1/4 количества
+        let chips_cost = (lvl + 1) * 8;      // 8, 16, 24, ..., 80
+        let other_cost = (lvl + 1) * 2;      // 2, 4, 6, ..., 20
         
-        // ИСПРАВЛЕНО: проверяем все 5 ресурсов
         let inv = &state.inventory;
-        if inv.coal >= cost && inv.ore >= cost && inv.chips >= cost 
-            && inv.plasma >= cost && inv.trash >= cost {
+        if inv.chips >= chips_cost && inv.ore >= other_cost 
+            && inv.coal >= other_cost && inv.plasma >= other_cost && inv.trash >= other_cost {
             
-            state.inventory.coal -= cost;
-            state.inventory.ore -= cost;
-            state.inventory.chips -= cost;
-            state.inventory.plasma -= cost;
-            state.inventory.trash -= cost;
+            state.inventory.chips -= chips_cost;
+            state.inventory.ore -= other_cost;
+            state.inventory.coal -= other_cost;
+            state.inventory.plasma -= other_cost;
+            state.inventory.trash -= other_cost;
             state.upgrades.crit_level += 1;
             
             events.push(GameEvent::LogMessage(format!(
-                "💥 Крит-модуль прокачан до ур.{}! (-{} каждого ресурса)",
-                state.upgrades.crit_level, cost
+                "💥 Крит-модуль прокачан до ур.{}! (-{}🎛️, -{}⛏️🪨⚡♻️)",
+                state.upgrades.crit_level, chips_cost, other_cost
             )));
         } else {
             events.push(GameEvent::LogMessage(format!(
-                "❌ Нужно по {} каждого ресурса (уголь, руда, чип, плазма, мусор)", cost
+                "❌ Нужно {} чипов и по {} остальных ресурсов (уголь, руда, плазма, мусор)",
+                chips_cost, other_cost
             )));
         }
         
         events
     }
     
-    // ========== НОВЫЙ МЕТОД: ОХЛАЖДЕНИЕ ==========
-    
+    // ========== ОХЛАЖДЕНИЕ ==========
     pub fn upgrade_cooling_module(&self, state: &mut GameState) -> Vec<GameEvent> {
         let mut events = Vec::new();
         let lvl = state.upgrades.cooling_level;
@@ -188,6 +192,44 @@ impl UpgradeSystem {
                 required: cost,
                 available: state.inventory.coal,
             });
+        }
+        
+        events
+    }
+    
+    // ========== ТУРБИНА (БАГ #54) ==========
+    // БАГ #54: турбина может быть улучшена до 5 уровня (0→5, всего 5 уровней)
+    pub fn upgrade_turbine(&self, state: &mut GameState) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+        
+        if state.turbine_upgrade_level >= 5 {
+            events.push(GameEvent::LogMessage("⚙️ Турбина уже на максимальном уровне (5)!".to_string()));
+            return events;
+        }
+        
+        let cost_ore = 30 + state.turbine_upgrade_level * 20;
+        let cost_chips = 5 + state.turbine_upgrade_level * 3;
+        
+        if state.inventory.ore >= cost_ore && state.inventory.chips >= cost_chips {
+            state.inventory.ore -= cost_ore;
+            state.inventory.chips -= cost_chips;
+            state.turbine_upgrade_level += 1;
+            
+            events.push(GameEvent::LogMessage(format!(
+                "⚙️ Турбина улучшена до уровня {}! (-{} руды, -{} чипов)",
+                state.turbine_upgrade_level, cost_ore, cost_chips
+            )));
+        } else {
+            let mut missing = Vec::new();
+            if state.inventory.ore < cost_ore {
+                missing.push(format!("руды ({}/{})", state.inventory.ore, cost_ore));
+            }
+            if state.inventory.chips < cost_chips {
+                missing.push(format!("чипов ({}/{})", state.inventory.chips, cost_chips));
+            }
+            events.push(GameEvent::LogMessage(format!(
+                "❌ Недостаточно ресурсов: {}", missing.join(", ")
+            )));
         }
         
         events

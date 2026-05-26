@@ -1,4 +1,5 @@
-
+// ======== auth.js (Новая папка/auth.js) ========
+// ИСПРАВЛЕН: БАГ #9 двойной вызов onLogin, БАГ #34 валидация username, БАГ #35 fallback домен
 
 import { supabase } from './supabase.js';
 import { GameBus, EVENTS } from './game-events.js';
@@ -26,13 +27,15 @@ function getAuthChannel() {
 
 export async function register(email, password, username) {
     try {
-        // БАГ #34: валидация username
         const cleanUsername = (username || email.split('@')[0]).trim();
         if (cleanUsername.length < 3) {
             return { success: false, error: 'Имя должно быть минимум 3 символа' };
         }
         if (cleanUsername.length > 20) {
             return { success: false, error: 'Имя не должно быть длиннее 20 символов' };
+        }
+        if (!/^[a-zA-ZА-Яа-я0-9_\-\.]+$/.test(cleanUsername)) {
+            return { success: false, error: 'Имя содержит недопустимые символы' };
         }
         
         const { data, error } = await supabase.auth.signUp({
@@ -46,7 +49,6 @@ export async function register(email, password, username) {
         if (error) throw error;
 
         if (data.user) {
-            // БАГ #22: убран created_at, пусть Supabase выставляет сам
             const { error: updateError } = await supabase
                 .from('profiles')
                 .upsert({ 
@@ -107,7 +109,10 @@ export async function logout() {
         
         localStorage.removeItem('corebox_current_user');
         
-        // БАГ #18: НЕ вызываем GameBus.clear() — каждый компонент отписывается сам
+        if (window.craftModule?.cleanup) window.craftModule.cleanup();
+        if (window.designModule?.cleanup) window.designModule.cleanup();
+        if (window.fleetModule?.cleanup) window.fleetModule.cleanup();
+        if (window.spaceModule?.cleanup) window.spaceModule.cleanup();
         
         return { success: true };
         
@@ -128,7 +133,6 @@ export async function getCurrentUser() {
     }
 }
 
-// БАГ #9: исправлена логика SIGNED_IN
 export function initAuth(onLogin, onLogout) {
     let loginHandled = false;
     let isInitialized = false;
@@ -152,7 +156,6 @@ export function initAuth(onLogin, onLogout) {
         }
         
         if (event === 'SIGNED_IN') {
-            // БАГ #9: пропускаем если уже обработали через INITIAL_SESSION
             if (loginHandled && isInitialized) {
                 loginHandled = false;
                 return;
@@ -177,8 +180,7 @@ export function initAuth(onLogin, onLogout) {
 
 export async function resetPassword(email) {
     try {
-        // БАГ #35: fallback для PWA/Electron
-        const origin = window.location.origin || 'https://your-production-domain.com';
+        const origin = window.location.origin || 'https://corebox-game.com';
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
             redirectTo: origin + '/reset-password.html'
         });

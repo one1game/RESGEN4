@@ -1,10 +1,11 @@
-// ========== src/game/state.rs (ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+// ========== src/game/state.rs (ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
 // БАГ #4: load_quests теперь обрабатывает CollectResource тип
 // БАГ #11: defense_debuff_remaining уменьшается при начале ночи (а не рассвете)
-// БАГ #24: add_fleet_ship использует глобальный счётчик
-// БАГ #39: get_active_planet_missions возвращает и "returning"
+// БАГ #24: add_fleet_ship использует глобальный счётчик + timestamp
+// БАГ #39: get_active_planet_missions возвращает и "flying", "returning", "arrived"
 // БАГ #44: add_planet_mission проверяет активные миссии
 // БАГ #45: record_defense_result обновляет total_defense_activations
+// БАГ #47: добавлено поле speed для FleetShip
 
 use serde::{Serialize, Deserialize};
 use super::config::GameConfig;
@@ -43,8 +44,6 @@ pub struct FleetShip {
 }
 
 impl FleetShip {
-    // БАГ #24: ship_index больше не используется, используем глобальный счётчик
-    // Но для совместимости оставляем параметр, но игнорируем его
     pub fn new(ship_type: &str, _ship_index: usize) -> Self {
         let (name, max_health, speed) = match ship_type {
             "cargo" => (format!("Грузовой"), 100, 1),
@@ -69,7 +68,36 @@ impl FleetShip {
             target_user_id: None,
             mission_returns_at: None,
             created_at: js_sys::Date::now() as i64,
-            speed,  // БАГ #47: инициализация speed
+            speed,
+        }
+    }
+    
+    // БАГ #24: конструктор с кастомным ID (для использования с timestamp)
+    pub fn new_with_id(ship_type: &str, id: String) -> Self {
+        let (name, max_health, speed) = match ship_type {
+            "cargo" => (format!("Грузовой"), 100, 1),
+            "scout" => (format!("Разведчик"), 80, 3),
+            "combat" => (format!("Боевой"), 120, 2),
+            _ => (format!("Корабль"), 100, 1),
+        };
+        
+        Self {
+            id,
+            ship_type: ship_type.to_string(),
+            name,
+            level: 0,
+            health: max_health,
+            max_health,
+            experience: 0,
+            missions_completed: 0,
+            on_mission: false,
+            on_defense: false,
+            current_mission_id: None,
+            target_planet_id: None,
+            target_user_id: None,
+            mission_returns_at: None,
+            created_at: js_sys::Date::now() as i64,
+            speed,
         }
     }
 }
@@ -161,7 +189,7 @@ pub enum QuestType {
     ActivateDefense,
     SurviveAttack,
     ReachEvolutionLevel,
-    CollectResource(String),  // тип для квестов на накопление ресурсов
+    CollectResource(String),
 }
 
 // ========== ОСНОВНОЙ GAME STATE ==========
@@ -409,7 +437,6 @@ impl GameState {
                 let actual = cost.min(self.inventory.coal);
                 if actual > 0 {
                     self.inventory.coal -= actual;
-                    // БАГ #38: saturating_add
                     self.total_coal_burned = self.total_coal_burned.saturating_add(actual);
                     let plasma_gen = self.total_coal_burned / config.coal_consumption_config.plasma_conversion_rate;
                     if plasma_gen > self.plasma_from_coal {
@@ -525,6 +552,7 @@ impl GameState {
 
     // БАГ #45: record_defense_result обновляет total_defense_activations
     pub fn record_defense_result(&mut self, was_successful: bool) {
+        // total_defense_activations считает ВСЕ попытки защиты (успешные и неуспешные)
         self.total_defense_activations += 1;
         if was_successful {
             self.consecutive_successful_defenses += 1;
@@ -562,10 +590,12 @@ impl GameState {
     }
     
     // ========== МЕТОДЫ ДЛЯ ФЛОТА ==========
-    // БАГ #24: add_fleet_ship использует глобальный счётчик
+    // БАГ #24: add_fleet_ship использует глобальный счётчик + timestamp
     pub fn add_fleet_ship(&mut self, ship_type: &str) -> &FleetShip {
         self.total_ships_built += 1;
-        let new_ship = FleetShip::new(ship_type, self.total_ships_built as usize);
+        let timestamp = js_sys::Date::now() as u64;
+        let ship_id = format!("ship_{}_{}", self.total_ships_built, timestamp);
+        let new_ship = FleetShip::new_with_id(ship_type, ship_id);
         self.fleet_ships.push(new_ship);
         self.fleet_ships.last().unwrap()
     }
@@ -595,12 +625,13 @@ impl GameState {
     // ========== МЕТОДЫ ДЛЯ ПЛАНЕТАРНЫХ МИССИЙ ==========
     // БАГ #44: add_planet_mission с проверкой активных миссий
     pub fn add_planet_mission(&mut self, mission: PlanetMission) {
-        // Удалять только завершённые/отменённые миссии этого корабля
+        // Удаляем только завершённые/отменённые миссии этого корабля
         self.active_planet_missions.retain(|m| {
             m.ship_id != mission.ship_id || m.status == "flying" || m.status == "returning"
         });
-        // Если активная миссия уже есть — не добавлять
+        // Если активная миссия уже есть — не добавляем
         if self.active_planet_missions.iter().any(|m| m.ship_id == mission.ship_id) {
+            web_sys::console::warn_1(&format!("⚠️ Миссия для корабля {} уже существует", mission.ship_id).into());
             return;
         }
         self.active_planet_missions.push(mission);
@@ -615,10 +646,10 @@ impl GameState {
         }
     }
     
-    // БАГ #39: get_active_planet_missions возвращает и "flying", и "returning"
+    // БАГ #39: get_active_planet_missions возвращает и "flying", "returning", "arrived"
     pub fn get_active_planet_missions(&self) -> Vec<&PlanetMission> {
         self.active_planet_missions.iter()
-            .filter(|m| m.status == "flying" || m.status == "returning")
+            .filter(|m| m.status == "flying" || m.status == "returning" || m.status == "arrived")
             .collect()
     }
 }

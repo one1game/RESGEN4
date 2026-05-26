@@ -3,20 +3,15 @@
 import { supabase } from './supabase.js';
 import { fleetModule } from './fleet.js';
 
-// БАГ #4: флаг для предотвращения двойной обработки
 let isProcessingMissions = false;
-
-// БАГ #11: Set для дедупликации обработанных миссий
 const _processedMissions = new Set();
 
-// Конфиг кораблей (время в СЕКУНДАХ для точности)
 const SHIP_CONFIG = {
-    scout:  { travel_seconds: 300,  label: 'Разведчик',  icon: '🔭' }, // 5 минут
-    combat: { travel_seconds: 480,  label: 'Боевой',     icon: '⚔️' }, // 8 минут
-    cargo:  { travel_seconds: 360,  label: 'Грузовой',   icon: '🚚' }, // 6 минут
+    scout:  { travel_seconds: 300,  label: 'Разведчик',  icon: '🔭' },
+    combat: { travel_seconds: 480,  label: 'Боевой',     icon: '⚔️' },
+    cargo:  { travel_seconds: 360,  label: 'Грузовой',   icon: '🚚' },
 };
 
-// ─── Отправить корабль ────────────────────────────────────────────────
 export async function sendShip(attackerId, targetId, shipType) {
     const cfg = SHIP_CONFIG[shipType];
     if (!cfg) return { success: false, error: 'Неизвестный тип корабля' };
@@ -124,7 +119,6 @@ export async function sendShip(attackerId, targetId, shipType) {
     return { success: true, mission, ship };
 }
 
-// ─── Обработка прибытия (БАГ #4: защита от двойного вызова, БАГ #11: дедупликация) ─────────────────────────────────
 export async function processArrivedMissions(currentUserId) {
     if (isProcessingMissions) {
         console.log("⏭️ processArrivedMissions уже выполняется, пропускаем");
@@ -148,7 +142,6 @@ export async function processArrivedMissions(currentUserId) {
         console.log(`📥 Найдено входящих миссий для обработки: ${arrived?.length || 0}`);
 
         for (const mission of arrived ?? []) {
-            // БАГ #11: проверка на уже обработанную миссию
             if (_processedMissions.has(mission.id)) {
                 console.log(`⏭️ Миссия ${mission.id} уже обработана, пропускаем`);
                 continue;
@@ -161,7 +154,6 @@ export async function processArrivedMissions(currentUserId) {
             if (mission.ship_type === 'cargo')  await _processCargo(mission);
             
             _processedMissions.add(mission.id);
-            // Очищаем Set через час чтобы не накапливать
             setTimeout(() => _processedMissions.delete(mission.id), 3600000);
         }
 
@@ -234,7 +226,6 @@ export async function processArrivedMissions(currentUserId) {
     }
 }
 
-// ─── Внутренние обработчики ────────────────────────────────────────────────
 async function _processScout(mission) {
     const { data: targetSave } = await supabase
         .from('game_saves')
@@ -363,7 +354,6 @@ async function _processCargo(mission) {
     }).eq('id', mission.id);
 }
 
-// ─── Вспомогательные функции ──────────────────────────────────────────────
 function _calcLoot(inventory, pct) {
     const result = {};
     const resources = ['ore', 'coal', 'chips', 'plasma', 'trash'];
@@ -411,7 +401,6 @@ export async function getLatestScoutData(attackerId, targetId) {
     return data ?? null;
 }
 
-// БАГ #6: фильтрация неактивных игроков (не заходили 7+ дней)
 export async function getTargetPlayers(currentUserId) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     
