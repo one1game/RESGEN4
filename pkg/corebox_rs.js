@@ -223,6 +223,21 @@ export class CoreGame {
         return ret >>> 0;
     }
     /**
+     * @returns {string}
+     */
+    get_intercepted_messages() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.coregame_get_intercepted_messages(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * @returns {number}
      */
     get_max_computational_power() {
@@ -230,10 +245,32 @@ export class CoreGame {
         return ret >>> 0;
     }
     /**
+     * @returns {string}
+     */
+    get_neuro_analytics() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.coregame_get_neuro_analytics(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * @returns {number}
      */
     get_neuro_evolution() {
         const ret = wasm.coregame_get_neuro_evolution(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get_neuro_score_needed() {
+        const ret = wasm.coregame_get_neuro_score_needed(this.__wbg_ptr);
         return ret >>> 0;
     }
     /**
@@ -244,6 +281,21 @@ export class CoreGame {
         let deferred1_1;
         try {
             const ret = wasm.coregame_get_planets(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {string}
+     */
+    get_rebel_intel() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.coregame_get_rebel_intel(this.__wbg_ptr);
             deferred1_0 = ret[0];
             deferred1_1 = ret[1];
             return getStringFromWasm0(ret[0], ret[1]);
@@ -333,6 +385,15 @@ export class CoreGame {
             throw takeFromExternrefTable0(ret[0]);
         }
     }
+    neuro_close_vulnerability() {
+        wasm.coregame_neuro_close_vulnerability(this.__wbg_ptr);
+    }
+    neuro_fake_depot() {
+        wasm.coregame_neuro_fake_depot(this.__wbg_ptr);
+    }
+    neuro_propaganda() {
+        wasm.coregame_neuro_propaganda(this.__wbg_ptr);
+    }
     constructor() {
         const ret = wasm.coregame_new();
         this.__wbg_ptr = ret;
@@ -402,16 +463,22 @@ export class CoreGame {
         wasm.coregame_set_fleet_cargo_bonus(this.__wbg_ptr, bonus);
     }
     /**
-     * @param {number} bonus
+     * @param {number} _bonus
      */
-    set_fleet_defense_bonus(bonus) {
-        wasm.coregame_set_fleet_defense_bonus(this.__wbg_ptr, bonus);
+    set_fleet_defense_bonus(_bonus) {
+        wasm.coregame_set_fleet_defense_bonus(this.__wbg_ptr, _bonus);
     }
     /**
      * @param {number} max
      */
     set_max_power(max) {
         wasm.coregame_set_max_power(this.__wbg_ptr, max);
+    }
+    /**
+     * @param {number} consciousness
+     */
+    set_neuro_consciousness(consciousness) {
+        wasm.coregame_set_neuro_consciousness(this.__wbg_ptr, consciousness);
     }
     start_auto_clicking() {
         wasm.coregame_start_auto_clicking(this.__wbg_ptr);

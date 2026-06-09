@@ -2,6 +2,7 @@
 // БАГ #31: исправлена проверка lastTouchTarget для двойного тапа
 // БАГ #32: MutationObserver для fixInputZoom теперь отключается
 // БАГ #33: bodyObserver использует subtree: true
+// БАГ #MED-13: добавлен сброс флага патча при удалении кнопки
 
 /**
  * CoreBox 3.2 — МОБИЛЬНЫЙ JS-ПАТЧ
@@ -73,6 +74,8 @@
   }, { passive: true });
 
   // Плавающая кнопка с long-press
+  let _floatingButtonPatched = false;
+  
   function patchFloatingButton() {
     const oldBtn = document.getElementById('floatingMineBtn');
     if (!oldBtn) return null;
@@ -199,12 +202,14 @@
     observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
     
     console.log('✅ Плавающая кнопка пропатчена для мобильных устройств');
+    _floatingButtonPatched = true;
     return btn;
   }
 
   let _bodyObserver = null;
   let _warningObserver = null;
   let _floatObserver = null;
+  let _domObserver = null; // БАГ #MED-13: наблюдатель за удалением кнопки
 
   function watchGameNotifications () {
     if (_bodyObserver) _bodyObserver.disconnect();
@@ -225,6 +230,14 @@
           if ((node.classList && node.classList.contains('offline-popup')) ||
               node.id === 'attackWarning') {
             Haptic.warning();
+          }
+        }
+        
+        // БАГ #MED-13: проверка на удаление кнопки
+        for (const node of m.removedNodes) {
+          if (node instanceof HTMLElement && node.id === 'floatingMineBtn') {
+            console.log('📱 Плавающая кнопка удалена, сбрасываем флаг патча');
+            _floatingButtonPatched = false;
           }
         }
       }
@@ -263,12 +276,28 @@
       }
     });
     _floatObserver.observe(document.body, { childList: true, subtree: true });
+    
+    // БАГ #MED-13: наблюдатель за появлением новой кнопки
+    if (_domObserver) _domObserver.disconnect();
+    _domObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node instanceof HTMLElement && node.id === 'floatingMineBtn') {
+            if (!_floatingButtonPatched) {
+              patchFloatingButton();
+            }
+          }
+        }
+      }
+    });
+    _domObserver.observe(document.body, { childList: true, subtree: true });
   }
 
   window._disconnectMobileObservers = function() {
     if (_bodyObserver) { _bodyObserver.disconnect(); _bodyObserver = null; }
     if (_warningObserver) { _warningObserver.disconnect(); _warningObserver = null; }
     if (_floatObserver) { _floatObserver.disconnect(); _floatObserver = null; }
+    if (_domObserver) { _domObserver.disconnect(); _domObserver = null; }
     if (_inputZoomObserver) { _inputZoomObserver.disconnect(); _inputZoomObserver = null; }
     console.log('📱 Мобильные observer\'ы отключены');
   };
@@ -418,14 +447,6 @@
     }
     
     tryPatch();
-    
-    const observer = new MutationObserver(() => {
-      const btn = document.getElementById('floatingMineBtn');
-      if (btn && btn.getAttribute('data-patched') !== 'true') {
-        patchFloatingButton();
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') {

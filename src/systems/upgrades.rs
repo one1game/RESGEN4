@@ -1,6 +1,7 @@
-// ========== src/systems/upgrades.rs (ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
+// src/systems/upgrades.rs (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ)
 // БАГ #54: турбина может быть улучшена до 5 уровня (0→5, всего 5 уровней)
 // БАГ #55: критический модуль требует в основном чипы, остальные в 1/4 количества
+// БАГ #NEU-03: добавлен апгрейд сознания
 
 use crate::game::{GameState, GameEvent};
 use crate::game::config::UpgradeConfig;
@@ -229,6 +230,42 @@ impl UpgradeSystem {
             }
             events.push(GameEvent::LogMessage(format!(
                 "❌ Недостаточно ресурсов: {}", missing.join(", ")
+            )));
+        }
+        
+        events
+    }
+    
+    // ========== НЕЙРО-СОЗНАНИЕ (БАГ #NEU-03) ==========
+    pub fn upgrade_consciousness(&self, state: &mut GameState, neuro_consciousness: &mut f64) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+        let lvl = state.upgrades.crit_level; // используем crit_level как уровень сознания
+        
+        if lvl >= 10 {
+            events.push(GameEvent::LogMessage("🧠 Нейро-сознание уже максимально!".to_string()));
+            return events;
+        }
+        
+        let cost_chips = 50 + lvl * 25;  // 50, 75, 100, ...
+        let cost_plasma = 10 + lvl * 5;  // 10, 15, 20, ...
+        
+        if state.inventory.chips >= cost_chips && state.inventory.plasma >= cost_plasma {
+            state.inventory.chips -= cost_chips;
+            state.inventory.plasma -= cost_plasma;
+            state.upgrades.crit_level += 1;
+            
+            // Увеличиваем нейро-сознание
+            let boost = 0.05 * state.upgrades.crit_level as f64;
+            *neuro_consciousness = (*neuro_consciousness + boost).min(1.0);
+            
+            events.push(GameEvent::LogMessage(format!(
+                "🧠 Нейро-сознание увеличено до ур.{}! (+{:.0}% сознания, -{}🎛️, -{}⚡)",
+                state.upgrades.crit_level, boost * 100.0, cost_chips, cost_plasma
+            )));
+        } else {
+            events.push(GameEvent::LogMessage(format!(
+                "❌ Нужно {} чипов и {} плазмы для апгрейда сознания",
+                cost_chips, cost_plasma
             )));
         }
         

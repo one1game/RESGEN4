@@ -1,6 +1,8 @@
+
+
 {
-  "version": "3.2-night-types-balanced",
-  "cycle_duration": 32,
+  "version": "3.3-night-types-balanced",
+  "cycle_duration": 40,
   "max_slots": 18,
 
   "time_config": {
@@ -115,7 +117,7 @@
       "unlocks": []
     },
     {
-      "id": "2e7fcdab-30e7-49ea-837f-56a0abbdbc46",
+      "id": "2e7fcdab-30e7-49ea-849f-56a0abbdbc46",
       "title": "Отразить атаку",
       "description": "Защита активна — но повстанцы нападут снова. Отрази 3 атаки. Следи за предупреждениями ИИ — он предсказывает атаки заранее.",
       "quest_type": "SurviveAttack",

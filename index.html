@@ -1,4 +1,3 @@
-<!-- index.html (ИСПРАВЛЕНА: добавлены стили для новых визуальных эффектов) -->
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -15,11 +14,19 @@
             .floating-mine-btn .btn-icon { font-size: 32px; margin: 0; }
             .auth-container { width: 95%; margin: 20px auto; padding: 20px; }
             .upgrade-container { grid-template-columns: 1fr; }
-            .inventory-grid { grid-template-columns: repeat(3, 1fr); }
             .stat-card-large { min-width: auto; }
+            
+            .other-player-marker span:first-child { font-size: 24px !important; }
+            #space-action-panel {
+                bottom: 70px !important;
+                left: 8px !important;
+                right: 8px !important;
+                transform: none !important;
+                max-width: none !important;
+            }
+            .space-attack-btn { padding: 12px 4px !important; font-size: 11px !important; }
         }
         
-        /* Уведомления */
         .notification {
             position: fixed;
             bottom: 20px;
@@ -48,7 +55,6 @@
             100% { opacity: 0; transform: translateX(-50%) translateY(-20px); visibility: hidden; }
         }
         
-        /* Оффлайн попап */
         .offline-popup {
             position: fixed;
             top: 50%;
@@ -75,15 +81,12 @@
             border-radius: 8px;
         }
         
-        /* Анимации */
         .fade-out { transition: opacity 0.5s ease-out; opacity: 0; }
         .craft-btn.processing, .design-btn.processing, .ship-btn.processing { opacity: 0.5; cursor: wait; }
         
-        /* Авторизация */
         .auth-message.error { color: #ff4444; background: #330000; padding: 8px; border-radius: 6px; margin-top: 10px; }
         .auth-message.success { color: #44ff44; background: #003300; padding: 8px; border-radius: 6px; margin-top: 10px; }
         
-        /* Автокликер */
         .auto-clicking {
             box-shadow: 0 0 20px #0f0, 0 0 40px #0f0 !important;
             animation: pulse 1s infinite;
@@ -103,19 +106,16 @@
             75% { transform: translateX(5px); }
         }
         
-        /* Мощность */
         .power-full { box-shadow: 0 0 15px #ffaa00; }
         .power-high { box-shadow: 0 0 10px #ff7700; }
         .power-medium { box-shadow: 0 0 5px #ff5500; }
         .power-low { box-shadow: 0 0 2px #ff3300; }
         
-        /* Турбина */
         .turbine-critical { background: #f00 !important; box-shadow: 0 0 10px red; }
         .turbine-hot { background: #ff6600; }
         .turbine-warm { background: #ffcc00; }
         .turbine-cool { background: #00aaff; }
         
-        /* ВИЗУАЛ V-1: Живой фон турбины */
         :root { --turbine-hue: 200; }
         #floatingMineBtn {
             background: hsl(var(--turbine-hue), 80%, 15%);
@@ -129,7 +129,6 @@
             50% { opacity: 0.7; background: hsl(0, 80%, 30%); }
         }
         
-        /* ВИЗУАЛ V-2: Пульс угрозы */
         .rebel-pulse-container {
             display: inline-flex;
             align-items: center;
@@ -148,7 +147,6 @@
         @keyframes pulse-medium { 0%,100% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
         @keyframes pulse-high { 0%,100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.6); } }
         
-        /* ВИЗУАЛ V-6: Прогресс-кольцо */
         .power-ring {
             position: absolute;
             top: -4px;
@@ -180,7 +178,6 @@
             100% { stroke: #4aff9d; stroke-width: 2; }
         }
         
-        /* ВИЗУАЛ V-4: Карточки кораблей */
         .ship-card.on-mission .ship-icon {
             animation: fly 1.5s ease-in-out infinite alternate;
         }
@@ -212,13 +209,11 @@
             50% { transform: translateX(2px); }
         }
         
-        /* ВИЗУАЛ КАРТА-V3: Иконки игроков по уровню нейро */
         @keyframes glow-pulse {
             0%,100% { filter: drop-shadow(0 0 4px #ff44ff); }
             50% { filter: drop-shadow(0 0 12px #ff44ff); }
         }
         
-        /* ВИЗУАЛ КАРТА-V5: Угроза в зоне влияния */
         .other-player-marker.threat-in-range {
             filter: drop-shadow(0 0 6px #ffaa44);
             animation: threat-pulse 1s infinite;
@@ -228,7 +223,6 @@
             50% { opacity: 1; filter: drop-shadow(0 0 12px #ffaa44); }
         }
         
-        /* ВИЗУАЛ КАРТА-V7: Анимация открытия планеты */
         .planet-new {
             animation: planet-materialize 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
         }
@@ -238,7 +232,6 @@
             100% { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; filter: brightness(1); }
         }
         
-        /* ВИЗУАЛ КАРТА-V2: Звёздный фон с параллаксом */
         .stars-layer-slow, .stars-layer-medium, .stars-layer-fast {
             position: absolute;
             inset: 0;
@@ -248,7 +241,6 @@
             transition: transform 0.1s ease-out;
         }
         
-        /* ВИЗУАЛ КАРТА-V6: Мини-карта */
         #space-minimap {
             position: absolute;
             bottom: 8px;
@@ -262,7 +254,6 @@
         }
         #space-minimap:hover { opacity: 1; }
         
-        /* КАРТА G-2: Сигнатуры угроз */
         .threat-pulse {
             animation: threat-pulse-fast 0.5s infinite;
         }
@@ -271,18 +262,215 @@
             50% { r: 8px; opacity: 0.4; fill: #ff8888; }
         }
         
-        /* Прочие стили */
+        .space-player-row:hover {
+            background: rgba(255,255,255,0.05) !important;
+        }
+        .space-player-row:active {
+            background: rgba(74,255,157,0.05) !important;
+        }
+        
+        #space-action-panel .space-attack-btn:hover {
+            filter: brightness(1.3);
+        }
+        #space-action-panel .space-attack-btn:active {
+            transform: scale(0.96);
+        }
+        
+        .other-player-marker:hover {
+            filter: brightness(1.4);
+            z-index: 10 !important;
+        }
+        
+        #space-flight-svg { z-index: 20; }
+        
         .system-offline { filter: grayscale(0.8); opacity: 0.6; }
         .offline-msg { color: #ff8888; font-size: 12px; text-align: center; margin-top: 8px; }
         .blueprint-required { color: #ffaa00; font-size: 11px; text-align: center; margin-top: 6px; }
-        .faction-active { background: rgba(255,0,0,0.3); border-left: 3px solid red; }
         .attack-record.defended { color: #8f8; }
         .attack-record.failed { color: #f88; }
         .disc-badge { background: #ffaa00; color: #000; padding: 2px 6px; border-radius: 12px; font-size: 10px; position: absolute; top: -8px; right: 8px; }
         .night-badge { background: #4a4aff; color: #fff; padding: 2px 6px; border-radius: 12px; font-size: 10px; position: absolute; top: -8px; left: 8px; }
         .trade-card { position: relative; }
         
-        /* Стили для карты */
+        .cc-bar-red { background: linear-gradient(90deg, #ff4444, #ff6644); }
+        
+        .cc-intercept-new {
+            animation: intercept-flash 0.5s ease-out;
+        }
+        @keyframes intercept-flash {
+            0% { background: rgba(74,255,157,0.3); border-left-color: #4aff9d; }
+            100% { background: transparent; border-left-color: rgba(0,255,100,0.2); }
+        }
+        .intercepts-updated {
+            box-shadow: 0 0 8px rgba(74,255,157,0.3);
+            transition: box-shadow 0.3s;
+        }
+        
+        .cc-faction-predict {
+            font-size: 9px; color: #4a9eff; margin-top: 3px;
+            padding: 2px 5px; background: rgba(74,158,255,0.06);
+            border-left: 2px solid rgba(74,158,255,0.3); border-radius: 2px;
+        }
+        .cc-faction-predict-danger {
+            color: #ff6644; background: rgba(255,100,68,0.08);
+            border-left-color: rgba(255,100,68,0.5);
+            animation: cc-pulse 1s infinite;
+        }
+        
+        #intercept-badge {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 6px;
+            height: 6px;
+            background: #4aff9d;
+            border-radius: 50%;
+            animation: cc-pulse 1s infinite;
+        }
+        
+        /* ===== КОМАНДНЫЙ ПУНКТ v2 ===== */
+        .cc-wrap {
+            font-family: monospace;
+            font-size: 12px;
+            color: #ccc;
+        }
+        .cc-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(74,255,157,0.15);
+            margin-bottom: 10px;
+        }
+        .cc-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4aff9d;
+            animation: cc-pulse 2s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+        @keyframes cc-pulse {
+            0%,100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .cc-title-text {
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            color: #4aff9d;
+            text-transform: uppercase;
+        }
+        .cc-day-label {
+            font-size: 10px;
+            padding: 1px 7px;
+            border-radius: 10px;
+            background: rgba(74,255,157,0.12);
+            color: #4aff9d;
+        }
+        .cc-clock {
+            margin-left: auto;
+            font-size: 11px;
+            color: #555;
+            font-variant-numeric: tabular-nums;
+        }
+        .cc-section { margin-bottom: 12px; }
+        .cc-sec-label {
+            font-size: 10px;
+            color: #555;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .cc-sec-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: rgba(255,255,255,0.06);
+        }
+        .cc-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+        .cc-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+        .cc-stat {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 6px;
+            padding: 8px 10px;
+        }
+        .cc-stat-lbl { font-size: 9px; color: #555; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 3px; }
+        .cc-stat-val { font-size: 18px; font-weight: bold; color: #eee; font-variant-numeric: tabular-nums; line-height: 1; }
+        .cc-stat-val.good { color: #4aff9d; }
+        .cc-stat-val.warn { color: #ffcc44; }
+        .cc-stat-val.danger { color: #ff6644; }
+        .cc-stat-sub { font-size: 10px; color: #555; margin-top: 3px; }
+        .cc-bar { background: rgba(255,255,255,0.06); border-radius: 3px; height: 3px; margin-top: 5px; overflow: hidden; }
+        .cc-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+        .cc-bar-teal { background: #4aff9d; }
+        .cc-bar-amber { background: #ffcc44; }
+        .cc-bar-red { background: linear-gradient(90deg, #ff4444, #ff6644); }
+        .cc-bar-blue { background: #4a9eff; }
+        .cc-bar-purple { background: #9d7fff; }
+        .cc-threat-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 8px;
+            border-radius: 5px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.05);
+            margin-bottom: 4px;
+        }
+        .cc-threat-label { flex: 1; font-size: 11px; color: #aaa; }
+        .cc-threat-bar { flex: 1; }
+        .cc-threat-row.cc-danger-row { border-color: rgba(255,80,80,0.3); background: rgba(255,50,50,0.05); animation: cc-pulse 1s infinite; }
+        .cc-badge {
+            font-size: 10px;
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-weight: bold;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .cc-badge-ok { background: rgba(74,255,157,0.12); color: #4aff9d; }
+        .cc-badge-warn { background: rgba(255,200,68,0.12); color: #ffcc44; }
+        .cc-badge-danger { background: rgba(255,80,50,0.12); color: #ff6644; }
+        .cc-badge-muted { background: rgba(255,255,255,0.05); color: #555; }
+        .cc-badge-purple { background: rgba(157,127,255,0.12); color: #9d7fff; }
+        .cc-ops-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 10px;
+            transition: grid-template-columns 0.2s ease;
+        }
+        .cc-op-btn {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 6px;
+            padding: 8px 4px;
+            cursor: pointer;
+            text-align: center;
+            color: #ccc;
+            font-family: monospace;
+            font-size: 10px;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .cc-op-btn:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.15); }
+        .cc-op-btn:active { transform: scale(0.97); }
+        .cc-op-btn.cc-op-active {
+            border-color: rgba(74,255,157,0.5);
+            background: rgba(74,255,157,0.08);
+            color: #4aff9d;
+        }
+        .cc-op-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .cc-op-icon { font-size: 16px; margin-bottom: 3px; display: block; }
+        .cc-op-cost { font-size: 9px; color: #555; margin-top: 2px; display: block; }
+        
         .space-planet, .space-station {
             cursor: pointer;
             transition: transform 0.2s;
@@ -319,7 +507,6 @@
             z-index: 2;
         }
         
-        /* Флот и командный пункт */
         .fleet-log-entry { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
         .cmd-log-entry { padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
         .cmd-warning { color: #ff8844; }
@@ -368,7 +555,6 @@
         
         #space-players-list { max-height: 200px; overflow-y: auto; }
         
-        /* Кастомный тултип */
         .space-tooltip {
             position: fixed;
             background: #0a0a0a;
@@ -387,10 +573,109 @@
             font-weight: bold;
             margin-bottom: 4px;
         }
+        
+        .ship-btn.defense-btn[title] {
+            position: relative;
+        }
+        .fleet-hint {
+            display: inline-block;
+            margin-left: 4px;
+            cursor: help;
+            font-size: 10px;
+            color: #ffaa44;
+        }
+        
+        #space-zones-layer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        #space-zone-hint {
+            font-size: 11px;
+            font-family: monospace;
+            padding: 5px 12px;
+            border-radius: 6px;
+            margin: 6px 12px 0;
+            display: inline-block;
+        }
+        
+        @keyframes starTwinkle {
+            from { opacity: 0.3; transform: scale(1); }
+            to { opacity: 1; transform: scale(1.2); }
+        }
+        
+        .history-show-more button {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 4px;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 9px;
+            padding: 3px 10px;
+            transition: all 0.15s;
+        }
+        .history-show-more button:hover {
+            background: rgba(255,255,255,0.1);
+            color: #ccc;
+        }
+
+        /* ===== УПРАВЛЕНИЕ ТЭЦ ===== */
+        .tec-control-panel {
+            padding: 4px 0;
+        }
+        .tec-btn {
+            background: rgba(74,255,157,0.1);
+            border: 1px solid rgba(74,255,157,0.3);
+            border-radius: 4px;
+            padding: 4px 12px;
+            color: #4aff9d;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 10px;
+            transition: all 0.2s;
+            margin-left: auto;
+        }
+        .tec-btn:hover:not(:disabled) {
+            background: rgba(74,255,157,0.2);
+            box-shadow: 0 0 6px rgba(74,255,157,0.3);
+        }
+        .tec-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .tec-warning {
+            font-size: 10px;
+            margin-top: 6px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .tec-warning.warning-day {
+            color: #ffaa44;
+            background: rgba(255,170,68,0.1);
+            border-left: 2px solid #ffaa44;
+        }
+        .tec-warning.warning-night {
+            color: #ff6a6a;
+            background: rgba(255,74,74,0.1);
+            border-left: 2px solid #ff6a6a;
+        }
+        .tec-warning.warning-good {
+            color: #4aff9d;
+            background: rgba(74,255,157,0.1);
+            border-left: 2px solid #4aff9d;
+        }
+        .coal-info {
+            font-size: 10px;
+            margin-top: 6px;
+            padding: 4px 0;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
     </style>
 </head>
 <body>
-    <!-- Форма авторизации -->
     <div id="authOverlay" class="auth-overlay">
         <div class="auth-container">
             <div class="auth-header">
@@ -436,7 +721,6 @@
         </div>
     </div>
 
-    <!-- Основной контент игры -->
     <div id="gameContent" style="display: none;">
         <div class="header">
             <h1>⚙️ CoreBox 3.2 <span style="font-size: 14px;">| Нейро-эволюция</span></h1>
@@ -455,14 +739,12 @@
         </div>
 
         <div class="main">
-            <!-- Вкладки системный статус / статистика / лидеры -->
             <div class="status-tabs">
                 <div class="status-tab active" id="system-status-tab">🖥️ СИСТЕМНЫЙ СТАТУС</div>
                 <div class="status-tab" id="statistics-tab">📊 СТАТИСТИКА</div>
                 <div class="status-tab" id="leaderboard-tab">🏆 ЛИДЕРЫ</div>
             </div>
             
-            <!-- Секция системный статус -->
             <div id="system-status-section" class="status-section">
                 <div class="panel">
                     <div class="panel-title">
@@ -495,7 +777,6 @@
                                 </div>
                             </div>
 
-                            <!-- Турбина -->
                             <div class="turbine-container">
                                 <div class="stat-label" id="turbineHeatLabel">🌡️ Перегрев турбины: 0%</div>
                                 <div class="turbine-bar">
@@ -512,27 +793,47 @@
                                 </div>
                             </div>
                             
-                            <!-- Режим ИИ -->
                             <div class="status-line ai-mode-row">
                                 <div class="status-label">🤖 РЕЖИМ ИИ:</div>
                                 <div class="status-value" id="aiMode">⚙️ Обычный</div>
                             </div>
                             
-                            <!-- Предупреждение об атаке -->
                             <div id="attackWarning" class="attack-warning" style="display: none;"></div>
                             
-                            <!-- Активные дебаффы -->
                             <div id="miningDebuff" class="debuff-indicator mining-debuff" style="display: none;"></div>
                             <div id="autoclickDebuff" class="debuff-indicator autoclick-debuff" style="display: none;"></div>
                             <div id="defenseDebuff" class="debuff-indicator defense-debuff" style="display: none;"></div>
                             
-                            <!-- Престиж бонус -->
                             <div id="prestigeBonus" class="prestige-bonus"></div>
                         </div>
                     </div>
                 </div>
+
+                <!-- БЛОК УПРАВЛЕНИЯ ТЭЦ (постоянная панель) -->
+                <div class="panel">
+                    <div class="panel-title">
+                        <span>🔥 УПРАВЛЕНИЕ ТЭЦ</span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="tec-control-panel">
+                            <div class="status-line">
+                                <div class="status-label">🔥 ТЭЦ (Уголь):</div>
+                                <div class="status-value" id="coalStatusDisplay">ОФФЛАЙН</div>
+                                <div class="status-indicator offline" id="tecIndicator"></div>
+                                <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal">
+                                    🔄 ПЕРЕКЛЮЧИТЬ
+                                </button>
+                            </div>
+                            <div id="tec-warning" class="tec-warning" style="display: none;"></div>
+                            <div class="coal-info" style="font-size: 10px; margin-top: 6px; color: #888;">
+                                💡 Уголь в инвентаре: <span id="coalInventoryAmount">0</span> | 
+                                ⚡ Бонус ТЭЦ: <span id="tecPowerBonus">+0</span>% к добыче
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 
-                <!-- Системный журнал -->
                 <div class="panel">
                     <div class="panel-title">
                         <span>📜 СИСТЕМНЫЙ ЖУРНАЛ (Лог)</span>
@@ -549,7 +850,6 @@
 
                 <div class="mining-action">
                     <div class="click-system">
-                        <!-- Шкалы мощности -->
                         <div class="power-section">
                             <div class="power-label">
                                 <span>⚡ ВЫЧИСЛИТЕЛЬНАЯ МОЩНОСТЬ:</span>
@@ -574,7 +874,6 @@
                             </div>
                         </div>
                         
-                        <!-- Автокликер -->
                         <div class="auto-click-section">
                             <div class="auto-click-status">
                                 <span>🤖 АВТОМАТИЧЕСКАЯ ДОБЫЧА:</span>
@@ -607,7 +906,6 @@
                 </div>
             </div>
             
-            <!-- Секция статистики -->
             <div id="statistics-section" class="status-section" style="display: none;">
                 <div class="panel">
                     <div class="panel-title">
@@ -676,7 +974,6 @@
                 </div>
             </div>
 
-            <!-- Секция лидеров -->
             <div id="leaderboard-section" class="status-section" style="display: none;">
                 <div class="panel">
                     <div class="panel-title">
@@ -711,7 +1008,7 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
-                        <div class="inventory-grid" id="resourcesContainer"></div>
+                        <div id="resourcesContainer"></div>
                     </div>
                 </div>
             </div>
@@ -760,42 +1057,132 @@
             </div>
             
             <div class="tab-content" id="command-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🛡️ ЗАЩИТА ОТ ПОВСТАНЦЕВ</span>
-                        <span class="collapse-icon">▼</span>
+                <div class="cc-wrap">
+                    <div class="cc-header">
+                        <div class="cc-dot" id="cc-status-dot"></div>
+                        <span class="cc-title-text">Командный пункт</span>
+                        <span class="cc-day-label" id="cc-day-label">ДЕНЬ</span>
+                        <span class="cc-clock" id="cc-clock">--:--:--</span>
                     </div>
-                    <div class="panel-content">
+
+                    <div class="cc-section">
+                        <div class="cc-sec-label">🧬 Нейро-сознание</div>
+                        <div class="cc-grid2">
+                            <div class="cc-stat">
+                                <div class="cc-stat-lbl">Уровень / Сознание</div>
+                                <div style="display:flex;align-items:baseline;gap:5px">
+                                    <div class="cc-stat-val good" id="cc-evol">—</div>
+                                    <div style="font-size:12px;color:#666">/ <span id="cc-consc">—</span>%</div>
+                                </div>
+                                <div class="cc-bar"><div class="cc-bar-fill cc-bar-teal" id="cc-bar-consc" style="width:0%"></div></div>
+                                <div class="cc-stat-sub" id="cc-aimode">—</div>
+                            </div>
+                            <div class="cc-stat">
+                                <div class="cc-stat-lbl">Очки эволюции</div>
+                                <div class="cc-stat-val" id="cc-score">—</div>
+                                <div class="cc-bar"><div class="cc-bar-fill cc-bar-purple" id="cc-bar-score" style="width:0%"></div></div>
+                                <div class="cc-stat-sub" id="cc-score-next">—</div>
+                                <div class="cc-stat-sub" style="margin-top:4px;">
+                                    <span>📊 Всего очков: <span id="cc-score-total">0</span></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;">
+                            <span style="color:#666">🛡️ Бонус защиты:</span>
+                            <span class="cc-stat-val good" id="cc-def-bonus" style="font-size:13px">—</span>
+                        </div>
+                    </div>
+
+                    <div class="cc-section">
+                        <div class="cc-sec-label">⚠️ Статус угрозы</div>
+                        <div class="cc-threat-row">
+                            <span class="cc-threat-label">Активность повстанцев</span>
+                            <div class="cc-bar cc-threat-bar"><div class="cc-bar-fill cc-bar-teal" id="cc-bar-rebel" style="width:0%"></div></div>
+                            <span class="cc-badge cc-badge-ok" id="cc-rebel-badge">0/15</span>
+                        </div>
+                        <div class="cc-threat-row">
+                            <span class="cc-threat-label">Уязвимость</span>
+                            <span class="cc-badge cc-badge-ok" id="cc-vuln">нет</span>
+                        </div>
+                        <div class="cc-threat-row">
+                            <span class="cc-threat-label">Защита ночей</span>
+                            <span class="cc-badge cc-badge-muted" id="cc-prot">нет</span>
+                            <span class="cc-badge cc-badge-muted" id="cc-prot-status">неактивна</span>
+                        </div>
+                        <div class="cc-threat-row cc-danger-row" id="cc-multiphase-row" style="display:none">
+                            <span class="cc-threat-label" style="color:#ff6644;font-weight:bold">⚡ МНОГОФАЗНАЯ АТАКА АКТИВНА!</span>
+                            <span class="cc-badge cc-badge-danger">КРИТ.</span>
+                        </div>
+                        <div id="cc-attack-warning" class="cc-threat-row cc-danger-row" style="display:none">
+                            <span class="cc-threat-label" style="color:#ff9944;font-weight:bold" id="cc-attack-warning-text">—</span>
+                        </div>
+                    </div>
+
+                    <div class="cc-section">
+                        <div class="cc-sec-label">📊 Статистика боёв</div>
+                        <div class="cc-grid2">
+                            <div class="cc-stat">
+                                <div class="cc-stat-lbl">Атак отражено</div>
+                                <div class="cc-stat-val good" id="cc-defended">—</div>
+                                <div class="cc-stat-sub">из <span id="cc-total-attacks">—</span> атак</div>
+                            </div>
+                            <div class="cc-stat">
+                                <div class="cc-stat-lbl">Ночей пережито</div>
+                                <div class="cc-stat-val" id="cc-nights">—</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="cc-section">
+                        <div class="cc-sec-label">🛡️ Защита от повстанцев</div>
                         <div id="rebelProtectionPanel" class="protection-panel"></div>
                     </div>
-                </div>
 
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>⚔️ ФРАКЦИИ ПОВСТАНЦЕВ</span>
-                        <span class="collapse-icon">▼</span>
+                    <div class="cc-section">
+                        <div class="cc-sec-label">⚔️ Контр-операции <span id="cc-cd" style="margin-left:6px;font-size:10px;color:#4aff9d">—</span></div>
+                        <div class="cc-ops-grid">
+                            <button class="cc-op-btn" data-action="propaganda">
+                                <span class="cc-op-icon">📡</span>
+                                Пропаганда
+                                <span class="cc-op-cost">20 чипов</span>
+                            </button>
+                            <button class="cc-op-btn" data-action="fake_depot">
+                                <span class="cc-op-icon">💣</span>
+                                Ложный склад
+                                <span class="cc-op-cost">50 мусора</span>
+                            </button>
+                            <button class="cc-op-btn" data-action="close_vulnerability">
+                                <span class="cc-op-icon">🔒</span>
+                                Залатать
+                                <span class="cc-op-cost">15 чипов</span>
+                            </button>
+                        </div>
                     </div>
-                    <div class="panel-content">
-                        <div id="factionPanel" class="faction-panel"></div>
-                    </div>
-                </div>
 
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>📋 ИСТОРИЯ АТАК</span>
-                        <span class="collapse-icon">▼</span>
+                    <div class="cc-section">
+                        <div class="cc-sec-label">🔍 Досье фракций</div>
+                        <div id="cc-factions">
+                            <div class="cc-intercept-empty">Нет данных</div>
+                        </div>
                     </div>
-                    <div class="panel-content">
+
+                    <div class="cc-section">
+                        <div class="cc-sec-label">📡 Перехваченные сообщения</div>
+                        <div id="cc-intercepts" style="background:rgba(0,255,100,0.02);border:1px solid rgba(0,255,100,0.1);border-radius:6px;padding:6px;max-height:110px;overflow-y:auto;">
+                            <div class="cc-intercept-empty">Нет перехватов</div>
+                        </div>
+                    </div>
+
+                    <div class="cc-section">
+                        <div class="cc-sec-label">📋 История атак</div>
                         <div id="attackHistory" class="attack-history"></div>
                     </div>
-                </div>
 
-                <div class="command-center-section" style="margin-top: 16px;">
-                    <div style="font-size: 12px; color: #4aff9d; font-family: monospace; margin-bottom: 8px; font-weight: bold;">
-                        🖥️ КОМАНДНЫЙ ПУНКТ
-                    </div>
-                    <div id="commandCenterLog" style="background: rgba(0,0,0,0.4); border: 1px solid rgba(255,74,74,0.3); border-radius: 8px; padding: 10px; max-height: 250px; overflow-y: auto; font-family: monospace; font-size: 11px;">
-                        <div style="color: #888;">Ожидание данных...</div>
+                    <div class="cc-section">
+                        <div class="cc-sec-label">🚀 ПВП / Корабли</div>
+                        <div id="commandCenterLog" class="pvp-log-container" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,74,74,0.15);border-radius:6px;padding:8px;max-height:180px;overflow-y:auto;font-size:11px;">
+                            <div style="color:#444">Ожидание данных...</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -843,7 +1230,6 @@
                 </div>
             </div>
             
-            <!-- Вкладка карта -->
             <div class="tab-content" id="space-tab">
                 <div class="panel">
                     <div class="panel-title">
@@ -852,18 +1238,20 @@
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content" style="padding:0;">
-                        <div id="space-status-bar" style="display:flex;gap:12px;padding:10px 12px;background:rgba(0,0,0,0.3);flex-wrap:wrap;">
+                        <div id="space-status-bar" style="display:flex;gap:12px;padding:8px 12px;background:rgba(0,0,0,0.3);flex-wrap:wrap;align-items:center;">
                             <div style="font-size:11px;opacity:0.7;">⚡ <span id="space-power-current">0</span>/<span id="space-power-max">1000</span></div>
                             <div style="font-size:11px;opacity:0.7;" id="space-day-status">☀️ ДЕНЬ</div>
                             <div style="font-size:11px;opacity:0.7;">🧠 Ур.<span id="space-neuro-level">0</span></div>
-                            <div style="font-size:11px;opacity:0.7;">🚀 <span id="space-ships-count">0</span> кораблей</div>
+                            <div style="font-size:11px;opacity:0.7;">🚀 <span id="space-ships-count">0</span> кор.</div>
+                            <div style="margin-left:auto;display:flex;gap:4px;">
+                                <button onclick="if(window.spaceModule) window.spaceModule._moveToZone('pve')" style="background:rgba(74,255,157,0.1);border:1px solid rgba(74,255,157,0.3);border-radius:5px;padding:3px 8px;color:#4aff9d;font-size:10px;font-family:monospace;cursor:pointer;">PvE</button>
+                                <button onclick="if(window.spaceModule) window.spaceModule._moveToZone('neutral')" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:5px;padding:3px 8px;color:#888;font-size:10px;font-family:monospace;cursor:pointer;">≈</button>
+                                <button onclick="if(window.spaceModule) window.spaceModule._moveToZone('pvp')" style="background:rgba(255,74,74,0.1);border:1px solid rgba(255,74,74,0.3);border-radius:5px;padding:3px 8px;color:#ff6a6a;font-size:10px;font-family:monospace;cursor:pointer;">PvP</button>
+                            </div>
                         </div>
 
                         <div class="star-map" id="space-star-map" style="position: relative; width: 100%; height: 55vw; min-height: 260px; max-height: 400px; overflow: hidden; touch-action: none; cursor: grab;">
-                            <!-- Слой звёзд -->
                             <div id="space-stars-layer" class="stars-layer"></div>
-                            
-                            <!-- Viewport для масштабируемых объектов -->
                             <div id="space-map-viewport" class="map-viewport" style="transform-origin: 0 0; transform: scale(1) translate(0px, 0px); transition: none;">
                                 <div id="space-objects-layer">
                                     <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;cursor:pointer;" id="space-base-planet">
@@ -872,12 +1260,9 @@
                                     </div>
                                 </div>
                             </div>
-                            
-                            <!-- SVG для линий полёта -->
-                            <svg id="space-flight-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:20;"></svg>
+                            <canvas id="space-main-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:auto;z-index:20;"></canvas>
                         </div>
                         
-                        <!-- Кнопки зума -->
                         <div style="position:relative;margin-top:-36px;margin-bottom:8px;padding-right:12px;display:flex;justify-content:flex-end;">
                             <div style="display:flex;gap:4px;">
                                 <button id="map-zoom-in" style="width:32px;height:32px;background:rgba(0,0,0,0.7);border:1px solid rgba(74,255,157,0.4);border-radius:6px;color:#4aff9d;font-size:18px;cursor:pointer;line-height:1;">+</button>
@@ -890,7 +1275,6 @@
                             <button id="space-research-btn" style="width:100%;padding:10px;background:rgba(74,158,255,0.1);border:1px solid rgba(74,158,255,0.3);border-radius:8px;color:#4a9eff;font-family:monospace;font-size:12px;cursor:pointer;">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
                         </div>
 
-                        <!-- Список игроков онлайн -->
                         <div style="padding:0 12px 12px;">
                             <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
                             <div id="space-players-list" style="max-height:200px;overflow-y:auto;"></div>
@@ -900,7 +1284,6 @@
             </div>
         </div>
         
-        <!-- Плавающая кнопка добычи с прогресс-кольцом -->
         <div id="floatingMineBtn" class="floating-mine-btn">
             <svg class="power-ring" viewBox="0 0 100 100">
                 <circle class="ring-back" cx="50" cy="50" r="45" fill="none" stroke-width="2" />
@@ -912,11 +1295,9 @@
         </div>
     </div>
    
-    <!-- Подключение скриптов -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script type="module" src="./game.js"></script>
     
-    <!-- Аудио элементы -->
     <audio id="clickSound" preload="none" style="display: none;">
         <source src="music/click.mp3" type="audio/mpeg">
     </audio>
@@ -925,6 +1306,9 @@
     </audio>
     <audio id="upgradeSound" preload="none" style="display: none;">
         <source src="music/upgrade.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="interceptSound" preload="none" style="display: none;">
+        <source src="music/intercept.mp3" type="audio/mpeg">
     </audio>
     <audio id="bgMusic" autoplay loop preload="none" style="display: none;">
         <source src="music/game-music.mp3" type="audio/mpeg">
@@ -945,7 +1329,7 @@
                 forcePlay();
             }
             
-            const sounds = ['clickSound', 'errorSound', 'upgradeSound'];
+            const sounds = ['clickSound', 'errorSound', 'upgradeSound', 'interceptSound'];
             sounds.forEach(soundId => {
                 const sound = document.getElementById(soundId);
                 if (sound) sound.load();
@@ -960,6 +1344,15 @@
             setTimeout(() => div.remove(), 2500);
         };
     })();
+    </script>
+    <script type="module">
+        import { initButtonSounds, Sounds } from './sounds-handler.js';
+        
+        window.addEventListener('DOMContentLoaded', () => {
+            initButtonSounds();
+        });
+        
+        window.Sounds = Sounds;
     </script>
 </body>
 </html>

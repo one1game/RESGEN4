@@ -1,11 +1,26 @@
-// supabase.js
-// Инициализация подключения к Supabase (ИСПРАВЛЕНА - ЛЕНИВАЯ ЗАГРУЗКА + ОБРАБОТКА ОШИБОК)
+// ======== supabase.js (ИСПРАВЛЕНАЯ ВЕРСИЯ v3.4) ========
+// ИСПРАВЛЕНИЯ:
+// БАГ SB-01: Proxy fallback возвращает chainable mock-объект
 
 const SUPABASE_URL = "https://xnbtizdqhpyvafftnlcb.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhuYnRpemRxaHB5dmFmZnRubGNiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwODM3NTUsImV4cCI6MjA5MTY1OTc1NX0.9qrJJctl5o6q_stFSqMmtLbKyZzR8rrpiQppaG1f72o";
 
 let _supabaseClient = null;
 let _initError = null;
+
+// БАГ SB-01: создание chainable mock-объекта для fallback
+function createChainableMock() {
+    const error = new Error('Supabase недоступен');
+    const mock = new Proxy({}, {
+        get(_, prop) {
+            if (typeof prop === 'string') {
+                return () => mock;
+            }
+            return undefined;
+        }
+    });
+    return mock;
+}
 
 function getSupabaseClient() {
     if (_initError) {
@@ -45,6 +60,7 @@ export async function checkSupabaseConnection() {
     }
 }
 
+// БАГ SB-01: Proxy с chainable fallback
 export const supabase = new Proxy({}, {
     get(_, prop) {
         try {
@@ -57,10 +73,8 @@ export const supabase = new Proxy({}, {
         } catch (e) {
             console.error(`Ошибка доступа к supabase.${String(prop)}:`, e);
             if (typeof prop === 'string' && ['from', 'channel', 'auth', 'rpc'].includes(prop)) {
-                return () => {
-                    console.warn(`Supabase метод ${prop} вызван, но клиент не инициализирован`);
-                    return Promise.reject(new Error('Supabase не доступен'));
-                };
+                // БАГ SB-01: возвращаем chainable mock вместо Promise.reject
+                return () => createChainableMock();
             }
             return undefined;
         }

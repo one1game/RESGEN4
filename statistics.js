@@ -1,4 +1,7 @@
-
+// statistics.js - ПОЛНОСТЬЮ ИСПРАВЛЕН
+// БАГ #CRIT-07: исправлен повторный инкремент sessionsCount
+// БАГ #LOW-06: resetUserStatistics возвращает Promise
+// БАГ #16: resetUserStatistics переделан на Promise
 
 export let gameStats = {
     totalClicks: 0, maxPowerReached: 0, nightsSurvived: 0, rebelAttacks: 0,
@@ -15,6 +18,8 @@ export let gameStats = {
     _sessionCounted: false,
 };
 
+let _statisticsLoadedOnce = false;
+
 export function initStatistics() {
     setupStatisticsEventListeners();
     startPlayTimeTracker();
@@ -22,6 +27,13 @@ export function initStatistics() {
 
 export function loadUserStatistics(userStats) {
     if (!userStats) return;
+    
+    if (_statisticsLoadedOnce) {
+        updateStatisticsFromRust(userStats);
+        updateStatisticsDisplay();
+        return;
+    }
+    _statisticsLoadedOnce = true;
     
     const sessionCountedKey = 'corebox_session_counted';
     const sessionAlreadyCounted = sessionStorage.getItem(sessionCountedKey) === 'true';
@@ -101,30 +113,34 @@ function showConfirmDialog(message, onConfirm, onCancel) {
     document.getElementById('confirm-no').onclick = onNo;
 }
 
+// БАГ #16: resetUserStatistics возвращает Promise
 export function resetUserStatistics() {
-    showConfirmDialog('Сбросить статистику?', () => {
-        const preserved = { 
-            sessionsCount: gameStats.sessionsCount,
-            accumulatedPlayTime: gameStats.accumulatedPlayTime,
-            _sessionCounted: true
-        };
-        Object.keys(gameStats).forEach(k => {
-            if (typeof gameStats[k] === 'number') gameStats[k] = 0;
-            else if (typeof gameStats[k] === 'boolean') gameStats[k] = false;
-            else if (typeof gameStats[k] === 'string') gameStats[k] = '';
+    return new Promise((resolve) => {
+        showConfirmDialog('Сбросить статистику?', () => {
+            const preserved = { 
+                sessionsCount: gameStats.sessionsCount,
+                accumulatedPlayTime: gameStats.accumulatedPlayTime,
+                _sessionCounted: true
+            };
+            Object.keys(gameStats).forEach(k => {
+                if (typeof gameStats[k] === 'number') gameStats[k] = 0;
+                else if (typeof gameStats[k] === 'boolean') gameStats[k] = false;
+                else if (typeof gameStats[k] === 'string') gameStats[k] = '';
+            });
+            gameStats.sessionsCount = preserved.sessionsCount;
+            gameStats.accumulatedPlayTime = preserved.accumulatedPlayTime;
+            gameStats._sessionCounted = true;
+            gameStats.startTime = Date.now();
+            gameStats.lastSessionDate = new Date().toISOString();
+            gameStats.currentAiMode = 'Обычный';
+            updateStatisticsDisplay();
+            
+            document.dispatchEvent(new CustomEvent('resetUserStats', { detail: { stats: gameStats } }));
+            resolve(true);
+        }, () => {
+            resolve(false);
         });
-        gameStats.sessionsCount = preserved.sessionsCount;
-        gameStats.accumulatedPlayTime = preserved.accumulatedPlayTime;
-        gameStats._sessionCounted = true;
-        gameStats.startTime = Date.now();
-        gameStats.lastSessionDate = new Date().toISOString();
-        gameStats.currentAiMode = 'Обычный';
-        updateStatisticsDisplay();
-        
-        document.dispatchEvent(new CustomEvent('resetUserStats', { detail: { stats: gameStats } }));
-        return true;
     });
-    return false;
 }
 
 export function updateStatisticsFromRust(rustStats) {

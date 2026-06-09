@@ -1,16 +1,21 @@
-// game/src/systems/autoclick.rs
+// src/systems/autoclick.rs - ИСПРАВЛЕН
+// БАГ #AC1: добавлена добыча ресурсов в process_auto_click
+
 use crate::game::{GameState, GameEvent};
 use crate::game::config::AutoClickConfig;
+use crate::systems::mining::MiningSystem;
+use crate::systems::neuro_ecosystem::NeuroEcosystem;
 use rand::Rng;
 
 #[derive(Clone)]
 pub struct AutoClickSystem {
     config: AutoClickConfig,
+    mining_system: MiningSystem,
 }
 
 impl AutoClickSystem {
-    pub fn new(config: AutoClickConfig) -> Self {
-        Self { config }
+    pub fn new(config: AutoClickConfig, mining_system: MiningSystem) -> Self {
+        Self { config, mining_system }
     }
     
     pub fn add_manual_click(&self, state: &mut GameState) -> Vec<GameEvent> {
@@ -65,7 +70,8 @@ impl AutoClickSystem {
         events
     }
     
-    pub fn process_auto_click(&self, state: &mut GameState) -> Vec<GameEvent> {
+    // БАГ #AC1: ИСПРАВЛЕН — добавлена добыча ресурсов
+    pub fn process_auto_click(&self, state: &mut GameState, neuro: &NeuroEcosystem) -> Vec<GameEvent> {
         let mut events = Vec::new();
         
         if !state.auto_clicking || !state.can_auto_click() {
@@ -80,6 +86,9 @@ impl AutoClickSystem {
             if state.computational_power >= power_cost {
                 state.computational_power -= power_cost;
                 state.last_auto_click_time = 0;
+                
+                // БАГ #AC1: ДОБАВЛЯЕМ ДОБЫЧУ РЕСУРСОВ
+                events.extend(self.mining_system.auto_mine_resources(state, neuro));
                 
                 events.push(GameEvent::LogMessage(
                     format!("⚡ Автоклик: -{} мощности (интервал: {}сек)", power_cost, self.config.auto_click_interval)

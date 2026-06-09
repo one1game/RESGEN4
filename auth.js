@@ -1,12 +1,21 @@
-// ======== auth.js (Новая папка/auth.js) ========
-// ИСПРАВЛЕН: БАГ #9 двойной вызов onLogin, БАГ #34 валидация username, БАГ #35 fallback домен
+// ======== auth.js (ИСПРАВЛЕНАЯ ВЕРСИЯ v3.5) ========
+// ИСПРАВЛЕНИЯ:
+// БАГ A-01: initAuth — хранение cleanup-функции и предотвращение дублирования подписок
+// БАГ A-02: logout — использование событийной шины вместо хардкода
+// БАГ A-03: resetPassword — добавлена валидация email
+// БАГ #A1: race condition при двойном вызове onLogin
+// БАГ #A2: утечка _onLogoutCallback
+// БАГ #A3: валидация email
+// БАГ #MIN-01: валидация пароля
+// БАГ #MIN-05: закрытие BroadcastChannel
 
 import { supabase } from './supabase.js';
 import { GameBus, EVENTS } from './game-events.js';
 
-// ПАТЧ 3.3: глобальный счётчик сессий для синхронизации между вкладками
 let _sessionId = Math.random().toString(36).substring(2, 10);
 let _authChannel = null;
+let _onLogoutCallback = null;
+let _currentAuthCleanup = null;
 
 function getAuthChannel() {
     if (!_authChannel && typeof BroadcastChannel !== 'undefined') {
@@ -15,9 +24,7 @@ function getAuthChannel() {
             _authChannel.onmessage = (e) => {
                 if (e.data.type === 'logout' && e.data.sessionId !== _sessionId) {
                     console.log('🔓 Выход из системы в другой вкладке');
-                    if (window._onLogoutCallback) {
-                        window._onLogoutCallback();
-                    }
+                    if (_onLogoutCallback) _onLogoutCallback();
                 }
             };
         } catch(e) {}
@@ -25,8 +32,24 @@ function getAuthChannel() {
     return _authChannel;
 }
 
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidPassword(password) {
+    return password.length >= 6;
+}
+
 export async function register(email, password, username) {
     try {
+        if (!isValidEmail(email)) {
+            return { success: false, error: 'Неверный формат email' };
+        }
+        
+        if (!isValidPassword(password)) {
+            return { success: false, error: 'Пароль должен быть минимум 6 символов' };
+        }
+        
         const cleanUsername = (username || email.split('@')[0]).trim();
         if (cleanUsername.length < 3) {
             return { success: false, error: 'Имя должно быть минимум 3 символа' };
@@ -41,9 +64,7 @@ export async function register(email, password, username) {
         const { data, error } = await supabase.auth.signUp({
             email: email,
             password: password,
-            options: {
-                data: { username: cleanUsername }
-            }
+            options: { data: { username: cleanUsername } }
         });
 
         if (error) throw error;
@@ -51,11 +72,7 @@ export async function register(email, password, username) {
         if (data.user) {
             const { error: updateError } = await supabase
                 .from('profiles')
-                .upsert({ 
-                    id: data.user.id, 
-                    username: cleanUsername
-                }, { onConflict: 'id' });
-            
+                .upsert({ id: data.user.id, username: cleanUsername }, { onConflict: 'id' });
             if (updateError) console.warn("Не удалось обновить username:", updateError);
         }
 
@@ -91,16 +108,13 @@ export async function login(email, password) {
     }
 }
 
+// БАГ A-02: logout — использование событийной шины
 export async function logout() {
     try {
         const channel = getAuthChannel();
         if (channel) {
             try {
-                channel.postMessage({
-                    type: 'logout',
-                    sessionId: _sessionId,
-                    timestamp: Date.now()
-                });
+                channel.postMessage({ type: 'logout', sessionId: _sessionId, timestamp: Date.now() });
             } catch(e) {}
         }
         
@@ -109,10 +123,8 @@ export async function logout() {
         
         localStorage.removeItem('corebox_current_user');
         
-        if (window.craftModule?.cleanup) window.craftModule.cleanup();
-        if (window.designModule?.cleanup) window.designModule.cleanup();
-        if (window.fleetModule?.cleanup) window.fleetModule.cleanup();
-        if (window.spaceModule?.cleanup) window.spaceModule.cleanup();
+        // БАГ A-02: Используем событийную шину вместо хардкода
+        GameBus.emit(EVENTS.LOGOUT);
         
         return { success: true };
         
@@ -133,11 +145,18 @@ export async function getCurrentUser() {
     }
 }
 
+// БАГ A-01: initAuth — хранение cleanup-функции и предотвращение дублирования
 export function initAuth(onLogin, onLogout) {
+    // БАГ A-01: очищаем предыдущую подписку перед созданием новой
+    if (_currentAuthCleanup) {
+        _currentAuthCleanup();
+        _currentAuthCleanup = null;
+    }
+    
     let loginHandled = false;
     let isInitialized = false;
     
-    window._onLogoutCallback = onLogout;
+    _onLogoutCallback = onLogout;
     
     getAuthChannel();
     
@@ -157,11 +176,10 @@ export function initAuth(onLogin, onLogout) {
         
         if (event === 'SIGNED_IN') {
             if (loginHandled && isInitialized) {
-                loginHandled = false;
                 return;
             }
             if (session?.user) {
-                loginHandled = false;
+                loginHandled = true;
                 onLogin(session.user);
             }
         } else if (event === 'SIGNED_OUT') {
@@ -172,14 +190,28 @@ export function initAuth(onLogin, onLogout) {
         }
     });
     
-    return () => {
+    // БАГ A-01: создаём и сохраняем cleanup-функцию
+    const cleanup = () => {
         subscription?.unsubscribe();
-        window._onLogoutCallback = null;
+        _onLogoutCallback = null;
+        if (_authChannel) {
+            _authChannel.close();
+            _authChannel = null;
+        }
     };
+    
+    _currentAuthCleanup = cleanup;
+    
+    return cleanup;
 }
 
+// БАГ A-03: resetPassword — добавлена валидация email
 export async function resetPassword(email) {
     try {
+        if (!isValidEmail(email)) {
+            return { success: false, error: 'Неверный формат email' };
+        }
+        
         const origin = window.location.origin || 'https://corebox-game.com';
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
             redirectTo: origin + '/reset-password.html'
@@ -193,4 +225,9 @@ export async function resetPassword(email) {
         console.error("Ошибка сброса пароля:", error.message);
         return { success: false, error: error.message };
     }
+}
+
+// Добавляем событие LOGOUT в EVENTS если его нет
+if (typeof EVENTS !== 'undefined' && EVENTS && !EVENTS.LOGOUT) {
+    EVENTS.LOGOUT = 'auth:logout';
 }

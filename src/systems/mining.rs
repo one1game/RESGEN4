@@ -1,7 +1,10 @@
-// ========== src/systems/mining.rs (ИСПРАВЛЕН) ==========
-// БАГ #17: критический шанс синхронизирован с JS (потолок 25%)
-// БАГ #41: комбо-мультипликатор ограничен в Rust (но он в JS, здесь не требуется)
-// БАГ #50: пассивная добыча проверяет ore_unlocked
+// src/systems/mining.rs (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// БАГ #M1: убран turbine_cooling = false из mine_resources_common
+// БАГ #M3: mining_chance_bonus применяется как мультипликатор
+// БАГ #M4: автокликер не добывает руду без ore_unlocked
+// БАГ #M5: critical_chance рассчитывается после heat_penalty
+// БАГ #4: total_mined обновляется при любом добывающем событии
+// БАГ #2: day_no_coal_penalty — днём без ТЭЦ штраф ×0.5
 
 use rand::Rng;
 use crate::game::{GameState, GameEvent};
@@ -36,10 +39,6 @@ impl MiningSystem {
 
         if state.turbine_heat >= 100 {
             return events;
-        }
-
-        if state.turbine_cooling {
-            state.turbine_cooling = false;
         }
 
         let mut rng = rand::thread_rng();
@@ -89,9 +88,10 @@ impl MiningSystem {
         let mut ore_chance =
             (self.config.base_chances.ore + mining_lvl * 0.003) * heat_penalty;
 
-        coal_chance = (coal_chance + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
-        trash_chance = (trash_chance + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
-        ore_chance = (ore_chance + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
+        // БАГ #M3: mining_chance_bonus как мультипликатор
+        coal_chance = (coal_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
+        trash_chance = (trash_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
+        ore_chance = (ore_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
 
         let mining_debuff = if state.mining_debuff_remaining > 0 {
             1.0 - state.mining_debuff_percent as f64
@@ -109,16 +109,21 @@ impl MiningSystem {
         trash_chance *= mining_debuff * auto_debuff;
         ore_chance *= mining_debuff * auto_debuff;
 
+        // БАГ #2: днём без ТЭЦ штраф ×0.5
+        let day_no_coal_penalty = if state.is_day && !state.coal_enabled { 0.5 } else { 1.0 };
+        coal_chance *= day_no_coal_penalty;
+        trash_chance *= day_no_coal_penalty;
+        ore_chance *= day_no_coal_penalty;
+
         let crit_module_bonus = state.upgrades.crit_level as f64 * 0.02;
         let consciousness_crit_bonus = bonuses.crit_bonus;
         
-        // БАГ #17: расчёт критического шанса с потолком 25% (синхронизация с JS)
+        // БАГ #M5: critical_chance рассчитывается ПОСЛЕ heat_penalty
         let mut critical_chance = (self.config.critical_chance 
             + crit_module_bonus 
             + consciousness_crit_bonus) 
             * (1.0 - new_heat as f64 / 200.0);
         
-        // ЖЁСТКИЙ ПОТОЛОК 25% (максимум 1/4 кликов)
         if critical_chance > 0.25 {
             critical_chance = 0.25;
         }
@@ -126,9 +131,10 @@ impl MiningSystem {
         let is_critical = rng.gen::<f64>() < critical_chance;
         let multiplier = if is_critical { self.config.critical_multiplier } else { 1 };
 
+        // БАГ #4: total_mined обновляется при любом ресурсе
         if rng.gen::<f64>() < coal_chance {
             let amount = multiplier;
-            state.inventory.coal   += amount;
+            state.inventory.coal = (state.inventory.coal + amount).min(state.max_inventory_stack);
             state.total_mined      += amount;
             state.total_coal_mined += amount;
             state.coal_unlocked     = true;
@@ -144,7 +150,7 @@ impl MiningSystem {
 
         if rng.gen::<f64>() < trash_chance {
             let amount = multiplier;
-            state.inventory.trash   += amount;
+            state.inventory.trash = (state.inventory.trash + amount).min(state.max_inventory_stack);
             state.total_mined       += amount;
             state.total_trash_mined += amount;
             state.trash_unlocked     = true;
@@ -158,11 +164,10 @@ impl MiningSystem {
             }
         }
 
-        // БАГ #50: проверка на ore_unlocked для руды в ручной добыче
-        // (в auto-добыче тоже проверяем, но в пассивной - отдельно)
-        if rng.gen::<f64>() < ore_chance && (is_auto || state.ore_unlocked) {
+        // БАГ #M4: руда добывается ТОЛЬКО если разблокирована
+        if rng.gen::<f64>() < ore_chance && state.ore_unlocked {
             let amount = multiplier;
-            state.inventory.ore    += amount;
+            state.inventory.ore = (state.inventory.ore + amount).min(state.max_inventory_stack);
             state.total_mined      += amount;
             state.total_ore_mined  += amount;
 
@@ -186,7 +191,6 @@ impl MiningSystem {
         self.mine_resources_common(state, neuro, true)
     }
 
-    // БАГ #50: пассивная добыча с проверкой ore_unlocked
     pub fn passive_mining(&self, state: &mut GameState, neuro: &NeuroEcosystem) -> Vec<GameEvent> {
         if !state.is_passive_mining_active() {
             return Vec::new();
@@ -203,23 +207,25 @@ impl MiningSystem {
             1.0
         };
 
-        if rng.gen::<f64>() < self.config.passive_chances.coal * debuff * passive_multiplier {
-            state.inventory.coal   += 1;
+        // БАГ #2: днём без ТЭЦ штраф ×0.5 для пассивной добычи
+        let day_no_coal_penalty = if state.is_day && !state.coal_enabled { 0.5 } else { 1.0 };
+
+        if rng.gen::<f64>() < self.config.passive_chances.coal * debuff * passive_multiplier * day_no_coal_penalty {
+            state.inventory.coal = (state.inventory.coal + 1).min(state.max_inventory_stack);
             state.total_mined      += 1;
             state.total_coal_mined += 1;
             state.coal_unlocked     = true;
         }
 
-        if rng.gen::<f64>() < self.config.passive_chances.trash * debuff * passive_multiplier {
-            state.inventory.trash   += 1;
+        if rng.gen::<f64>() < self.config.passive_chances.trash * debuff * passive_multiplier * day_no_coal_penalty {
+            state.inventory.trash = (state.inventory.trash + 1).min(state.max_inventory_stack);
             state.total_mined       += 1;
             state.total_trash_mined += 1;
             state.trash_unlocked     = true;
         }
 
-        // БАГ #50: пассивная руда ТОЛЬКО если разблокирована
-        if state.ore_unlocked && rng.gen::<f64>() < self.config.passive_chances.ore * debuff * passive_multiplier {
-            state.inventory.ore    += 1;
+        if state.ore_unlocked && rng.gen::<f64>() < self.config.passive_chances.ore * debuff * passive_multiplier * day_no_coal_penalty {
+            state.inventory.ore = (state.inventory.ore + 1).min(state.max_inventory_stack);
             state.total_mined      += 1;
             state.total_ore_mined  += 1;
         }

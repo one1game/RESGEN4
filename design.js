@@ -1,11 +1,20 @@
-// design.js - СИСТЕМА ЧЕРТЕЖЕЙ КОРАБЛЕЙ (ИСПРАВЛЕНА - БЕЗ СПАМА В КОНСОЛЬ)
+// design.js - ПОЛНОСТЬЮ ИСПРАВЛЕН (v6.0)
+// БАГ #8: _userIdInitialized = true при неудачной инициализации
+// БАГ #C3: aiResearchBonus теперь реально применяется в getEffectiveCost
+// БАГ #C4: renderDesignUI всегда обновляет computationalPower
+// БАГ #43: _getUserId исправлен - убран устаревший API Supabase v1
+// ИСПРАВЛЕНИЕ: добавлена немедленная блокировка кнопки при клике
+
+import { supabase } from './supabase.js';
 
 export const designModule = {
     game: null,
     computationalPower: 0,
     maxComputationalPower: 1000,
     aiResearchBonus: 0,
-    _userId: null,  // КЭШИРОВАННЫЙ ID
+    _userId: null,
+    _userIdInitialized: false,
+    _userIdInitAttempts: 0,
     
     blueprints: [
         { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', designCost: 200, icon: '🚚', unlocked: false },
@@ -13,51 +22,67 @@ export const designModule = {
         { id: 'combat', name: 'Боевой корабль', desc: 'Защита флота и атака угроз', designCost: 800, icon: '⚔️', unlocked: false }
     ],
     
-    // ИСПРАВЛЕНО: получение userId без спама в консоль
-    _getUserId() {
-        if (this._userId) return this._userId;
+    async initUserId() {
+        if (this._userIdInitialized) return this._userId;
         
-        // Пытаемся получить из window.currentUser
-        if (window.currentUser?.id) {
-            this._userId = window.currentUser.id;
-            return this._userId;
-        }
-        
-        // Пытаемся получить из переданного userId
-        if (this.currentUserId) {
-            this._userId = this.currentUserId;
-            return this._userId;
-        }
-        
-        // Пытаемся получить из sessionStorage Supabase
         try {
-            const sessionKey = 'sb-xnbtizdqhpyvafftnlcb-auth-token';
-            const sessionData = sessionStorage.getItem(sessionKey);
-            if (sessionData) {
-                const parsed = JSON.parse(sessionData);
-                if (parsed?.user?.id) {
-                    this._userId = parsed.user.id;
-                    // Синхронизируем с window.currentUser
-                    window.currentUser = { id: this._userId };
-                    return this._userId;
-                }
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user?.id) {
+                this._userId = session.user.id;
+                window.currentUser = { id: this._userId };
+                this._userIdInitialized = true;
+                this._userIdInitAttempts = 0;
+                return this._userId;
             }
-        } catch(e) {}
+        } catch(e) {
+            console.warn('Ошибка получения сессии:', e);
+        }
         
-        // ТИХО возвращаем null, БЕЗ warn
+        this._userIdInitAttempts = (this._userIdInitAttempts || 0) + 1;
+        if (this._userIdInitAttempts >= 3) {
+            console.warn('❌ Не удалось инициализировать userId после 3 попыток');
+            this._userIdInitialized = true;
+        }
         return null;
     },
     
     _getStorageKey() {
-        const userId = this._getUserId();
-        // Возвращаем ключ БЕЗ ЛЮБЫХ warn/error/log
+        const userId = this._userId || window.currentUser?.id;
         return userId ? `corebox_ship_blueprints_${userId}` : 'corebox_ship_blueprints';
+    },
+    
+    _getDefenseStorageKey() {
+        const userId = this._userId || window.currentUser?.id;
+        return userId ? `corebox_defense_ship_${userId}` : 'corebox_defense_ship';
+    },
+    
+    _getUserId() {
+        if (this._userId) return this._userId;
+        if (window.currentUser?.id) {
+            this._userId = window.currentUser.id;
+            return this._userId;
+        }
+        if (this.currentUserId) {
+            this._userId = this.currentUserId;
+            return this._userId;
+        }
+        return null;
     },
     
     init(game, userId = null) {
         this.game = game;
         this._userId = userId || window.currentUser?.id || null;
         this.currentUserId = this._userId;
+        
+        if (!this._userId) {
+            this.initUserId().then(id => {
+                if (id) {
+                    this._userId = id;
+                    this.loadBlueprints();
+                    this.syncBlueprintsFromRust();
+                }
+            });
+        }
         
         this.loadBlueprints();
         
@@ -67,7 +92,6 @@ export const designModule = {
         
         this.syncBlueprintsFromRust();
         
-        // Только один тихий лог при успешной инициализации
         if (this._userId && this.computationalPower > 0) {
             console.log('📐 Модуль дизайна инициализирован');
         }
@@ -79,6 +103,7 @@ export const designModule = {
         this.currentUserId = null;
         this.computationalPower = 0;
         this.aiResearchBonus = 0;
+        this._userIdInitAttempts = 0;
         console.log('📐 Модуль дизайна очищен');
     },
     
@@ -102,9 +127,7 @@ export const designModule = {
             this.computationalPower = stats.computational_power || 0;
             
             this.saveBlueprints();
-        } catch(e) {
-            // Тихо игнорируем ошибки
-        }
+        } catch(e) {}
     },
     
     isBlueprintUnlocked(blueprintId) {
@@ -127,7 +150,8 @@ export const designModule = {
     },
     
     loadBlueprints() {
-        const saved = localStorage.getItem(this._getStorageKey());
+        const key = this._getStorageKey();
+        const saved = localStorage.getItem(key);
         if (saved) {
             try {
                 const parsed = JSON.parse(saved);
@@ -192,7 +216,8 @@ export const designModule = {
     getEffectiveCost(blueprintId) {
         const blueprint = this.blueprints.find(bp => bp.id === blueprintId);
         if (!blueprint) return Infinity;
-        return blueprint.designCost;
+        const bonus = this.aiResearchBonus;
+        return Math.max(1, blueprint.designCost - bonus);
     },
     
     canDesign(blueprintId) {
@@ -269,16 +294,36 @@ export const designModule = {
             const blueprintId = btn.dataset.blueprint;
             if (!blueprintId) return;
             
+            // ✅ Мгновенно блокируем кнопку, чтобы предотвратить повторные клики
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
             btn.classList.add('processing');
             btn.innerHTML = '⏳ РАЗРАБОТКА...';
             
             setTimeout(() => {
-                const result = this.handleDesignClick(blueprintId);
-                if (this.game && result.success) {
-                    this.computationalPower = this.game.get_computational_power();
-                    if (window.updateCraftTab) window.updateCraftTab();
+                try {
+                    const result = this.handleDesignClick(blueprintId);
+                    if (this.game && result.success) {
+                        this.computationalPower = this.game.get_computational_power();
+                        if (window.updateCraftTab) window.updateCraftTab();
+                    } else if (!result.success && window.showNotif) {
+                        window.showNotif(result.error, true);
+                    }
+                } catch (err) {
+                    console.error('Design panic:', err);
+                    if (window.showNotif) window.showNotif('Ошибка ядра при разработке', true);
+                } finally {
+                    // ✅ Восстанавливаем кнопку безопасно
+                    const currentBtn = container.querySelector(`.design-btn[data-blueprint="${blueprintId}"]`);
+                    if (currentBtn) {
+                        currentBtn.disabled = false;
+                        currentBtn.classList.remove('processing');
+                        // Восстанавливаем текст в зависимости от доступности
+                        const canDesignNow = this.canDesign(blueprintId);
+                        currentBtn.innerHTML = canDesignNow ? '📐 СОЗДАТЬ ЧЕРТЕЖ' : '❌ НЕДОСТАТОЧНО МОЩНОСТИ';
+                    }
+                    this.refreshUI(container);
                 }
-                this.refreshUI(container);
             }, 300);
         };
         
@@ -305,9 +350,7 @@ export const designModule = {
     renderDesignUI() {
         if (this.game && typeof this.game.get_computational_power === 'function') {
             const livePower = this.game.get_computational_power();
-            if (livePower > 0 || this.computationalPower === 0) {
-                this.computationalPower = livePower;
-            }
+            this.computationalPower = livePower;
         }
         
         const aiBonusText = this.aiResearchBonus > 0 
@@ -351,7 +394,7 @@ export const designModule = {
             if (hasBlueprint) {
                 html += `<div class="status-unlocked">✅ ЧЕРТЕЖ СОЗДАН</div>`;
             } else {
-                html += `<button class="design-btn ${canDesign ? '' : 'disabled'}" data-blueprint="${blueprint.id}" ${canDesign ? '' : 'disabled'}>
+                html += `<button class="design-btn ${canDesign ? '' : 'disabled'}" data-blueprint="${blueprint.id}" data-can-design="${canDesign}" ${canDesign ? '' : 'disabled'}>
                     ${canDesign ? '📐 СОЗДАТЬ ЧЕРТЕЖ' : '❌ НЕДОСТАТОЧНО МОЩНОСТИ'}
                 </button>`;
             }

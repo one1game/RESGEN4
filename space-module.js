@@ -1,6 +1,7 @@
-
+// space-module.js - ИСПРАВЛЕНАЯ ВЕРСИЯ (станции и планеты)
 import { supabase } from './supabase.js';
 import { GameBus, EVENTS } from './game-events.js';
+import { escapeHtml } from './utils.js';
 
 export const spaceModule = {
     game: null,
@@ -26,12 +27,55 @@ export const spaceModule = {
     _needsPlayerReload: false,
     _onlinePlayerIds: [],
     
-    // Нейтральные станции
     neutralStations: [],
     
-    // Статические данные для тултипа
     _tooltipElement: null,
     _tooltipTimeout: null,
+    
+    _minimapStars: null,
+    
+    _gameBusUnsubscribers: [],
+
+    // ========== CANVAS ENGINE ==========
+    _canvas: null,
+    _ctx: null,
+    _canvasW: 0,
+    _canvasH: 0,
+    _animFrameId: null,
+    _isRendering: false,
+
+    // Spatial hash
+    _spatialGrid: {},
+    _CELL_SIZE: 50,
+
+    // Emoji cache
+    _emojiCache: {},
+    _EMOJI_SIZES: [14, 16, 18, 20, 22, 24],
+
+    // Throttle / dirty flags
+    _renderDirty: false,
+    _lastMinimapRender: 0,
+    _lastFetchTime: 0,
+    _adaptiveLoadTimeout: null,
+    _hasMissionsLastCheck: 0,
+    _hasMissionsCache: false,
+
+    // Старые поля для совместимости
+    _renderThrottleTimer: null,
+    _lastRenderTime: 0,
+    _renderInterval: 100,
+    _maxPlayersOnMap: 60,
+    _lastPlayersHash: '',
+    _viewportBounds: { x1: 0, x2: 100, y1: 0, y2: 100 },
+    _visiblePlayers: [],
+    
+    // НОВЫЕ ПОЛЯ ДЛЯ РЕАЛЬНЫХ КООРДИНАТ
+    _mapSize: 1000,
+    _myMapPos: null,
+    _mapPosLoaded: false,
+    _viewportMapBounds: { x1: 0, y1: 0, x2: 1000, y2: 1000 },
+    _clusterMode: false,
+    _isDragging: false,
 
     PLANET_TYPES: {
         'earth':   { icon: '🌍', name: 'Землеподобная',  color: '#4aff9d' },
@@ -45,18 +89,29 @@ export const spaceModule = {
     PLANET_NAMES: ['Арктур', 'Сириус', 'Вега', 'Проксима', 'Антарес',
                    'Поллукс', 'Кастор', 'Альтаир', 'Денеб', 'Регул'],
 
-    // ========== ИНИЦИАЛИЗАЦИЯ ==========
+    setMyPosition(x, y) {
+        this._myMapPos = { x, y };
+        this._mapPosLoaded = true;
+        this._playerPositions[this.currentUser?.id] = { x, y };
+        this._markDirty();
+    },
+
     init(gameInstance, user) {
         this.game = gameInstance;
         this.currentUser = user;
         this._playerPositions = {};
 
         if (user?.id) {
-            this._playerPositions[user.id] = { x: 50, y: 50 };
+            this._playerPositions[user.id] = { x: 500, y: 500 };
         }
 
         this.loadPlanetsFromRust();
         this.loadNeutralStations();
+        
+        this._minimapStars = Array.from({length: 30}, () => ({
+            x: Math.random() * 100,
+            y: Math.random() * 100
+        }));
         
         if (!this._starsGenerated) {
             this.generateStars();
@@ -72,23 +127,36 @@ export const spaceModule = {
         this.setupTooltip();
 
         this._subscribeToEvents();
+        
+        this._initCanvas();
+        this._startRenderLoop();
 
         console.log('🌌 Space модуль инициализирован');
     },
 
+    // ========== ИСПРАВЛЕНА: станции в процентах (0-100) ==========
     loadNeutralStations() {
-        // Загрузка станций из конфига или создание дефолтных
         try {
             const saved = localStorage.getItem('corebox_neutral_stations');
             if (saved) {
-                this.neutralStations = JSON.parse(saved);
+                const parsed = JSON.parse(saved);
+                if (parsed.version === 2 && parsed.data) {
+                    this.neutralStations = parsed.data;
+                } else if (Array.isArray(parsed) && !parsed.version) {
+                    this.neutralStations = parsed;
+                    this.saveNeutralStations();
+                } else {
+                    this.neutralStations = parsed;
+                    this.saveNeutralStations();
+                }
             } else {
+                // ИСПРАВЛЕНО: координаты станций в процентах (0-100)
                 this.neutralStations = [
                     { id: 'st1', name: 'Станция Альфа', x: 25, y: 75, bonus_type: 'mining_boost', cost_trash: 50, cooldown_until: 0, icon: '🛸' },
                     { id: 'st2', name: 'Станция Бета', x: 75, y: 25, bonus_type: 'defense_boost', cost_trash: 80, cooldown_until: 0, icon: '🛸' },
                     { id: 'st3', name: 'Станция Гамма', x: 80, y: 80, bonus_type: 'power_boost', cost_trash: 100, cooldown_until: 0, icon: '🛸' }
                 ];
-                localStorage.setItem('corebox_neutral_stations', JSON.stringify(this.neutralStations));
+                this.saveNeutralStations();
             }
         } catch(e) {
             console.warn('Ошибка загрузки станций:', e);
@@ -97,7 +165,11 @@ export const spaceModule = {
 
     saveNeutralStations() {
         try {
-            localStorage.setItem('corebox_neutral_stations', JSON.stringify(this.neutralStations));
+            const toSave = {
+                version: 2,
+                data: this.neutralStations
+            };
+            localStorage.setItem('corebox_neutral_stations', JSON.stringify(toSave));
         } catch(e) {}
     },
 
@@ -147,19 +219,21 @@ export const spaceModule = {
     },
 
     _subscribeToEvents() {
-        GameBus.on(EVENTS.SHIP_MISSION_END, ({ ship, resources }) => {
+        const unsub1 = GameBus.on(EVENTS.SHIP_MISSION_END, ({ ship, missionId }) => {
             this.loadPlanetsFromRust();
-            this.renderFlightLines();
+            this._markDirty();
             this.renderPlanets();
         });
         
-        GameBus.on(EVENTS.FLEET_UPDATED, () => {
-            this.renderFlightLines();
+        const unsub2 = GameBus.on(EVENTS.FLEET_UPDATED, () => {
+            this._markDirty();
         });
         
-        GameBus.on(EVENTS.STATS_UPDATED, (stats) => {
+        const unsub3 = GameBus.on(EVENTS.STATS_UPDATED, (stats) => {
             this.updateStatusBar(stats);
         });
+        
+        this._gameBusUnsubscribers = [unsub1, unsub2, unsub3];
     },
 
     _startMissionCheckInterval() {
@@ -179,7 +253,8 @@ export const spaceModule = {
                 for (const mission of missions) {
                     const remaining = mission.remaining_ms;
                     
-                    if (remaining <= 0 && mission.status === 'flying') {
+                    if (remaining <= 0 && mission.status === 'flying' && !mission._processing) {
+                        mission._processing = true;
                         console.log(`✅ Завершение миссии ${mission.id} через Rust`);
                         
                         try {
@@ -197,11 +272,6 @@ export const spaceModule = {
                                         window.showNotif?.(`🪐 ${gained} с планеты!`, false);
                                     }
                                 }
-                            } else {
-                                if (mission.coal_taken > 0) this.game.add_resource('coal', mission.coal_taken);
-                                if (mission.plasma_taken > 0) this.game.add_resource('plasma', mission.plasma_taken);
-                                if (mission.ore_taken > 0) this.game.add_resource('ore', mission.ore_taken);
-                                window.addToLog?.(`📦 Миссия завершена: +${mission.coal_taken}🪨 +${mission.plasma_taken}⚡ +${mission.ore_taken}⛏️`, 'success');
                             }
                         } catch(e) {
                             console.warn('Ошибка завершения миссии:', e);
@@ -237,7 +307,8 @@ export const spaceModule = {
                     window.fleetModule._renderFleetTab();
                 }
                 
-                this.renderFlightLines();
+                this._markDirty();
+                this._hasMissionsLastCheck = 0;
                 
             } catch(e) {
                 console.warn('Ошибка в missionCheckInterval:', e);
@@ -245,7 +316,6 @@ export const spaceModule = {
         }, 2000);
     },
 
-    // ========== ЗУМИРОВАНИЕ КАРТЫ ==========
     initMapZoom() {
         const starMap = document.getElementById('space-star-map');
         const viewport = document.getElementById('space-map-viewport');
@@ -267,6 +337,10 @@ export const spaceModule = {
         const applyTransform = () => {
             viewport.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
             viewport.style.transformOrigin = '0 0';
+            this._scale = scale;
+            this._translateX = translateX;
+            this._translateY = translateY;
+            this._markDirty();
         };
 
         const clampTranslate = () => {
@@ -298,6 +372,7 @@ export const spaceModule = {
         starMap.addEventListener('mousedown', (e) => {
             if (e.target.closest('.space-planet, .space-station, .other-player-marker, #space-base-planet, button')) return;
             isDragging = true;
+            this._isDragging = true;
             lastX = e.clientX;
             lastY = e.clientY;
             starMap.style.cursor = 'grabbing';
@@ -313,6 +388,7 @@ export const spaceModule = {
         });
         window.addEventListener('mouseup', () => {
             isDragging = false;
+            this._isDragging = false;
             starMap.style.cursor = 'grab';
         });
 
@@ -325,6 +401,7 @@ export const spaceModule = {
             } else if (e.touches.length === 1) {
                 if (e.target.closest('.space-planet, .space-station, .other-player-marker, #space-base-planet, button')) return;
                 isDragging = true;
+                this._isDragging = true;
                 lastX = e.touches[0].clientX;
                 lastY = e.touches[0].clientY;
             }
@@ -360,6 +437,7 @@ export const spaceModule = {
 
         starMap.addEventListener('touchend', () => {
             isDragging = false;
+            this._isDragging = false;
             lastPinchDist = null;
         });
 
@@ -393,7 +471,6 @@ export const spaceModule = {
         });
     },
 
-    // ВИЗУАЛ КАРТА-V2: генерация звёзд с параллаксом
     generateStars() {
         const container = document.getElementById('space-stars-layer');
         if (!container) return;
@@ -402,7 +479,6 @@ export const spaceModule = {
         
         container.innerHTML = '';
         
-        // Создаём три слоя для параллакса
         const layers = [
             { count: 150, sizeBase: 0.8, sizeVar: 0.5, opacityBase: 0.3, speed: 0.3, className: 'stars-layer-slow' },
             { count: 100, sizeBase: 1.2, sizeVar: 0.8, opacityBase: 0.5, speed: 0.6, className: 'stars-layer-medium' },
@@ -412,7 +488,7 @@ export const spaceModule = {
         const margin = 0.15;
         const totalWidth = 1 + margin * 2;
         
-        layers.forEach((layer, idx) => {
+        layers.forEach((layer) => {
             const layerDiv = document.createElement('div');
             layerDiv.className = layer.className;
             layerDiv.style.cssText = `
@@ -450,7 +526,6 @@ export const spaceModule = {
             container.appendChild(layerDiv);
         });
         
-        // ВИЗУАЛ КАРТА-V2: параллакс при движении мыши
         const starMap = document.getElementById('space-star-map');
         if (starMap) {
             starMap.addEventListener('mousemove', (e) => {
@@ -471,22 +546,21 @@ export const spaceModule = {
         console.log('✨ Звёзды сгенерированы с параллаксом');
     },
 
-    // БАГ КАРТА-1: детерминированная позиция игрока на основе ID
     _getPlayerPosition(userId) {
-        if (!this._playerPositions[userId]) {
-            let hash = 0;
-            for (let i = 0; i < userId.length; i++) {
-                hash = ((hash << 5) - hash) + userId.charCodeAt(i);
-                hash |= 0;
-            }
-            const goldenAngle = 2.399963;
-            const angle = Math.abs(hash % 100) * goldenAngle;
-            const r = 15 + (Math.abs(hash % 5)) * 9;
-            this._playerPositions[userId] = {
-                x: Math.max(8, Math.min(92, 50 + Math.cos(angle) * r)),
-                y: Math.max(8, Math.min(92, 50 + Math.sin(angle) * r))
-            };
+        if (this._playerPositions[userId]) {
+            return this._playerPositions[userId];
         }
+        let hash = 0;
+        for (let i = 0; i < userId.length; i++) {
+            hash = ((hash << 5) - hash) + userId.charCodeAt(i);
+            hash |= 0;
+        }
+        let hash2 = hash ^ (hash >>> 16);
+        hash2 = Math.imul(hash2, 0x45d9f3b);
+        hash2 ^= (hash2 >>> 16);
+        const x = 100 + (Math.abs(hash) % 800);
+        const y = 100 + (Math.abs(hash2) % 800);
+        this._playerPositions[userId] = { x, y };
         return this._playerPositions[userId];
     },
 
@@ -497,13 +571,13 @@ export const spaceModule = {
         this.loadPlanetsFromRust();
         this.renderPlanets();
         this.renderPlayers();
-        this.renderFlightLines();
         this.renderMinimap();
         this.updateStatusBar();
         
         this.syncFromGame();
         
         this._reconnectMultiplayer();
+        this._startRenderLoop();
         
         if (this._needsPlayerReload) {
             this._needsPlayerReload = false;
@@ -515,30 +589,8 @@ export const spaceModule = {
             researchBtn._handlerSet = true;
             researchBtn.onclick = () => this.startResearch();
         }
-    },
-
-    _reconnectMultiplayer() {
-        if (!this.currentUser) return;
-        if (this._multiplayerChannel) {
-            this._multiplayerChannel.unsubscribe();
-        }
-        this._multiplayerChannel = supabase
-            .channel(`space:${this.currentUser.id}`)
-            .on('presence', { event: 'sync' }, () => {
-                const state = this._multiplayerChannel.presenceState();
-                this._onlinePlayerIds = Object.keys(state);
-                this.renderPlayers();
-                this.renderPlayersOnMap();
-            })
-            .subscribe(async (status) => {
-                if (status === 'SUBSCRIBED') {
-                    await this._multiplayerChannel.track({
-                        user_id: this.currentUser.id,
-                        online_at: new Date().toISOString(),
-                        username: this.currentUser.user_metadata?.username || 'Игрок'
-                    });
-                }
-            });
+        
+        this._markDirty();
     },
 
     onTabDeactivated() {
@@ -558,6 +610,14 @@ export const spaceModule = {
         if (this._missionTimerInterval) {
             clearInterval(this._missionTimerInterval);
             this._missionTimerInterval = null;
+        }
+        if (this._adaptiveLoadTimeout) {
+            clearTimeout(this._adaptiveLoadTimeout);
+            this._adaptiveLoadTimeout = null;
+        }
+        if (this._animFrameId) {
+            cancelAnimationFrame(this._animFrameId);
+            this._animFrameId = null;
         }
     },
 
@@ -681,14 +741,12 @@ export const spaceModule = {
         }, 1500);
     },
 
-    // ВИЗУАЛ КАРТА-V7: анимация открытия планеты
     renderPlanets() {
         const layer = document.getElementById('space-objects-layer');
         if (!layer) return;
 
         layer.querySelectorAll('.space-planet').forEach(el => el.remove());
 
-        // БАГ КАРТА-2: выносим загрузку миссий за пределы цикла
         let activeMissions = [];
         try {
             activeMissions = JSON.parse(this.game.get_active_planet_missions());
@@ -701,7 +759,6 @@ export const spaceModule = {
                                    (planet.resources_remaining?.ore || 0);
             const isExhausted = totalRemaining === 0;
             
-            // ВИЗУАЛ КАРТА-V7: анимация новой планеты
             const isNew = planet.discovered_at && (Date.now() - planet.discovered_at < 3000);
             const newClass = isNew ? 'planet-new' : '';
             
@@ -710,6 +767,7 @@ export const spaceModule = {
             
             const el = document.createElement('div');
             el.className = `space-planet ${newClass}`;
+            // Планеты в процентах (0-100) — правильно
             el.style.cssText = `
                 position:absolute;left:${planet.x}%;top:${planet.y}%;
                 transform:translate(-50%,-50%);text-align:center;cursor:pointer;
@@ -719,7 +777,7 @@ export const spaceModule = {
             
             el.innerHTML = `
                 <span style="font-size:22px;">${cfg.icon}</span>
-                <div style="font-size:9px;color:${cfg.color};margin-top:2px;">${this.escapeHtml(planet.name)}</div>
+                <div style="font-size:9px;color:${cfg.color};margin-top:2px;">${escapeHtml(planet.name)}</div>
                 ${missionProgressHtml}
                 ${isExhausted ? '<div style="font-size:7px;color:#f88;">ИСЧЕРПАНА</div>' : ''}
             `;
@@ -731,6 +789,7 @@ export const spaceModule = {
         this.renderMinimap();
     },
 
+    // ========== ИСПРАВЛЕНА: станции в процентах ==========
     renderStations() {
         const layer = document.getElementById('space-objects-layer');
         if (!layer) return;
@@ -743,6 +802,7 @@ export const spaceModule = {
             
             const el = document.createElement('div');
             el.className = 'space-station';
+            // ИСПРАВЛЕНО: station.x и station.y уже в процентах (0-100)
             el.style.cssText = `
                 position:absolute;left:${station.x}%;top:${station.y}%;
                 transform:translate(-50%,-50%);text-align:center;cursor:pointer;
@@ -752,7 +812,7 @@ export const spaceModule = {
             
             el.innerHTML = `
                 <span style="font-size:24px;">${station.icon}</span>
-                <div style="font-size:8px;color:#ffaa44;margin-top:2px;">${this.escapeHtml(station.name)}</div>
+                <div style="font-size:8px;color:#ffaa44;margin-top:2px;">${escapeHtml(station.name)}</div>
                 ${isOnCooldown ? '<div style="font-size:7px;color:#888;">ОСТЫВАЕТ</div>' : ''}
             `;
             el.onclick = () => this.showStationInfo(station);
@@ -773,6 +833,11 @@ export const spaceModule = {
             default: bonusText = '📦 Редкий бонус';
         }
         
+        const remaining = station.cooldown_until - now;
+        const cooldownDisplay = remaining < 60000 
+            ? `${Math.ceil(remaining / 1000)} сек` 
+            : `${Math.ceil(remaining / 60000)} мин`;
+        
         const popup = document.createElement('div');
         popup.className = 'station-popup';
         popup.style.cssText = `
@@ -786,12 +851,12 @@ export const spaceModule = {
         popup.innerHTML = `
             <div style="font-size:28px;text-align:center;">${station.icon}</div>
             <div style="font-size:16px;font-weight:bold;color:#ffaa44;text-align:center;margin-bottom:8px;">
-                ${this.escapeHtml(station.name)}
+                ${escapeHtml(station.name)}
             </div>
             <div style="font-size:11px;margin-bottom:12px;background:rgba(255,255,255,0.05);padding:8px;border-radius:8px;">
                 <div>🎁 Бонус: ${bonusText}</div>
                 <div>♻️ Стоимость: ${station.cost_trash} мусора</div>
-                ${isOnCooldown ? `<div style="color:#f88;margin-top:8px;">⏱️ Кулдаун: ${Math.ceil((station.cooldown_until - now) / 60000)} мин</div>` : ''}
+                ${isOnCooldown ? `<div style="color:#f88;margin-top:8px;">⏱️ Кулдаун: ${cooldownDisplay}</div>` : ''}
             </div>
             ${!isOnCooldown ? `
             <button id="station-btn-trade" style="width:100%;padding:10px;background:rgba(255,170,0,0.15);
@@ -860,7 +925,7 @@ export const spaceModule = {
             return;
         }
         
-        this.game.subtract_resource('trash', station.cost_trash);
+        let bonusApplied = true;
         
         switch(station.bonus_type) {
             case 'mining_boost':
@@ -879,13 +944,18 @@ export const spaceModule = {
                 this.game.add_power(50);
                 window.addToLog?.(`🎁 Станция ${station.name}: +50 вычислительной мощности!`, 'success');
                 break;
+            default:
+                window.showNotif?.('❌ Неизвестный тип бонуса', true);
+                bonusApplied = false;
         }
         
-        station.cooldown_until = Date.now() + 5 * 60 * 1000; // 5 минут кулдаун
-        this.saveNeutralStations();
-        this.renderStations();
-        
-        window.showNotif?.(`✅ Бонус от ${station.name} активирован!`, false);
+        if (bonusApplied) {
+            this.game.subtract_resource('trash', station.cost_trash);
+            station.cooldown_until = Date.now() + 5 * 60 * 1000;
+            this.saveNeutralStations();
+            this.renderStations();
+            window.showNotif?.(`✅ Бонус от ${station.name} активирован!`, false);
+        }
     },
 
     _getActiveMissionForPlanet(planetId) {
@@ -912,7 +982,6 @@ export const spaceModule = {
         `;
     },
 
-    // БАГ КАРТА-5: исчерпанная планета показывает информационный блок
     showPlanetInfo(planet) {
         const cfg = this.PLANET_TYPES[planet.planet_type] ?? {};
         const rem = planet.resources_remaining || planet.resources || {};
@@ -942,11 +1011,10 @@ export const spaceModule = {
             box-shadow:0 0 30px rgba(74,255,157,0.2);
         `;
         
-        // БАГ КАРТА-5: для исчерпанных планет — информационный блок вместо кнопки
         popup.innerHTML = `
             <div style="font-size:28px;text-align:center;">${cfg.icon || '🪐'}</div>
             <div style="font-size:16px;font-weight:bold;color:${cfg.color};text-align:center;margin-bottom:8px;">
-                ${this.escapeHtml(planet.name)} — ${cfg.name || planet.planet_type}
+                ${escapeHtml(planet.name)} — ${cfg.name || planet.planet_type}
             </div>
             <div style="font-size:11px;margin-bottom:12px;background:rgba(255,255,255,0.05);padding:8px;border-radius:8px;">
                 <div>🪨 Уголь: <b>${rem.coal || 0}</b></div>
@@ -1027,8 +1095,12 @@ export const spaceModule = {
                 ship.onMission = true;
                 ship.currentMissionId = result.mission.id;
                 ship.targetPlanetId = planet.id;
-                ship.missionReturnsAt = result.mission.returns_at;
-                ship.missionArrivesAt = result.mission.arrives_at;
+                ship.missionReturnsAt = typeof result.mission.returns_at === 'string'
+                    ? new Date(result.mission.returns_at).getTime()
+                    : result.mission.returns_at;
+                ship.missionArrivesAt = typeof result.mission.arrives_at === 'string'
+                    ? new Date(result.mission.arrives_at).getTime()
+                    : result.mission.arrives_at;
                 ship.shipType = shipType;
             }
             
@@ -1041,7 +1113,12 @@ export const spaceModule = {
             
             GameBus.emit(EVENTS.SHIP_MISSION_START, { ship: availableShip, planet, mission: result.mission });
             
-            window.showNotif?.(`🚀 Корабль отправлен к ${planet.name}! Забрано: 🪨${result.mission.coal} ⚡${result.mission.plasma} ⛏️${result.mission.ore}`, false);
+            const taken = result.mission.resources_taken || {
+                coal: result.mission.coal ?? 0,
+                plasma: result.mission.plasma ?? 0,
+                ore: result.mission.ore ?? 0
+            };
+            window.showNotif?.(`🚀 Корабль отправлен к ${planet.name}! Забрано: 🪨${taken.coal || 0} ⚡${taken.plasma || 0} ⛏️${taken.ore || 0}`, false);
         } else {
             window.showNotif?.(`❌ ${result.error}`, true);
         }
@@ -1078,56 +1155,22 @@ export const spaceModule = {
         try {
             const missionsJson = this.game.get_active_planet_missions();
             const missions = JSON.parse(missionsJson);
-            let needsRefresh = false;
-            let needsFleetSave = false;
             
             const now = Date.now();
             
             for (const mission of missions) {
-                const remaining = mission.remaining_ms;
-                
-                if (remaining <= 0 && mission.status === 'flying') {
-                    console.log(`✅ Планетарная миссия ${mission.id} завершена, освобождаем корабль`);
-                    
-                    const ship = window.fleetModule?.ships.find(s => s.id === mission.ship_id);
-                    if (ship && ship.onMission) {
-                        ship.onMission = false;
-                        ship.currentMissionId = null;
-                        ship.targetPlanetId = null;
-                        ship.missionReturnsAt = null;
-                        ship.missionArrivesAt = null;
-                        needsFleetSave = true;
-                        needsRefresh = true;
-                        
-                        console.log(`🆓 Корабль ${ship.name} освобождён (миссия завершена)`);
-                        GameBus.emit(EVENTS.SHIP_MISSION_END, { ship, missionId: mission.id });
-                    }
-                    
-                    this.loadPlanetsFromRust();
-                    
-                    if (window._refreshFleetWithMissions) {
-                        window._refreshFleetWithMissions();
-                    }
-                } else if (remaining <= 30000 && remaining > 0 && mission.status === 'flying') {
+                if (mission.remaining_ms <= 30000 && mission.remaining_ms > 0 && mission.status === 'flying') {
                     if (!mission._warningShown) {
                         mission._warningShown = true;
                         const ship = window.fleetModule?.ships.find(s => s.id === mission.ship_id);
                         if (ship) {
-                            window.showNotif?.(`⚠️ Корабль "${ship.name}" возвращается через ${Math.floor(remaining / 1000)} сек`, false);
+                            window.showNotif?.(`⚠️ Корабль "${ship.name}" возвращается через ${Math.floor(mission.remaining_ms / 1000)} сек`, false);
                         }
                     }
                 }
             }
             
-            if (needsFleetSave && window.fleetModule) {
-                window.fleetModule.saveFleet();
-            }
-            
-            if (needsRefresh && window.fleetModule?._renderFleetTab) {
-                window.fleetModule._renderFleetTab();
-            }
-            
-            this.renderFlightLines();
+            this._markDirty();
         } catch(e) {
             console.warn('Ошибка обновления таймеров миссий:', e);
         }
@@ -1148,7 +1191,7 @@ export const spaceModule = {
                     ship.targetPlanetId = mission.planet_id;
                     ship.missionReturnsAt = mission.returns_at;
                     ship.missionArrivesAt = mission.arrives_at;
-                    ship.shipType = 'cargo';
+                    ship.shipType = mission.ship_type || 'cargo';
                     restored++;
                 }
             });
@@ -1163,88 +1206,115 @@ export const spaceModule = {
         }
     },
 
-    // БАГ #49: setupMultiplayer с сохранением дескриптора интервала
     setupMultiplayer() {
         this._forceLoadPlayers();
         
-        if (this.multiplayerInterval) clearInterval(this.multiplayerInterval);
-        this.multiplayerInterval = setInterval(() => this.loadMultiplayerPlayers(), 30000);
+        const adaptiveLoad = () => {
+            if (!this.isTabActive) {
+                this._adaptiveLoadTimeout = setTimeout(adaptiveLoad, 60000);
+                return;
+            }
+            this.loadMultiplayerPlayers().then(() => {
+                const hasOnline = this.otherPlayers.some(p => this.isOnline(p));
+                this._adaptiveLoadTimeout = setTimeout(adaptiveLoad, hasOnline ? 15000 : 60000);
+            });
+        };
+        this._adaptiveLoadTimeout = setTimeout(adaptiveLoad, 5000);
         
         if (this._missionTimerInterval) clearInterval(this._missionTimerInterval);
         this._missionTimerInterval = setInterval(() => this.updateMissionTimers(), 1000);
         
-        setTimeout(() => this._restorePlanetMissions(), 2000);
+        setTimeout(() => {
+            const checkReady = () => {
+                if (window.fleetModule && !window.fleetModule.isInitializing) {
+                    this._restorePlanetMissions();
+                } else {
+                    setTimeout(checkReady, 500);
+                }
+            };
+            checkReady();
+        }, 500);
     },
 
-    // БАГ КАРТА-4: Supabase Presence для онлайна
     setupPresence() {
         if (!this.currentUser) return;
-        
-        if (this._presenceChannel) {
-            this._presenceChannel.unsubscribe();
-        }
-        
-        this._presenceChannel = supabase.channel('online_players', {
-            config: { presence: { key: this.currentUser.id } }
-        });
-        
-        this._presenceChannel
-            .on('presence', { event: 'sync' }, () => {
-                const state = this._presenceChannel.presenceState();
-                this._onlinePlayerIds = Object.keys(state);
-                this.renderPlayers();
-                this.renderPlayersOnMap();
-            })
-            .subscribe(async (status) => {
-                if (status === 'SUBSCRIBED') {
-                    await this._presenceChannel.track({
-                        userId: this.currentUser.id,
-                        username: this.currentUser.user_metadata?.username || 'Игрок',
-                        online_at: new Date().toISOString()
-                    });
-                }
-            });
+        this._reconnectMultiplayer();
     },
 
-    // БАГ КАРТА-6: _forceLoadPlayers проверяет isTabActive
-    async _forceLoadPlayers() {
+    async _fetchAndApplyPlayers() {
         if (!this.currentUser) return;
-        if (!this.isTabActive) {
-            this._needsPlayerReload = true;
+
+        const bounds = this._viewportMapBounds;
+        const qx1 = Math.max(0,    bounds.x1 - 200);
+        const qy1 = Math.max(0,    bounds.y1 - 200);
+        const qx2 = Math.min(1000, bounds.x2 + 200);
+        const qy2 = Math.min(1000, bounds.y2 + 200);
+
+        const [viewportResult, topResult] = await Promise.all([
+            supabase.rpc('get_players_in_viewport', {
+                p_x1: qx1, p_y1: qy1,
+                p_x2: qx2, p_y2: qy2,
+                p_exclude_user: this.currentUser.id,
+                p_limit: 150
+            }),
+            supabase
+                .from('game_saves')
+                .select('user_id, map_x, map_y, total_mined, neuro_evolution, nights_survived, computational_power, last_seen')
+                .neq('user_id', this.currentUser.id)
+                .not('map_x', 'is', null)
+                .order('total_mined', { ascending: false })
+                .limit(50),
+        ]);
+
+        const merged = new Map();
+        [...(viewportResult.data ?? []), ...(topResult.data ?? [])].forEach(s => {
+            if (s.map_x != null && s.user_id) merged.set(s.user_id, s);
+        });
+
+        if (merged.size === 0) return;
+
+        const ids = Array.from(merged.keys());
+        const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, username')
+            .in('id', ids);
+
+        const profileMap = {};
+        (profiles ?? []).forEach(p => { profileMap[p.id] = p.username; });
+
+        this.otherPlayers = ids.map(id => {
+            const s = merged.get(id);
+            return { ...s, username: profileMap[id] ?? 'Игрок' };
+        });
+
+        for (const player of this.otherPlayers) {
+            if (player.map_x != null && player.map_y != null) {
+                this._playerPositions[player.user_id] = {
+                    x: player.map_x,
+                    y: player.map_y,
+                };
+            }
+        }
+
+        const currentIds = new Set(ids);
+        for (const id in this._playerPositions) {
+            if (id !== this.currentUser?.id && !currentIds.has(id)) {
+                delete this._playerPositions[id];
+            }
+        }
+
+        this._rebuildSpatialGrid();
+        this.renderPlayers();
+        this._markDirty();
+    },
+
+    async _forceLoadPlayers() {
+        if (!this.currentUser || !this.isTabActive) {
+            this._needsPlayerReload = !this.isTabActive;
             return;
         }
-        
         try {
-            const { data: saves, error } = await supabase
-                .from('game_saves')
-                .select('user_id, coal, ore, chips, plasma, trash, total_mined, neuro_evolution, nights_survived, computational_power, last_seen')
-                .order('total_mined', { ascending: false })
-                .limit(50);
-
-            if (error) throw error;
-
-            const { data: profiles } = await supabase
-                .from('profiles')
-                .select('id, username');
-
-            const profileMap = {};
-            (profiles ?? []).forEach(p => { profileMap[p.id] = p.username; });
-
-            this.otherPlayers = (saves ?? [])
-                .filter(s => s.user_id !== this.currentUser.id)
-                .map(s => ({ ...s, username: profileMap[s.user_id] ?? 'Игрок' }));
-
-            // БАГ КАРТА-1: очищаем позиции для удалённых игроков
-            const currentIds = new Set(this.otherPlayers.map(p => p.user_id));
-            for (const id in this._playerPositions) {
-                if (id !== this.currentUser?.id && !currentIds.has(id)) {
-                    delete this._playerPositions[id];
-                }
-            }
-
-            this.renderPlayers();
-            this.renderPlayersOnMap();
-            this.renderFlightLines();
+            await this._fetchAndApplyPlayers();
         } catch(e) {
             console.warn('Ошибка первоначальной загрузки игроков:', e);
         }
@@ -1255,35 +1325,7 @@ export const spaceModule = {
         if (!this.isTabActive) return;
         
         try {
-            const { data: saves, error } = await supabase
-                .from('game_saves')
-                .select('user_id, coal, ore, chips, plasma, trash, total_mined, neuro_evolution, nights_survived, computational_power, last_seen')
-                .order('total_mined', { ascending: false })
-                .limit(50);
-
-            if (error) throw error;
-
-            const { data: profiles } = await supabase
-                .from('profiles')
-                .select('id, username');
-
-            const profileMap = {};
-            (profiles ?? []).forEach(p => { profileMap[p.id] = p.username; });
-
-            this.otherPlayers = (saves ?? [])
-                .filter(s => s.user_id !== this.currentUser.id)
-                .map(s => ({ ...s, username: profileMap[s.user_id] ?? 'Игрок' }));
-
-            const currentIds = new Set(this.otherPlayers.map(p => p.user_id));
-            for (const id in this._playerPositions) {
-                if (id !== this.currentUser?.id && !currentIds.has(id)) {
-                    delete this._playerPositions[id];
-                }
-            }
-
-            this.renderPlayers();
-            this.renderPlayersOnMap();
-            this.renderFlightLines();
+            await this._fetchAndApplyPlayers();
         } catch(e) {
             console.warn('Ошибка загрузки игроков:', e);
         }
@@ -1315,13 +1357,11 @@ export const spaceModule = {
                 display:flex;align-items:center;gap:8px;padding:6px 0;
                 border-bottom:1px solid rgba(255,255,255,0.05);
                 cursor:pointer;
-            " onmouseenter="window.spaceModule?.showPlayerTooltip('${this.escapeHtml(p.user_id)}', event)"
-              onmouseleave="window.spaceModule?.scheduleTooltipHide()"
-              onclick="window.spaceModule?.showPlayerInfo('${this.escapeHtml(p.user_id)}')">
+            " data-player-id="${escapeHtml(p.user_id)}" data-player-username="${escapeHtml(p.username)}">
                 <span style="font-size:14px;">${this.isOnline(p) ? '🟢' : '⚫'}</span>
                 <div style="flex:1;min-width:0;">
                     <div style="font-size:12px;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                        ${this.escapeHtml(p.username)}
+                        ${escapeHtml(p.username)}
                     </div>
                     <div style="font-size:10px;opacity:0.5;">
                         ⛏️ ${(p.total_mined||0).toLocaleString()} · 🧠 Ур.${p.neuro_evolution||0}
@@ -1330,10 +1370,18 @@ export const spaceModule = {
             </div>
         `).join('');
         
-        this.renderFlightLines();
+        list.querySelectorAll('[data-player-id]').forEach(el => {
+            const playerId = el.dataset.playerId;
+            const fresh = el.cloneNode(true);
+            el.parentNode.replaceChild(fresh, el);
+            fresh.addEventListener('mouseenter', (e) => this.showPlayerTooltip(playerId, e));
+            fresh.addEventListener('mouseleave', () => this.scheduleTooltipHide());
+            fresh.addEventListener('click', () => this.showPlayerInfo(playerId));
+        });
+        
+        this._markDirty();
     },
 
-    // ВИЗУАЛ КАРТА-V4: кастомный тултип
     showPlayerTooltip(userId, event) {
         const player = this.otherPlayers.find(p => p.user_id === userId);
         if (!player) return;
@@ -1343,7 +1391,7 @@ export const spaceModule = {
         
         const tooltipContent = `
             <div class="tooltip-inner">
-                <div class="tooltip-name" style="color:${isOnline ? '#4aff9d' : '#888'}">🏰 ${this.escapeHtml(player.username)}</div>
+                <div class="tooltip-name" style="color:${isOnline ? '#4aff9d' : '#888'}">🏰 ${escapeHtml(player.username)}</div>
                 <div>🧠 Нейро: Ур.${player.neuro_evolution || 0} | ⛏️ ${(player.total_mined || 0).toLocaleString()} добыто</div>
                 <div>🛡️ Защитник: ${player.has_defense_ship ? `Да (ур.${player.defense_ship_level})` : 'Нет'}</div>
                 <div>⏱️ ${isOnline ? '🟢 Онлайн' : `⚫ Оффлайн · ${lastSeenText}`}</div>
@@ -1353,7 +1401,6 @@ export const spaceModule = {
         this.showTooltip(tooltipContent, event.clientX, event.clientY);
     },
 
-    // ВИЗУАЛ КАРТА-V3: иконки игроков по уровню нейро
     getPlayerIcon(neuroEvolution) {
         const evo = neuroEvolution || 0;
         if (evo >= 10) return { icon: '👁️', size: 24, color: '#ff44ff', glow: true };
@@ -1364,224 +1411,537 @@ export const spaceModule = {
         return                { icon: '🏚️', size: 14, color: '#888',    glow: false };
     },
 
-    // ВИЗУАЛ КАРТА-V5: зоны влияния
-    renderInfluenceZone() {
-        const svg = document.getElementById('space-flight-svg');
-        if (!svg) return;
+    _initCanvas() {
+        const starMap = document.getElementById('space-star-map');
+        const canvas = document.getElementById('space-main-canvas');
+        if (!canvas || !starMap) return;
+
+        this._canvas = canvas;
+        this._ctx = canvas.getContext('2d');
+        this._resizeCanvas();
+
+        if (window.ResizeObserver) {
+            this._resizeObserver = new ResizeObserver(() => this._resizeCanvas());
+            this._resizeObserver.observe(starMap);
+        }
+
+        canvas.style.pointerEvents = 'none';
         
-        const existing = svg.querySelector('.influence-zone');
-        if (existing) existing.remove();
+        starMap.addEventListener('click', (e) => {
+            if (e.target.closest('.space-planet, .space-station, #space-base-planet, button')) return;
+            this._handleCanvasClick(e);
+        }, true);
         
-        const myPos = this._getMyPlanetPosition();
-        if (!myPos) return;
+        starMap.addEventListener('mousemove', (e) => {
+            if (e.target.closest('.space-planet, .space-station, #space-base-planet, button')) {
+                this.hideTooltip();
+                return;
+            }
+            this._handleCanvasHover(e);
+        });
         
-        const neuroLevel = this._lastStats?.neuro_evolution || 0;
-        const radius = 8 + neuroLevel * 1.5;
-        
-        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle.classList.add('influence-zone');
-        circle.setAttribute('cx', `${myPos.x}%`);
-        circle.setAttribute('cy', `${myPos.y}%`);
-        circle.setAttribute('r', `${radius}%`);
-        circle.setAttribute('fill', 'rgba(74,255,157,0.04)');
-        circle.setAttribute('stroke', 'rgba(74,255,157,0.15)');
-        circle.setAttribute('stroke-width', '1');
-        circle.setAttribute('stroke-dasharray', '6 3');
-        
-        svg.insertBefore(circle, svg.firstChild);
+        starMap.addEventListener('mouseleave', () => this.hideTooltip());
     },
 
-    renderPlayersOnMap() {
-        const layer = document.getElementById('space-objects-layer');
-        if (!layer) return;
-        layer.querySelectorAll('.other-player-marker').forEach(el => el.remove());
+    _resizeCanvas() {
+        const starMap = document.getElementById('space-star-map');
+        if (!starMap || !this._canvas) return;
+        const w = starMap.clientWidth;
+        const h = starMap.clientHeight;
+        if (w === this._canvasW && h === this._canvasH) return;
+        this._canvas.width = w;
+        this._canvas.height = h;
+        this._canvasW = w;
+        this._canvasH = h;
+        this._emojiCache = {};
+    },
 
-        const getTimeAgo = (isoString) => {
-            if (!isoString) return 'давно';
-            const diff = Date.now() - new Date(isoString).getTime();
-            const mins = Math.floor(diff / 60000);
-            if (mins < 60) return `${mins} мин назад`;
-            const hours = Math.floor(mins / 60);
-            if (hours < 24) return `${hours} ч назад`;
-            return `${Math.floor(hours / 24)} дн назад`;
+    _startRenderLoop() {
+        if (this._animFrameId) return;
+        const loop = () => {
+            this._animFrameId = requestAnimationFrame(loop);
+            if (!this.isTabActive) return;
+            if (!this._renderDirty && !this._hasMissions()) return;
+            this._renderFrame();
+        };
+        this._animFrameId = requestAnimationFrame(loop);
+    },
+
+    _hasMissions() {
+        const now = Date.now();
+        if (now - (this._hasMissionsLastCheck || 0) < 2000) {
+            return this._hasMissionsCache ?? false;
+        }
+        this._hasMissionsLastCheck = now;
+        try {
+            const missions = JSON.parse(this.game?.get_active_planet_missions?.() ?? '[]');
+            this._hasMissionsCache = missions.some(m => m.status === 'flying');
+        } catch {
+            this._hasMissionsCache = false;
+        }
+        return this._hasMissionsCache;
+    },
+
+    _markDirty() {
+        this._renderDirty = true;
+    },
+
+    _renderFrame() {
+        this._renderDirty = false;
+        if (!this._ctx || !this._canvasW) return;
+
+        const ctx = this._ctx;
+        ctx.clearRect(0, 0, this._canvasW, this._canvasH);
+
+        this._updateViewportBounds();
+        this._drawInfluenceZone(ctx);
+        this._drawFlightLines(ctx);
+        
+        const scale = this._scale || 1;
+        this._clusterMode = scale < 0.8 && this.otherPlayers.length > 30;
+        
+        if (this._clusterMode) {
+            this._drawPlayerClusters(ctx);
+            this._drawEdgeClusters(ctx, this._canvasW, this._canvasH);
+        } else {
+            this._drawPlayers(ctx);
+        }
+
+        const now = Date.now();
+        if (now - this._lastMinimapRender > 500) {
+            this._lastMinimapRender = now;
+            this.renderMinimap();
+        }
+    },
+
+    _updateViewportBounds() {
+        if (!this._canvasW) return;
+        const scale = this._scale || 1;
+        const tx = this._translateX || 0;
+        const ty = this._translateY || 0;
+        const w = this._canvasW;
+        const h = this._canvasH;
+
+        this._viewportBounds = {
+            x1: (-tx / scale / w) * 100 - 20,
+            x2: ((-tx + w) / scale / w) * 100 + 20,
+            y1: (-ty / scale / h) * 100 - 20,
+            y2: ((-ty + h) / scale / h) * 100 + 20,
         };
 
-        const myPos = this._getMyPlanetPosition();
-        
-        this.otherPlayers.slice(0, 20).forEach((player) => {
-            const pos = this._getPlayerPosition(player.user_id);
-            
-            const isOnline = this.isOnline(player);
-            const { icon, size, color, glow } = this.getPlayerIcon(player.neuro_evolution);
-            const glowStyle = glow ? 'filter: drop-shadow(0 0 6px #ff44ff); animation: glow-pulse 2s infinite;' : '';
-            
-            // Проверка на нахождение в зоне влияния
-            let isInInfluence = false;
-            if (myPos && pos) {
-                const dx = pos.x - myPos.x;
-                const dy = pos.y - myPos.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                const neuroLevel = this._lastStats?.neuro_evolution || 0;
-                const influenceRadius = 8 + neuroLevel * 1.5;
-                isInInfluence = distance < influenceRadius;
-            }
-            
-            const threatClass = isInInfluence ? 'threat-in-range' : '';
-            
-            const marker = document.createElement('div');
-            marker.className = `other-player-marker ${threatClass}`;
-            marker.style.cssText = `
-                position:absolute;left:${pos.x}%;top:${pos.y}%;
-                transform:translate(-50%,-50%);text-align:center;cursor:pointer;
-                z-index:15;
-            `;
-            
-            marker.innerHTML = `
-                <span style="font-size:${size}px;${glowStyle}">${icon}</span>
-                <div style="font-size:8px;color:${color};margin-top:1px;">
-                    ${this.escapeHtml(player.username?.slice(0,10) ?? 'Игрок')}
-                </div>
-            `;
-            
-            marker.onmouseenter = (e) => {
-                this.showPlayerTooltip(player.user_id, e);
-            };
-            marker.onmouseleave = () => {
-                this.scheduleTooltipHide();
-            };
-            marker.onclick = () => this.showPlayerInfo(player.user_id);
-            layer.appendChild(marker);
-        });
-        
-        this.renderInfluenceZone();
-        this.renderFlightLines();
+        this._viewportMapBounds = {
+            x1: (-tx / scale / w) * this._mapSize,
+            y1: (-ty / scale / h) * this._mapSize,
+            x2: ((-tx + w) / scale / w) * this._mapSize,
+            y2: ((-ty + h) / scale / h) * this._mapSize,
+        };
     },
 
-    // ВИЗУАЛ КАРТА-V1: живые SVG линии полёта + КАРТА G-2: сигнатуры угроз
-    renderFlightLines() {
-        const svg = document.getElementById('space-flight-svg');
-        if (!svg) return;
+    _getEmojiImage(emoji, size) {
+        const key = `${emoji}_${size}`;
+        if (this._emojiCache[key]) return this._emojiCache[key];
 
-        svg.innerHTML = '';
+        const offscreen = document.createElement('canvas');
+        offscreen.width = size * 2;
+        offscreen.height = size * 2;
+        const octx = offscreen.getContext('2d');
+        octx.font = `${size}px serif`;
+        octx.textAlign = 'center';
+        octx.textBaseline = 'middle';
+        octx.fillText(emoji, size, size);
+        this._emojiCache[key] = offscreen;
+        return offscreen;
+    },
 
+    _rebuildSpatialGrid() {
+        this._spatialGrid = {};
+        for (const player of this.otherPlayers) {
+            const pos = this._getPlayerPosition(player.user_id);
+            if (!pos) continue;
+            const cx = Math.floor(pos.x / this._CELL_SIZE);
+            const cy = Math.floor(pos.y / this._CELL_SIZE);
+            const key = `${cx}_${cy}`;
+            if (!this._spatialGrid[key]) this._spatialGrid[key] = [];
+            this._spatialGrid[key].push(player.user_id);
+        }
+    },
+
+    _getPlayersInViewport() {
+        const b = this._viewportMapBounds;
+        const cx1 = Math.floor(b.x1 / this._CELL_SIZE) - 1;
+        const cx2 = Math.floor(b.x2 / this._CELL_SIZE) + 1;
+        const cy1 = Math.floor(b.y1 / this._CELL_SIZE) - 1;
+        const cy2 = Math.floor(b.y2 / this._CELL_SIZE) + 1;
+        const ids = new Set();
+        for (let cx = cx1; cx <= cx2; cx++) {
+            for (let cy = cy1; cy <= cy2; cy++) {
+                const cell = this._spatialGrid[`${cx}_${cy}`];
+                if (cell) cell.forEach(id => ids.add(id));
+            }
+        }
+        return ids;
+    },
+
+    _drawPlayers(ctx) {
+        const w = this._canvasW;
+        const h = this._canvasH;
+        const scale = this._scale || 1;
+        const tx = this._translateX || 0;
+        const ty = this._translateY || 0;
+        const myPos = this._getMyPlanetPosition();
+        const neuroLevel = this._lastStats?.neuro_evolution || 0;
+        const influenceRadiusUnits = 50 + neuroLevel * 15;
+        
+        const toScreen = (xU, yU) => ({
+            x: (xU / this._mapSize) * w * scale + tx,
+            y: (yU / this._mapSize) * h * scale + ty,
+        });
+
+        const visibleIds = this._getPlayersInViewport();
+
+        const candidates = this.otherPlayers
+            .filter(p => visibleIds.has(p.user_id))
+            .map(p => {
+                const pos = this._getPlayerPosition(p.user_id);
+                if (!pos) return null;
+                const dx = pos.x - myPos.x;
+                const dy = pos.y - myPos.y;
+                return { ...p, pos, dist: Math.sqrt(dx*dx + dy*dy) };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.dist - b.dist)
+            .slice(0, this._maxPlayersOnMap);
+
+        this._visiblePlayers = candidates;
+
+        for (const player of candidates) {
+            const screen = toScreen(player.pos.x, player.pos.y);
+            const { icon, size, color, glow } = this.getPlayerIcon(player.neuro_evolution);
+            const isOnline = this.isOnline(player);
+
+            if (glow) {
+                ctx.save();
+                ctx.shadowColor = '#ff44ff';
+                ctx.shadowBlur = 12;
+            }
+
+            const img = this._getEmojiImage(icon, size);
+            ctx.drawImage(img, screen.x - size, screen.y - size, size * 2, size * 2);
+
+            if (glow) ctx.restore();
+
+            ctx.font = `bold 9px monospace`;
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            const name = (player.username || '?').slice(0, 8);
+            ctx.fillText(name, screen.x, screen.y + size + 2);
+
+            if (isOnline) {
+                ctx.beginPath();
+                ctx.arc(screen.x, screen.y - size - 3, 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#4aff9d';
+                ctx.fill();
+            }
+
+            if (player.dist < influenceRadiusUnits) {
+                ctx.beginPath();
+                ctx.arc(screen.x, screen.y, size + 4, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(255,170,68,${0.5 + 0.5 * Math.sin(Date.now() / 400)})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+        }
+    },
+
+    _drawPlayerClusters(ctx) {
+        const w = this._canvasW;
+        const h = this._canvasH;
+        const scale = this._scale || 1;
+        const tx = this._translateX || 0;
+        const ty = this._translateY || 0;
+
+        const SECTOR = 200;
+        const grid = {};
+
+        for (const player of this.otherPlayers) {
+            const pos = this._getPlayerPosition(player.user_id);
+            if (!pos) continue;
+            const sx = Math.floor(pos.x / SECTOR);
+            const sy = Math.floor(pos.y / SECTOR);
+            const key = `${sx}_${sy}`;
+            if (!grid[key]) {
+                grid[key] = {
+                    count: 0,
+                    online: 0,
+                    cx: (sx + 0.5) * SECTOR,
+                    cy: (sy + 0.5) * SECTOR,
+                };
+            }
+            grid[key].count++;
+            if (this.isOnline(player)) grid[key].online++;
+        }
+
+        for (const sector of Object.values(grid)) {
+            const px = (sector.cx / this._mapSize) * w * scale + tx;
+            const py = (sector.cy / this._mapSize) * h * scale + ty;
+
+            if (px < -60 || px > w + 60 || py < -60 || py > h + 60) continue;
+
+            const radius = Math.min(45, 16 + Math.sqrt(sector.count) * 3);
+
+            if (sector.online > 0) {
+                const pulse = radius + 4 * Math.abs(Math.sin(Date.now() / 800));
+                ctx.beginPath();
+                ctx.arc(px, py, pulse, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(74,255,157,0.15)`;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            ctx.beginPath();
+            ctx.arc(px, py, radius, 0, Math.PI * 2);
+            ctx.fillStyle = sector.online > 0
+                ? `rgba(74,255,157,0.1)`
+                : 'rgba(80,80,80,0.1)';
+            ctx.fill();
+            ctx.strokeStyle = sector.online > 0
+                ? `rgba(74,255,157,${Math.min(0.7, 0.25 + sector.online * 0.02)})`
+                : 'rgba(100,100,100,0.2)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            const label = sector.count >= 1000
+                ? `${(sector.count / 1000).toFixed(1)}k`
+                : String(sector.count);
+            ctx.font = `bold ${Math.min(15, 10 + Math.floor(label.length))}px monospace`;
+            ctx.fillStyle = sector.online > 0 ? '#4aff9d' : '#666';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, px, py - 4);
+
+            if (sector.online > 0) {
+                ctx.font = '8px monospace';
+                ctx.fillStyle = 'rgba(74,255,157,0.7)';
+                ctx.fillText(`● ${sector.online}`, px, py + 8);
+            }
+        }
+
+        ctx.font = '10px monospace';
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('приблизьте для просмотра игроков', w / 2, h - 6);
+    },
+
+    _drawEdgeClusters(ctx, w, h) {
+        const b = this._viewportMapBounds;
+        let top = 0, bottom = 0, left = 0, right = 0;
+        for (const p of this.otherPlayers) {
+            const pos = this._getPlayerPosition(p.user_id);
+            if (!pos) continue;
+            if (pos.x < b.x1) left++;
+            else if (pos.x > b.x2) right++;
+            if (pos.y < b.y1) top++;
+            else if (pos.y > b.y2) bottom++;
+        }
+
+        const drawBadge = (x, y, count, arrow) => {
+            if (count === 0) return;
+            ctx.save();
+            ctx.fillStyle = 'rgba(74,255,157,0.12)';
+            ctx.strokeStyle = 'rgba(74,255,157,0.5)';
+            ctx.lineWidth = 1;
+            const r = 16;
+            ctx.beginPath();
+            ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#4aff9d';
+            ctx.font = 'bold 9px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${arrow}${count}`, x, y);
+            ctx.restore();
+        };
+
+        const pad = 22;
+        drawBadge(pad, h / 2, left, '◀');
+        drawBadge(w - pad, h / 2, right, '▶');
+        drawBadge(w / 2, pad, top, '▲');
+        drawBadge(w / 2, h - pad, bottom, '▼');
+    },
+
+    _drawFlightLines(ctx) {
         const myPos = this._getMyPlanetPosition();
         if (!myPos) return;
+        const w = this._canvasW;
+        const h = this._canvasH;
+        const scale = this._scale || 1;
+        const tx = this._translateX || 0;
+        const ty = this._translateY || 0;
 
-        let activeMissions = [];
-        if (this.game) {
-            try {
-                const missionsJson = this.game.get_active_planet_missions();
-                activeMissions = JSON.parse(missionsJson);
-            } catch(e) {}
-        }
-        
-        const now = Date.now();
-        
-        // Исходящие миссии (оранжевые)
-        activeMissions.forEach(mission => {
-            const targetPlanet = this.planets.find(p => p.id === mission.planet_id);
-            if (!targetPlanet) return;
-            
-            const targetPos = { x: targetPlanet.x, y: targetPlanet.y };
-            const dx = targetPos.x - myPos.x;
-            const dy = targetPos.y - myPos.y;
-            const length = Math.sqrt(dx * dx + dy * dy);
-            const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-            
-            const startedAt = mission.started_at || (mission.arrives_at - (mission.returns_at - mission.arrives_at));
-            const totalDuration = mission.arrives_at - startedAt;
-            const elapsed = now - startedAt;
-            let progress = Math.min(1.0, Math.max(0, elapsed / totalDuration));
-            
-            if (now >= mission.returns_at) {
-                progress = 0.9;
-            }
-            
-            const shipPosX = myPos.x + dx * progress;
-            const shipPosY = myPos.y + dy * progress;
-            
-            // Линия
-            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            line.setAttribute('x1', `${myPos.x}%`);
-            line.setAttribute('y1', `${myPos.y}%`);
-            line.setAttribute('x2', `${targetPos.x}%`);
-            line.setAttribute('y2', `${targetPos.y}%`);
-            line.setAttribute('stroke', '#ffaa44');
-            line.setAttribute('stroke-width', '1');
-            line.setAttribute('stroke-dasharray', '4 4');
-            line.setAttribute('opacity', '0.6');
-            svg.appendChild(line);
-            
-            // Корабль (точка)
-            const shipPoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            shipPoint.setAttribute('r', '3');
-            shipPoint.setAttribute('fill', '#ffaa44');
-            shipPoint.setAttribute('cx', `${shipPosX}%`);
-            shipPoint.setAttribute('cy', `${shipPosY}%`);
-            svg.appendChild(shipPoint);
+        const toScreen = (xU, yU) => ({
+            x: (xU / this._mapSize) * w * scale + tx,
+            y: (yU / this._mapSize) * h * scale + ty,
         });
-        
-        // КАРТА G-2: Входящие PvP-миссии (красные, сигнатуры угроз)
-        if (this.currentUser && window.fleetModule) {
-            const incomingMissions = window.fleetModule.activePvpMissions || [];
-            
-            incomingMissions.forEach(mission => {
-                if (mission.targetUserId !== this.currentUser.id) return;
-                if (mission.status !== 'flying') return;
-                
-                const attackerPos = this._getPlayerPosition(mission.targetUserId || mission.attackerId);
-                if (!attackerPos) return;
-                
-                const dx = attackerPos.x - myPos.x;
-                const dy = attackerPos.y - myPos.y;
-                const length = Math.sqrt(dx * dx + dy * dy);
-                const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-                
-                let progress = 0;
-                if (mission.arrivesAt) {
-                    const total = mission.arrivesAt - mission.startedAt;
-                    const elapsed = now - mission.startedAt;
-                    progress = Math.min(0.95, Math.max(0, elapsed / total));
-                }
-                
-                const shipPosX = attackerPos.x + (myPos.x - attackerPos.x) * progress;
-                const shipPosY = attackerPos.y + (myPos.y - attackerPos.y) * progress;
-                const remainingMs = mission.arrivesAt - now;
-                const isUrgent = remainingMs < 60000;
-                
-                // Красная линия угрозы
-                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-                line.setAttribute('x1', `${attackerPos.x}%`);
-                line.setAttribute('y1', `${attackerPos.y}%`);
-                line.setAttribute('x2', `${myPos.x}%`);
-                line.setAttribute('y2', `${myPos.y}%`);
-                line.setAttribute('stroke', isUrgent ? '#ff4444' : '#ff6666');
-                line.setAttribute('stroke-width', isUrgent ? '2' : '1.5');
-                line.setAttribute('stroke-dasharray', isUrgent ? '2 2' : '6 4');
-                line.setAttribute('opacity', isUrgent ? '0.9' : '0.6');
-                svg.appendChild(line);
-                
-                // Пульсирующий маркер угрозы
-                const threatMarker = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                threatMarker.setAttribute('r', isUrgent ? '6' : '4');
-                threatMarker.setAttribute('fill', '#ff4444');
-                threatMarker.setAttribute('cx', `${shipPosX}%`);
-                threatMarker.setAttribute('cy', `${shipPosY}%`);
-                if (isUrgent) {
-                    threatMarker.setAttribute('class', 'threat-pulse');
-                }
-                svg.appendChild(threatMarker);
-            });
+
+        const now = Date.now();
+        let activeMissions = [];
+        try {
+            activeMissions = JSON.parse(this.game?.get_active_planet_missions?.() ?? '[]');
+        } catch {}
+
+        for (const mission of activeMissions) {
+            const planet = this.planets.find(p => p.id === mission.planet_id);
+            if (!planet) continue;
+
+            const from = toScreen(myPos.x, myPos.y);
+            const to = toScreen(planet.x * 10, planet.y * 10);
+
+            const startedAt = mission.started_at || (mission.arrives_at - (mission.returns_at - mission.arrives_at));
+            const progress = Math.min(1, Math.max(0, (now - startedAt) / (mission.arrives_at - startedAt)));
+            const shipX = from.x + (to.x - from.x) * progress;
+            const shipY = from.y + (to.y - from.y) * progress;
+
+            ctx.save();
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+            ctx.strokeStyle = 'rgba(255,170,68,0.5)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.beginPath();
+            ctx.arc(shipX, shipY, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffaa44';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(shipX, shipY, 7, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,170,68,0.4)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
         }
-        
-        this.renderInfluenceZone();
+
+        const incomingMissions = window.fleetModule?.activePvpMissions || [];
+        for (const mission of incomingMissions) {
+            if (mission.targetUserId !== this.currentUser?.id) continue;
+            if (mission.status !== 'flying') continue;
+            const attackerPos = this._getPlayerPosition(mission.attackerId);
+            if (!attackerPos) continue;
+
+            const from = toScreen(attackerPos.x, attackerPos.y);
+            const to = toScreen(myPos.x, myPos.y);
+            const total = mission.arrivesAt - mission.startedAt;
+            const progress = Math.min(0.95, Math.max(0, (now - mission.startedAt) / total));
+            const shipX = from.x + (to.x - from.x) * progress;
+            const shipY = from.y + (to.y - from.y) * progress;
+            const isUrgent = (mission.arrivesAt - now) < 60000;
+
+            ctx.save();
+            ctx.setLineDash(isUrgent ? [3, 3] : [6, 4]);
+            ctx.beginPath();
+            ctx.moveTo(from.x, from.y);
+            ctx.lineTo(to.x, to.y);
+            ctx.strokeStyle = isUrgent ? 'rgba(255,68,68,0.9)' : 'rgba(255,100,100,0.6)';
+            ctx.lineWidth = isUrgent ? 2 : 1.5;
+            ctx.stroke();
+            ctx.restore();
+
+            const pulse = isUrgent ? 4 + 3 * Math.abs(Math.sin(now / 200)) : 5;
+            ctx.beginPath();
+            ctx.arc(shipX, shipY, pulse, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff4444';
+            ctx.fill();
+        }
+    },
+
+    _drawInfluenceZone(ctx) {
+        const myPos = this._getMyPlanetPosition();
+        if (!myPos) return;
+        const w = this._canvasW;
+        const h = this._canvasH;
+        const scale = this._scale || 1;
+        const tx = this._translateX || 0;
+        const ty = this._translateY || 0;
+
+        const cx = (myPos.x / this._mapSize) * w * scale + tx;
+        const cy = (myPos.y / this._mapSize) * h * scale + ty;
+        const neuroLevel = this._lastStats?.neuro_evolution || 0;
+        const radiusUnits = 50 + neuroLevel * 15;
+        const radiusPx = (radiusUnits / this._mapSize) * w * scale;
+
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radiusPx);
+        grad.addColorStop(0, 'rgba(74,255,157,0.06)');
+        grad.addColorStop(1, 'rgba(74,255,157,0)');
+        ctx.beginPath();
+        ctx.arc(cx, cy, radiusPx, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        ctx.save();
+        ctx.setLineDash([6, 3]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, radiusPx, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(74,255,157,0.2)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+    },
+
+    _handleCanvasClick(e) {
+        const starMap = document.getElementById('space-star-map');
+        const rect = starMap.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const player = this._hitTestPlayer(cx, cy);
+        if (player) {
+            this.showPlayerInfo(player.user_id);
+        }
+    },
+
+    _handleCanvasHover(e) {
+        const starMap = document.getElementById('space-star-map');
+        const rect = starMap.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const player = this._hitTestPlayer(cx, cy);
+        if (player) {
+            starMap.style.cursor = 'pointer';
+            this.showPlayerTooltip(player.user_id, e);
+        } else {
+            starMap.style.cursor = this._isDragging ? 'grabbing' : 'grab';
+            this.scheduleTooltipHide();
+        }
+    },
+
+    _hitTestPlayer(cx, cy) {
+        if (!this._visiblePlayers) return null;
+        const w = this._canvasW;
+        const h = this._canvasH;
+        const scale = this._scale || 1;
+        const tx = this._translateX || 0;
+        const ty = this._translateY || 0;
+        const HIT_RADIUS = 25;
+
+        for (const player of this._visiblePlayers) {
+            const px = (player.pos.x / this._mapSize) * w * scale + tx;
+            const py = (player.pos.y / this._mapSize) * h * scale + ty;
+            const dx = cx - px;
+            const dy = cy - py;
+            if (dx*dx + dy*dy < HIT_RADIUS * HIT_RADIUS) return player;
+        }
+        return null;
     },
 
     _getMyPlanetPosition() {
+        if (this._myMapPos) return this._myMapPos;
         if (this._playerPositions[this.currentUser?.id]) {
             return this._playerPositions[this.currentUser.id];
         }
-        return { x: 50, y: 50 };
+        return { x: 500, y: 500 };
     },
 
     _hashString(str) {
@@ -1607,6 +1967,10 @@ export const spaceModule = {
         const repColor = repScore >= 0 ? '#4aff9d' : '#ff6a6a';
         const repSign = repScore >= 0 ? '+' : '';
 
+        const canSendCargo = scoutFresh && 
+            window.fleetModule?._lastCombatResult?.won && 
+            window.fleetModule?._lastCombatResult?.targetUserId === player.user_id;
+
         if (this._currentPopup) {
             this._currentPopup.remove();
             this._currentPopup = null;
@@ -1630,7 +1994,7 @@ export const spaceModule = {
                 <span style="font-size:28px;">🏰</span>
                 <div style="flex:1;">
                     <div style="font-size:16px;font-weight:bold;color:#4aff9d;">
-                        ${this.escapeHtml(player.username)}
+                        ${escapeHtml(player.username)}
                     </div>
                     <div style="font-size:11px;color:${isOnline ? '#4aff9d' : '#888'};">
                         ${isOnline ? '🟢 Онлайн' : '⚫ Оффлайн · ' + this._formatLastSeen(player.last_seen)}
@@ -1691,9 +2055,9 @@ export const spaceModule = {
                     border:1px solid rgba(255,170,0,0.4);border-radius:8px;
                     color:#ffaa44;cursor:pointer;font-family:monospace;font-size:12px;
                     font-weight:bold;transition:0.2s;
-                    ${!scoutFresh ? 'opacity:0.4;cursor:not-allowed;' : ''}"
-                    ${!scoutFresh ? 'disabled' : ''}>
-                    📦 ОТПРАВИТЬ ГРУЗОВОЙ КОРАБЛЬ${!scoutFresh ? ' (нужна разведка)' : ''}
+                    ${!canSendCargo ? 'opacity:0.4;cursor:not-allowed;' : ''}"
+                    ${!canSendCargo ? 'disabled' : ''}>
+                    📦 ОТПРАВИТЬ ГРУЗОВОЙ КОРАБЛЬ${!canSendCargo ? (scoutFresh ? ' (нужна победа в бою)' : ' (нужна разведка)') : ''}
                 </button>
             </div>
 
@@ -1710,6 +2074,7 @@ export const spaceModule = {
 
         const doSend = async (shipType) => {
             if (shipType !== 'scout' && !scoutFresh) return;
+            if (shipType === 'cargo' && !canSendCargo) return;
             
             const btn = popup.querySelector(`#space-btn-${shipType}`);
             if (btn) {
@@ -1738,8 +2103,8 @@ export const spaceModule = {
             }
             
             if (result.success && shipType !== 'scout') {
-                // После атаки обновляем репутацию
-                const newRep = repScore - 2;
+                const repScoreCurrent = player.reputation_score ?? 0;
+                const newRep = repScoreCurrent - 2;
                 await this.updateReputation(player.user_id, newRep);
             }
         };
@@ -1769,6 +2134,10 @@ export const spaceModule = {
     },
 
     async updateReputation(userId, newScore) {
+        if (isNaN(newScore)) {
+            console.warn('updateReputation: newScore is NaN, пропускаем');
+            return;
+        }
         try {
             await supabase
                 .from('player_reputation')
@@ -1783,6 +2152,7 @@ export const spaceModule = {
             if (player) player.reputation_score = newScore;
         } catch(e) {
             console.warn('Ошибка обновления репутации:', e);
+            if (window.addToLog) window.addToLog('⚠️ Ошибка синхронизации репутации', 'warning');
         }
     },
 
@@ -1796,87 +2166,134 @@ export const spaceModule = {
         return `${Math.floor(hours / 24)} дн назад`;
     },
 
-    // ВИЗУАЛ КАРТА-V6: мини-карта
     renderMinimap() {
         const canvas = document.getElementById('space-minimap');
         if (!canvas) return;
         
         const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, 80, 80);
+        if (!ctx) return;
+
+        const W = 100, H = 100;
+        const scale = W / this._mapSize;
+
+        ctx.clearRect(0, 0, W, H);
         
-        // Фон
         ctx.fillStyle = '#050505';
-        ctx.fillRect(0, 0, 80, 80);
+        ctx.fillRect(0, 0, W, H);
         
-        // Звёзды
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        for (let i = 0; i < 30; i++) {
-            ctx.fillRect(Math.random()*80, Math.random()*80, 1, 1);
-        }
+        this._minimapStars.forEach(s => {
+            ctx.fillRect(s.x, s.y, 1, 1);
+        });
         
-        // Планеты
+        // Планеты: координаты в % (0-100)
         this.planets.forEach(p => {
             ctx.fillStyle = '#ffaa44';
             ctx.beginPath();
-            ctx.arc(p.x * 0.8, p.y * 0.8, 2, 0, Math.PI * 2);
+            ctx.arc(p.x * scale * 10, p.y * scale * 10, 2, 0, Math.PI * 2);
             ctx.fill();
         });
         
-        // Нейтральные станции
+        // Станции: координаты в % (0-100)
         this.neutralStations.forEach(s => {
-            ctx.fillStyle = '#ffaa44';
-            ctx.beginPath();
-            ctx.rect(s.x * 0.8 - 1, s.y * 0.8 - 1, 2, 2);
-            ctx.fill();
+            ctx.fillStyle = '#4aff9d';
+            ctx.fillRect(s.x * scale * 10 - 1, s.y * scale * 10 - 1, 2, 2);
         });
         
-        // Игроки
+        // Другие игроки: координаты в 0-1000
         this.otherPlayers.forEach(p => {
             const pos = this._getPlayerPosition(p.user_id);
             if (!pos) return;
-            ctx.fillStyle = this.isOnline(p) ? '#4aff9d' : '#555';
+            ctx.fillStyle = this.isOnline(p) ? '#4aff9d' : '#333';
             ctx.beginPath();
-            ctx.arc(pos.x * 0.8, pos.y * 0.8, 2, 0, Math.PI * 2);
+            ctx.arc(pos.x * scale, pos.y * scale, 1.5, 0, Math.PI * 2);
             ctx.fill();
         });
         
-        // Моя база
+        // Я
         const myPos = this._getMyPlanetPosition();
         if (myPos) {
             ctx.fillStyle = '#fff';
             ctx.beginPath();
-            ctx.arc(myPos.x * 0.8, myPos.y * 0.8, 3, 0, Math.PI * 2);
+            ctx.arc(myPos.x * scale, myPos.y * scale, 3, 0, Math.PI * 2);
             ctx.fill();
-            
-            // Рамка вокруг базы
             ctx.strokeStyle = '#4aff9d';
-            ctx.lineWidth = 0.5;
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(myPos.x * 0.8, myPos.y * 0.8, 4, 0, Math.PI * 2);
+            ctx.arc(myPos.x * scale, myPos.y * scale, 5, 0, Math.PI * 2);
             ctx.stroke();
         }
         
-        // Активные линии полёта на мини-карте
-        let activeMissions = [];
-        try {
-            const missionsJson = this.game.get_active_planet_missions();
-            activeMissions = JSON.parse(missionsJson);
-        } catch(e) {}
+        // Viewport рамка
+        const vb = this._viewportMapBounds;
+        ctx.strokeStyle = 'rgba(74,255,157,0.4)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(
+            vb.x1 * scale, vb.y1 * scale,
+            (vb.x2 - vb.x1) * scale,
+            (vb.y2 - vb.y1) * scale
+        );
         
+        // Линии активных миссий
+        let activeMissions = [];
+        try { activeMissions = JSON.parse(this.game?.get_active_planet_missions?.() ?? '[]'); } catch {}
         activeMissions.forEach(mission => {
-            const targetPlanet = this.planets.find(p => p.id === mission.planet_id);
-            if (!targetPlanet || !myPos) return;
-            
+            const planet = this.planets.find(p => p.id === mission.planet_id);
+            if (!planet || !myPos) return;
             ctx.beginPath();
-            ctx.moveTo(myPos.x * 0.8, myPos.y * 0.8);
-            ctx.lineTo(targetPlanet.x * 0.8, targetPlanet.y * 0.8);
+            ctx.moveTo(myPos.x * scale, myPos.y * scale);
+            ctx.lineTo(planet.x * scale * 10, planet.y * scale * 10);
             ctx.strokeStyle = 'rgba(255,170,68,0.4)';
             ctx.lineWidth = 0.5;
             ctx.stroke();
         });
     },
 
+    _moveToZone(zone) {
+        console.log(`_moveToZone(${zone}) — зоны не используются`);
+    },
+
+    _reconnectMultiplayer() {
+        if (!this.currentUser) return;
+        if (this._multiplayerChannel) this._multiplayerChannel.unsubscribe();
+
+        const shardKey = this.currentUser.id.charAt(0);
+        this._multiplayerChannel = supabase.channel(`space_shard_${shardKey}`);
+
+        this._multiplayerChannel
+            .on('presence', { event: 'sync' }, () => {
+                const state = this._multiplayerChannel.presenceState();
+                this._onlinePlayerIds = Object.values(state).flat()
+                    .map(p => p.user_id).filter(Boolean);
+                this.renderPlayers();
+                this._markDirty();
+            })
+            .subscribe(async (status) => {
+                if (status === 'SUBSCRIBED') {
+                    await this._multiplayerChannel.track({
+                        user_id: this.currentUser.id,
+                        online_at: new Date().toISOString(),
+                        username: this.currentUser.user_metadata?.username || 'Игрок',
+                    });
+                }
+            });
+    },
+
     destroy() {
+        if (this._animFrameId) {
+            cancelAnimationFrame(this._animFrameId);
+            this._animFrameId = null;
+        }
+        if (this._adaptiveLoadTimeout) {
+            clearTimeout(this._adaptiveLoadTimeout);
+            this._adaptiveLoadTimeout = null;
+        }
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
+        }
+        this._emojiCache = {};
+        
         if (this.multiplayerInterval) clearInterval(this.multiplayerInterval);
         if (this.planetsChannel) supabase.removeChannel(this.planetsChannel);
         if (this._multiplayerChannel) {
@@ -1907,15 +2324,15 @@ export const spaceModule = {
             clearInterval(this._missionTimerInterval);
             this._missionTimerInterval = null;
         }
-    },
-
-    escapeHtml(str) {
-        return String(str ?? '').replace(/[&<>"']/g, c =>
-            ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]
-        );
-    },
+        this._gameBusUnsubscribers.forEach(unsub => {
+            if (typeof unsub === 'function') unsub();
+        });
+        this._gameBusUnsubscribers = [];
+    }
 };
 
 window.spaceModule = spaceModule;
 window.spaceModule.setShipMissionStatusFromRust = spaceModule.setShipMissionStatusFromRust.bind(spaceModule);
 window.spaceModule.loadPlanetsFromRust = spaceModule.loadPlanetsFromRust.bind(spaceModule);
+
+export default spaceModule;

@@ -1,23 +1,10 @@
-// game.js
-// ИСПРАВЛЕННАЯ ВЕРСИЯ - добавлена загрузка прогресса квестов и защита от конфликтов
-// ПАТЧ 3.3: добавлен единый ключ сохранения и миграция
-// БАГ #6: добавлена функция applyPendingLoot при инициализации
-// БАГ #12: исправлен расчёт подсказки по углю (читает из конфига)
-// БАГ #13: handleLogout очищает corebox_pending_loot
-// БАГ #36: designModule?.updateComputationalPower?.() с проверкой
-// БАГ #41: ограничен комбо-мультипликатор
-// БАГ #50: hold-to-auto-click на плавающей кнопке
-// БАГ N-1: combo-счётчик сбрасывается при неактивной системе и перегреве
-// БАГ N-2: cachedRustStats с меткой времени и инвалидацией
-// БАГ N-3: applyPendingLoot обрабатывает все 5 ресурсов
-// БАГ N-5: updateLastSeen с upsert
-// БАГ N-6: trade_blocked сбрасывается при загрузке сохранения
-// ТЕХН T-1: адаптивный game loop на requestAnimationFrame
-// ТЕХН T-3: батчинг облачных сохранений
-// ВИЗУАЛ V-1: живой фон турбины
-// ВИЗУАЛ V-2: пульс угрозы
-// ВИЗУАЛ V-6: прогресс-кольцо вокруг кнопки добычи
-// ИСПРАВЛЕНИЕ СПАМА СОБЫТИЙ: кулдауны, ограничение престиж-бонуса, взаимоисключающие пары
+// ======== game.js (ИСПРАВЛЕННАЯ ВЕРСИЯ v6.6 - ФИКС ПЕРЕРИСОВКИ) ========
+// ИСПРАВЛЕНИЯ В ЭТОМ ФАЙЛЕ:
+// - Добавлен флаг isProcessingTrade для защиты от спама кликов
+// - Переработан массив BASE_TRADES с налогом терминала (~25%)
+// - Добавлена проверка переполнения инвентаря в renderTradeTab
+// - Добавлена строгая проверка места в инвентаре в executeTrade
+// - УБРАНА ПЕРЕРИСОВКА КРАФТА/ДИЗАЙНА ИЗ gameLoopFrame (теперь только slowInterval)
 
 import init, { start_game, apply_config_from_admin } from './pkg/corebox_rs.js';
 import { initStatistics, updateStatisticsDisplay, switchTab, gameStats, loadUserStatistics, resetUserStatistics, updateStatisticsFromRust } from './statistics.js';
@@ -27,9 +14,10 @@ import { fleetModule } from './fleet.js';
 import { spaceModule } from './space-module.js';
 import { Sounds } from './sounds.js';
 import { initAuth, logout, getCurrentUser, login, register } from './auth.js';
-import { saveGameToCloud, loadGameFromCloud, syncStatisticsToCloud } from './save.js';
+import { saveGameToCloud, loadGameFromCloud, syncStatisticsToCloud, ensureMapPosition } from './save.js';
 import { supabase } from './supabase.js';
 import { GameBus, EVENTS } from './game-events.js';
+import { QUESTS_CONTENT, applyQuestReward, getQuestContent } from './quests_content.js';
 import {
     sendShip,
     processArrivedMissions,
@@ -39,74 +27,40 @@ import {
     markAllNotificationsRead,
     subscribeToNotifications,
 } from './multiplayer_combat.js';
+import { escapeHtml, normalizeNeuroConsciousness } from './utils.js';
 
+// ========== ГЛОБАЛЬНЫЙ ЭКСПОРТ sendShip ДЛЯ КАРТЫ ==========
+window.sendShipAction = sendShip;
+
+// ИСПРАВЛЕННЫЙ МАССИВ BASE_TRADES
 const BASE_TRADES = [
+    // Базовая конвертация с налогом терминала (~25%)
+    // Крафт: 100 руды = 1 чип. Обмен: 125 руды = 1 чип
+    { id: 'ore_to_chips', from: 'ore', fromAmt: 125, to: 'chips', toAmt: 1 },
+    // Обратный обмен: ликвидация актива с потерей 25%
+    { id: 'chips_to_ore', from: 'chips', fromAmt: 1, to: 'ore', toAmt: 75 },
+    
+    // Крафт: 50 угля = 1 плазма. Обмен: 70 угля = 1 плазма (налог 40%)
+    { id: 'coal_to_plasma', from: 'coal', fromAmt: 70, to: 'plasma', toAmt: 1 },
+    // Обратный обмен: ликвидация с потерей 30%
+    { id: 'plasma_to_coal', from: 'plasma', fromAmt: 1, to: 'coal', toAmt: 35 },
+
+    // Промежуточные обмены (также с налогом, чтобы не было бесконечного цикла выгоды)
     { id: 'coal_to_ore', from: 'coal', fromAmt: 3, to: 'ore', toAmt: 1 },
     { id: 'ore_to_coal', from: 'ore', fromAmt: 1, to: 'coal', toAmt: 2 },
-    { id: 'ore_to_chips', from: 'ore', fromAmt: 40, to: 'chips', toAmt: 1 },
-    { id: 'chips_to_ore', from: 'chips', fromAmt: 1, to: 'ore', toAmt: 35 },
-    { id: 'coal_to_plasma', from: 'coal', fromAmt: 80, to: 'plasma', toAmt: 1 },
-    { id: 'plasma_to_coal', from: 'plasma', fromAmt: 1, to: 'coal', toAmt: 60 },
+    
+    // Кросс-обмен высоких ресурсов
     { id: 'chips_to_plasma', from: 'chips', fromAmt: 5, to: 'plasma', toAmt: 1 },
-    { id: 'plasma_to_chips', from: 'plasma', fromAmt: 1, to: 'chips', toAmt: 4 },
+    { id: 'plasma_to_chips', from: 'plasma', fromAmt: 1, to: 'chips', toAmt: 3 },
 ];
 
 const RES_ICON = { coal: '🪨', ore: '⛏️', chips: '🎛️', plasma: '⚡', trash: '🗑️' };
-const RES_NAME = { coal: 'уголь', ore: 'руда', chips: 'чип', plasma: 'плазма' };
+const RES_NAME = { coal: 'уголь', ore: 'руда', chips: 'чип', plasma: 'плазма', trash: 'мусор' };
 
 const SAVE_KEY = (userId) => `corebox_v2_${userId || 'local'}`;
 
-// Переменные для hold-кликинга
 let _holdInterval = null;
 let _isHolding = false;
-
-// ========== СИСТЕМА КУЛДАУНОВ ДЛЯ СОБЫТИЙ ==========
-let _lastEventTime = 0;
-let _lastEventType = null;
-let _eventCooldowns = {
-    '🎁 Найден тайник': 0,
-    '💀 Саботаж повстанцев': 0,
-    '🔧 Ремонтный дрон': 0,
-    '📡 Спутниковая связь': 0,
-    '☄️ Метеоритный дождь': 0,
-    '⚠️ Перегрев системы': 0
-};
-let _eventCooldownTicks = {
-    '🎁 Найден тайник': 15,
-    '💀 Саботаж повстанцев': 25,
-    '🔧 Ремонтный дрон': 30,
-    '📡 Спутниковая связь': 20,
-    '☄️ Метеоритный дождь': 40,
-    '⚠️ Перегрев системы': 10
-};
-let _wasOverheated = false;  // для отслеживания входа в перегрев
-
-function updateEventCooldowns() {
-    for (const key in _eventCooldowns) {
-        if (_eventCooldowns[key] > 0) {
-            _eventCooldowns[key]--;
-        }
-    }
-}
-
-// БАГ N-3: функция применения отложенного лута (обрабатывает все ресурсы)
-async function applyPendingLoot() {
-    const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
-    if (Object.keys(pending).length === 0) return;
-    if (!game) return;
-    
-    for (const [res, amt] of Object.entries(pending)) {
-        if (amt > 0) {
-            if (typeof game.add_resource === 'function') {
-                game.add_resource(res, amt);
-            }
-        }
-    }
-    
-    addToLog(`📦 Восстановлен лут из предыдущей сессии: ${Object.entries(pending).map(([r,a]) => `${a} ${r}`).join(', ')}`);
-    localStorage.removeItem('corebox_pending_loot');
-}
-
 let game;
 let currentUser = null;
 let lastRustStats = null;
@@ -115,7 +69,6 @@ let isGameInitialized = false;
 let comboCount = 0;
 let lastClickTime = 0;
 let prestigeLevel = Number(localStorage.getItem('corebox_prestige_level')) || 0;
-let randomEventTimer = -60;
 let _saveTimer = null;
 let _cloudSaveTimer = null;
 let _lastSeenTimer = null;
@@ -133,6 +86,11 @@ let _nightWarnShown = false;
 let _currentTab = 'inventory';
 let _fleetUITimer = null;
 let _lastCloudSave = 0;
+let _justLoadedCloudSave = false;
+let _ccClockInterval = null;
+let _lastInterceptCount = 0;
+let _attackHistoryCollapsed = true;
+let isProcessingTrade = false; // Флаг защиты от спама кликов в торговле
 
 let _notifChannel = null;
 let _missionPollInterval = null;
@@ -144,67 +102,271 @@ let _keepAliveChannel = null;
 let cachedRustStats = null;
 let cachedRustStatsTime = 0;
 
-function migrateLegacySaves(userId) {
-    const legacyKeys = ['corebox_save', 'corebox_save_universal', 'corebox_save_backup'];
-    let bestSave = null;
-    let bestTs = 0;
+let _sessionId = Math.random().toString(36).substring(2, 10);
+
+let _totalNeuroScoreEarned = parseInt(localStorage.getItem('cc_total_score') || '0');
+let _lastKnownNeuroScore = 0;
+
+// ========== ФУНКЦИЯ ОБНОВЛЕНИЯ UI ТЭЦ ==========
+function updateTecUI() {
+    const tecBtn = document.getElementById('tec-toggle-btn');
+    const tecStatusSpan = document.getElementById('coalStatusDisplay');
+    const tecIndicator = document.getElementById('tecIndicator');
+    const tecWarning = document.getElementById('tec-warning');
+    const coalInventorySpan = document.getElementById('coalInventoryAmount');
+    const tecPowerBonusSpan = document.getElementById('tecPowerBonus');
     
-    for (const key of legacyKeys) {
+    if (!tecBtn) return;
+    
+    let stats = cachedRustStats;
+    if (!stats && game) {
         try {
-            const raw = localStorage.getItem(key);
-            if (!raw) continue;
-            const parsed = JSON.parse(raw);
-            const ts = parsed.timestamp || parsed._savedAt || 0;
-            if (ts > bestTs) {
-                bestTs = ts;
-                bestSave = parsed;
-            }
+            const j = game.get_statistics();
+            if (j) stats = JSON.parse(j);
         } catch(e) {}
     }
+    if (!stats) return;
     
-    if (bestSave) {
-        const newKey = SAVE_KEY(userId);
-        localStorage.setItem(newKey, JSON.stringify(bestSave));
-        legacyKeys.forEach(k => localStorage.removeItem(k));
-        console.log('✅ Мигрировано старое сохранение');
-        return bestSave;
+    const isCoalEnabled = stats.coal_enabled === true;
+    const hasCoal = (stats.coal_inventory || 0) > 0;
+    const isDay = stats.is_day === true;
+    const coalAmount = stats.coal_inventory || 0;
+    
+    if (coalInventorySpan) {
+        coalInventorySpan.textContent = coalAmount;
     }
-    return null;
+    
+    const tecBonus = isCoalEnabled ? 2.5 : 0;
+    if (tecPowerBonusSpan) {
+        tecPowerBonusSpan.textContent = tecBonus;
+    }
+    
+    if (tecStatusSpan) {
+        tecStatusSpan.textContent = isCoalEnabled ? "АКТИВНА" : "ОФФЛАЙН";
+        tecStatusSpan.style.color = isCoalEnabled ? "#4aff9d" : "#ff6a6a";
+    }
+    if (tecIndicator) {
+        tecIndicator.className = `status-indicator ${isCoalEnabled ? 'online' : 'offline'}`;
+    }
+    
+    const isDisabled = !isCoalEnabled && !hasCoal;
+    tecBtn.disabled = isDisabled;
+    tecBtn.style.opacity = isDisabled ? "0.5" : "1";
+    
+    if (tecWarning) {
+        if (isDay && !isCoalEnabled && hasCoal) {
+            tecWarning.textContent = "⚠️ День, ТЭЦ выключена. Добыча работает, но в 2 раза медленнее. Включите ТЭЦ для полной эффективности!";
+            tecWarning.style.display = "block";
+            tecWarning.className = "tec-warning warning-day";
+        } else if (!isDay && !isCoalEnabled) {
+            if (!hasCoal) {
+                tecWarning.textContent = "⚠️ НОЧЬ! Угля нет. Добыча невозможна! Добудьте уголь или включите ТЭЦ.";
+            } else {
+                tecWarning.textContent = "⚠️ НОЧЬ! ТЭЦ выключена. Включите ТЭЦ для добычи.";
+            }
+            tecWarning.style.display = "block";
+            tecWarning.className = "tec-warning warning-night";
+        } else if (isDay && isCoalEnabled) {
+            tecWarning.textContent = "✅ День, ТЭЦ активна. Добыча работает на 100% эффективности.";
+            tecWarning.style.backgroundColor = "rgba(74,255,157,0.1)";
+            tecWarning.style.color = "#4aff9d";
+            tecWarning.style.borderLeftColor = "#4aff9d";
+            tecWarning.style.display = "block";
+            tecWarning.className = "tec-warning warning-good";
+        } else {
+            tecWarning.style.display = "none";
+        }
+    }
 }
 
-let activeDiscount = null;
-let lastDiscountNight = -1;
+// ========== ФУНКЦИЯ РЕНДЕРА КВЕСТОВ ==========
+function renderQuestsTab() {
+    const container = document.getElementById('questsContainer');
+    if (!container || !game) return;
 
-function rollNightDiscount(nightIndex) {
-    if (nightIndex === lastDiscountNight) return;
-    lastDiscountNight = nightIndex;
-    activeDiscount = null;
+    let stats = null;
+    try { stats = JSON.parse(game.get_statistics()); } catch(e) { 
+        container.innerHTML = '<div class="quest-error">Нет данных</div>';
+        return; 
+    }
+
+    const quests = stats.quests || [];
+    const currentQuestIdx = stats.current_quest || 0;
     
-    if (Math.random() < 0.25) {
-        const idx = Math.floor(Math.random() * BASE_TRADES.length);
-        activeDiscount = { tradeId: BASE_TRADES[idx].id, nightIndex };
-        addToLog(`🏷️ Ночная скидка 50%: ${RES_ICON[BASE_TRADES[idx].from]}→${RES_ICON[BASE_TRADES[idx].to]}`);
+    if (!quests.length) {
+        container.innerHTML = '<div class="quest-card quest-locked"><div class="quest-title">📋 Заданий пока нет</div><div class="quest-description">Скоро появятся новые квесты</div></div>';
+        return;
+    }
+
+    container.innerHTML = quests.map((q, i) => {
+        const isCurrent = i === currentQuestIdx;
+        const isCompleted = q.completed === true;
+        const isLocked = i > currentQuestIdx;
         
-        const tradeTab = document.getElementById('trade-tab');
-        if (tradeTab && tradeTab.style.display === 'block') {
-            if (typeof renderTradeTab === 'function') renderTradeTab();
+        let cls = '';
+        let statusText = '';
+        let statusIcon = '';
+        
+        if (isCompleted) {
+            cls = 'quest-done';
+            statusText = 'ВЫПОЛНЕНО';
+            statusIcon = '✅ ';
+        } else if (isCurrent) {
+            cls = 'quest-active';
+            statusText = 'АКТИВНО';
+            statusIcon = '▶️ ';
+        } else {
+            cls = 'quest-locked';
+            statusText = 'ЗАБЛОКИРОВАНО';
+            statusIcon = '🔒 ';
+        }
+        
+        const extra = QUESTS_CONTENT.find(x => x.id === q.id) || {};
+        const rewardHtml = !isCompleted && !isLocked ? 
+            `<div class="quest-reward-hint">🏆 Награда: ${extra.reward_trash || 0}♻️ ${extra.reward_coal ? '+' + extra.reward_coal + '🪨' : ''} ${extra.reward_ore ? '+' + extra.reward_ore + '⛏️' : ''}</div>` : '';
+        
+        return `
+            <div class="quest-card ${cls}" data-quest-id="${q.id}">
+                <div class="quest-header">
+                    <div class="quest-title">${statusIcon}${escapeHtml(q.title || 'Квест')}</div>
+                    <div class="quest-status ${isCompleted ? 'status-done' : isCurrent ? 'status-active' : 'status-locked'}">${statusText}</div>
+                </div>
+                ${!isLocked ? `<div class="quest-description">${escapeHtml(q.description || extra.description || '')}</div>` : ''}
+                ${extra.hint && !isLocked && !isCompleted ? `<div class="quest-hint">💡 ${escapeHtml(extra.hint)}</div>` : ''}
+                ${rewardHtml}
+                ${!isLocked && !isCompleted ? `<div class="quest-progress-bar"><div class="quest-progress-fill" style="width: 0%"></div></div>` : ''}
+            </div>
+        `;
+    }).join('');
+    
+    if (quests[currentQuestIdx] && !quests[currentQuestIdx].completed) {
+        const q = quests[currentQuestIdx];
+        const target = q.target || 1;
+        let current = 0;
+        
+        switch (q.quest_type) {
+            case 'MineAny': current = stats.total_mined || 0; break;
+            case 'SurviveNight': current = stats.nights_survived || 0; break;
+            case 'ActivateDefense': current = stats.upgrades?.defense ? 1 : 0; break;
+            case 'SurviveAttack': current = stats.rebel_attacks_count || 0; break;
+            case 'ReachEvolutionLevel': current = stats.neuro_evolution || 0; break;
+            default: 
+                if (q.quest_type === 'MineResource' && q.resource) {
+                    current = stats[`total_${q.resource}_mined`] || 0;
+                }
+                break;
+        }
+        
+        const percent = Math.min((current / target) * 100, 100);
+        const progressFill = document.querySelector('.quest-active .quest-progress-fill');
+        if (progressFill) progressFill.style.width = `${percent}%`;
+        
+        const progressText = document.createElement('div');
+        progressText.className = 'quest-progress-text';
+        progressText.textContent = `${current}/${target}`;
+        const questCard = document.querySelector('.quest-active');
+        if (questCard && !questCard.querySelector('.quest-progress-text')) {
+            questCard.appendChild(progressText);
         }
     }
 }
 
-function onDayStarted() {
-    if (activeDiscount) {
-        activeDiscount = null;
-        const tradeTab = document.getElementById('trade-tab');
-        if (tradeTab && tradeTab.style.display === 'block') {
-            if (typeof renderTradeTab === 'function') renderTradeTab();
-        }
-    }
-    _nightWarnShown = false;
+function showFloatingText(text, x, y) {
+    const el = document.createElement('div');
+    el.className = 'floating-text';
+    el.textContent = text;
+    el.style.cssText = `left:${x}px;top:${y}px`;
+    document.body.appendChild(el);
+    setTimeout(() => {
+        el.classList.add('fade-out');
+        setTimeout(() => el.remove(), 500);
+    }, 800);
 }
 
-window.rollNightDiscount = rollNightDiscount;
-window.onDayStarted = onDayStarted;
+function addToLog(msg, type = 'info') {
+    const log = document.getElementById('logBox');
+    if (!log) return;
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    
+    const now = new Date();
+    const ts = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+    entry.textContent = `[${ts}] ${msg}`;
+    
+    if (msg.includes('НЕЙРО-ЭВОЛЮЦИЯ')) entry.dataset.sound = 'evolution';
+    if (msg.includes('Атака') && msg.includes('повстанцев') && !msg.includes('отражена')) entry.dataset.sound = 'rebelAttack';
+    if (msg.includes('Предупреждение')) entry.dataset.sound = 'warning';
+    if (msg.includes('Квест') && msg.includes('выполнен')) {
+        entry.dataset.sound = 'questDone';
+        const match = msg.match(/Квест "([^"]+)" выполнен/);
+        if (match && game) {
+            const questTitle = match[1];
+            const quest = QUESTS_CONTENT.find(q => q.title === questTitle);
+            if (quest) {
+                applyQuestReward(quest.id, game);
+                const freshStats = JSON.parse(game.get_statistics());
+                updateInventoryDisplay(freshStats);
+                cachedRustStats = freshStats;
+            }
+        }
+    }
+    if (msg.includes('ТЭЦ активирована')) entry.dataset.sound = 'coalOn';
+    if (msg.includes('ТЭЦ деактивирована')) entry.dataset.sound = 'coalOff';
+    if (msg.includes('Обмен')) entry.dataset.sound = 'trade';
+    if (msg.includes('Улучшена')) entry.dataset.sound = 'upgrade';
+    if (msg.includes('ПЕРЕХВАТ')) entry.dataset.sound = 'intercept';
+    
+    log.appendChild(entry);
+    
+    const maxEntries = window.gameConfig?.ui_config?.max_log_entries ?? 50;
+    while (log.children.length > maxEntries) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+    
+    const channel = getUniversalChannel();
+    if (channel) {
+        try {
+            channel.postMessage({
+                type: 'log',
+                message: msg,
+                logType: type,
+                timestamp: Date.now(),
+                sessionId: _sessionId
+            });
+        } catch(e) {}
+    }
+}
+
+function setupLogObserver() {
+    const logBox = document.getElementById('logBox');
+    if (!logBox) return;
+    new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === 1 && node.classList?.contains('log-entry')) {
+                    const sound = node.dataset.sound;
+                    if (sound && Sounds[sound]) Sounds[sound]();
+                }
+            });
+        });
+    }).observe(logBox, { childList: true });
+}
+
+async function applyPendingLoot() {
+    const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
+    if (Object.keys(pending).length === 0) return;
+    if (!game) return;
+    
+    for (const [res, amt] of Object.entries(pending)) {
+        if (amt > 0) {
+            if (typeof game.add_resource === 'function') {
+                game.add_resource(res, amt);
+            }
+        }
+    }
+    
+    addToLog(`📦 Восстановлен лут из предыдущей сессии: ${Object.entries(pending).map(([r,a]) => `${a} ${r}`).join(', ')}`);
+    localStorage.removeItem('corebox_pending_loot');
+}
 
 function getUniversalChannel() {
     if (!_universalChannel && typeof BroadcastChannel !== 'undefined') {
@@ -237,7 +399,6 @@ function scheduleSave() {
     }, 5000);
 }
 
-// БАГ N-5: исправленный updateLastSeen с upsert
 async function updateLastSeen() {
     if (!currentUser) return;
     try {
@@ -266,28 +427,40 @@ function stopLastSeenUpdater() {
     }
 }
 
-// ТЕХН T-3: батчинг облачных сохранений
 async function cloudSaveNow(force = false) {
     if (!currentUser || !game) return;
     if (_isSaving && !force) return;
     
+    if (_isSaving && force) {
+        console.log('⏳ Ожидание завершения предыдущего сохранения...');
+        await new Promise(resolve => {
+            const check = setInterval(() => {
+                if (!_isSaving) {
+                    clearInterval(check);
+                    resolve();
+                }
+            }, 100);
+        });
+    }
+    
     const now = Date.now();
     if (!force && now - _lastCloudSave < 30000 && _cloudSaveTimer) return;
     
-    if (force && _isSaving) {
-        console.log('⚠️ Принудительное сохранение: сбрасываем флаг _isSaving');
-        _isSaving = false;
+    if (_justLoadedCloudSave && !force) {
+        console.log('⏳ Пропуск автосохранения на 5 секунд после загрузки облака');
+        return;
     }
     
     _isSaving = true;
+    _lastCloudSave = now;
     
     const currentFleetBackup = window.fleetModule?.ships ? JSON.parse(JSON.stringify(window.fleetModule.ships)) : null;
+    const currentInventory = getCurrentGameState()?.inventory;
     
     try {
         const result = await saveGameToCloud(game, force);
         
         if (result.success) {
-            _lastCloudSave = Date.now();
             await updateLastSeen();
             
             const indicator = document.getElementById('saveIndicator');
@@ -302,10 +475,26 @@ async function cloudSaveNow(force = false) {
             addToLog("⚠️ Обнаружен конфликт сохранений, выполняем объединение данных", "warning");
             
             try {
-                game.load_game_state(JSON.stringify(result.server_save));
+                const cloudState = result.server_save;
+                const localState = JSON.parse(game.get_statistics());
                 
-                if (result.server_save.fleet && Array.isArray(result.server_save.fleet) && window.fleetModule) {
-                    const cloudFleet = result.server_save.fleet;
+                if (cloudState.inventory && localState) {
+                    const resources = ['coal', 'ore', 'chips', 'plasma', 'trash'];
+                    const mergedInventory = {};
+                    for (const res of resources) {
+                        const localAmt = localState[`${res}_inventory`] || 0;
+                        mergedInventory[res] = Math.max(
+                            cloudState.inventory[res] || 0,
+                            localAmt
+                        );
+                    }
+                    cloudState.inventory = mergedInventory;
+                }
+                
+                game.load_game_state(JSON.stringify(cloudState));
+                
+                if (cloudState.fleet && Array.isArray(cloudState.fleet) && window.fleetModule) {
+                    const cloudFleet = cloudState.fleet;
                     const localFleet = currentFleetBackup || window.fleetModule.ships || [];
                     const cloudIds = new Set(cloudFleet.map(s => s.id));
                     const newLocalShips = localFleet.filter(s => !cloudIds.has(s.id));
@@ -320,8 +509,8 @@ async function cloudSaveNow(force = false) {
                     }
                 }
                 
-                if (result.server_save.blueprints && window.designModule) {
-                    const cloudBlueprints = result.server_save.blueprints;
+                if (cloudState.blueprints && window.designModule) {
+                    const cloudBlueprints = cloudState.blueprints;
                     const localBlueprints = window.designModule.blueprints || [];
                     
                     if (typeof cloudBlueprints === 'object' && !Array.isArray(cloudBlueprints)) {
@@ -409,205 +598,72 @@ function getCurrentGameState() {
     return null;
 }
 
-function showFloatingText(text, x, y) {
-    const el = document.createElement('div');
-    el.className = 'floating-text';
-    el.textContent = text;
-    el.style.cssText = `left:${x}px;top:${y}px`;
-    document.body.appendChild(el);
-    setTimeout(() => {
-        el.classList.add('fade-out');
-        setTimeout(() => el.remove(), 500);
-    }, 800);
-}
-
-function addToLog(msg, type = 'info') {
-    const log = document.getElementById('logBox');
-    if (!log) return;
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
+function migrateLegacySaves(userId) {
+    const legacyKeys = ['corebox_save', 'corebox_save_backup'];
+    let bestSave = null;
+    let bestTs = 0;
     
-    if (msg.includes('НЕЙРО-ЭВОЛЮЦИЯ')) entry.dataset.sound = 'evolution';
-    if (msg.includes('Атака') && msg.includes('повстанцев') && !msg.includes('отражена')) entry.dataset.sound = 'rebelAttack';
-    if (msg.includes('Предупреждение')) entry.dataset.sound = 'warning';
-    if (msg.includes('Квест') && msg.includes('выполнен')) entry.dataset.sound = 'questDone';
-    if (msg.includes('ТЭЦ активирована')) entry.dataset.sound = 'coalOn';
-    if (msg.includes('ТЭЦ деактивирована')) entry.dataset.sound = 'coalOff';
-    if (msg.includes('Обмен')) entry.dataset.sound = 'trade';
-    if (msg.includes('Улучшена')) entry.dataset.sound = 'upgrade';
-    
-    const now = new Date();
-    const ts = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
-    entry.textContent = `[${ts}] ${msg}`;
-    log.appendChild(entry);
-    while (log.children.length > 50) log.removeChild(log.firstChild);
-    log.scrollTop = log.scrollHeight;
-    
-    const channel = getUniversalChannel();
-    if (channel) {
+    for (const key of legacyKeys) {
         try {
-            channel.postMessage({
-                type: 'log',
-                message: msg,
-                logType: type,
-                timestamp: Date.now()
-            });
+            const raw = localStorage.getItem(key);
+            if (!raw) continue;
+            const parsed = JSON.parse(raw);
+            const ts = parsed.timestamp || parsed._savedAt || 0;
+            if (ts > bestTs) {
+                bestTs = ts;
+                bestSave = parsed;
+            }
         } catch(e) {}
     }
-}
-
-function setupLogObserver() {
-    const logBox = document.getElementById('logBox');
-    if (!logBox) return;
-    new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            mutation.addedNodes.forEach((node) => {
-                if (node.nodeType === 1 && node.classList?.contains('log-entry')) {
-                    const sound = node.dataset.sound;
-                    if (sound && Sounds[sound]) Sounds[sound]();
-                }
-            });
-        });
-    }).observe(logBox, { childList: true });
-}
-
-// ИСПРАВЛЕННАЯ ФУНКЦИЯ triggerRandomEvent с кулдаунами и ограничениями
-function triggerRandomEvent() {
-    // ИСПРАВЛЕНИЕ 6: максимум 1 событие за 3 секунды
-    const now = Date.now();
-    if (_lastEventTime && now - _lastEventTime < 3000) {
-        return;
+    
+    if (bestSave) {
+        const newKey = SAVE_KEY(userId);
+        localStorage.setItem(newKey, JSON.stringify(bestSave));
+        legacyKeys.forEach(k => localStorage.removeItem(k));
+        console.log('✅ Мигрировано старое сохранение');
+        return bestSave;
     }
+    return null;
+}
+
+let activeDiscount = null;
+let lastDiscountNight = -1;
+
+function rollNightDiscount(nightIndex, isNightStart) {
+    if (!isNightStart) return;
+    if (nightIndex === lastDiscountNight) return;
+    lastDiscountNight = nightIndex;
+    activeDiscount = null;
     
     let stats = null;
-    try { 
-        const j = game?.get_statistics(); 
-        if (j) stats = JSON.parse(j); 
-    } catch(e) {}
+    try { stats = JSON.parse(game.get_statistics()); } catch(e) {}
+    if (stats?.trade_blocked) return;
     
-    // ИСПРАВЛЕНИЕ 4: Ремонтный дрон — только если есть что чинить
-    const hasRepairableDamage = (stats?.mining_debuff_remaining > 0 || 
-                                  stats?.defense_debuff_remaining > 0 || 
-                                  stats?.autoclick_debuff_remaining > 0 ||
-                                  (stats?.turbine_heat || 0) > 60);
-    
-    // ИСПРАВЛЕНИЕ 9: Спутниковая связь — не при перегреве
-    const isOverheated = (stats?.turbine_heat || 0) >= 100;
-    
-    // ИСПРАВЛЕНИЕ 8: Ограничение prestige-бонуса к событиям (максимум +10%)
-    const prestigeEventBonusRaw = prestigeLevel * 0.005;
-    const prestigeEventBonus = Math.min(prestigeEventBonusRaw, 0.10);
-    
-    const events = [
-        { 
-            name: '🎁 Найден тайник!', 
-            effect: () => { 
-                const coal = stats?.coal_inventory || 0;
-                const ore = stats?.ore_inventory || 0;
-                const trash = stats?.trash_inventory || 0;
-                
-                if (coal < 500) {
-                    game.add_resource('coal', 30 + Math.floor(Math.random() * 40));
-                    return '+30-70 угля';
-                } else if (ore < 300) {
-                    game.add_resource('ore', 15 + Math.floor(Math.random() * 25));
-                    return '+15-40 руды';
-                } else {
-                    game.add_resource('trash', 40 + Math.floor(Math.random() * 50));
-                    return '+40-90 мусора';
-                }
-            },
-            cooldownKey: '🎁 Найден тайник',
-            requiresCooldown: true
-        },
-        { 
-            name: '☄️ Метеоритный дождь!', 
-            effect: () => { game.add_resource('ore', 15 + Math.floor(Math.random() * 25)); return '+15-40 руды'; },
-            cooldownKey: '☄️ Метеоритный дождь',
-            requiresCooldown: true
-        },
-        { 
-            name: '⚠️ Перегрев системы!', 
-            effect: () => { 
-                const p = game?.get_computational_power() || 0; 
-                game.subtract_power(Math.min(20, Math.floor(p * 0.1))); 
-                return '-мощности'; 
-            },
-            cooldownKey: '⚠️ Перегрев системы',
-            requiresCooldown: true,
-            condition: () => !isOverheated
-        },
-        { 
-            name: '💀 Саботаж повстанцев!', 
-            effect: () => {
-                const c = game?.get_resource('coal') || 0;
-                if (c === 0) return 'нечего красть';
-                game.subtract_resource('coal', Math.min(25, Math.floor(c * 0.15)));
-                return '-угля';
-            },
-            cooldownKey: '💀 Саботаж повстанцев',
-            requiresCooldown: true
-        },
-        { 
-            name: '🔧 Ремонтный дрон!', 
-            effect: () => { game.repair_systems(); return 'системы восстановлены'; },
-            cooldownKey: '🔧 Ремонтный дрон',
-            requiresCooldown: true,
-            condition: () => hasRepairableDamage
-        },
-        { 
-            name: '📡 Спутниковая связь!', 
-            effect: () => { game.add_power(25 + Math.floor(Math.random() * 35)); return '+мощности'; },
-            cooldownKey: '📡 Спутниковая связь',
-            requiresCooldown: true,
-            condition: () => !isOverheated
+    if (Math.random() < 0.25) {
+        const idx = Math.floor(Math.random() * BASE_TRADES.length);
+        activeDiscount = { tradeId: BASE_TRADES[idx].id, nightIndex };
+        addToLog(`🏷️ Ночная скидка 50%: ${RES_ICON[BASE_TRADES[idx].from]}→${RES_ICON[BASE_TRADES[idx].to]}`);
+        
+        const tradeTab = document.getElementById('trade-tab');
+        if (tradeTab && tradeTab.style.display === 'block') {
+            if (typeof renderTradeTab === 'function') renderTradeTab();
         }
-    ];
-    
-    // ИСПРАВЛЕНИЕ 8: пересчитываем шанс с ограниченным бонусом
-    let baseChance = 0.03;
-    let totalChance = baseChance + prestigeEventBonus;
-    totalChance = Math.min(totalChance, 0.15);
-    
-    if (Math.random() >= totalChance) return;
-    
-    let availableEvents = events.filter(e => {
-        if (e.condition && !e.condition()) return false;
-        if (e.requiresCooldown && _eventCooldowns[e.cooldownKey] > 0) return false;
-        return true;
-    });
-    
-    if (availableEvents.length === 0) return;
-    
-    // ИСПРАВЛЕНИЕ 5: запрет взаимоисключающих пар
-    const mutuallyExclusive = {
-        '🎁 Найден тайник': '💀 Саботаж повстанцев',
-        '💀 Саботаж повстанцев': '🎁 Найден тайник',
-        '📡 Спутниковая связь': '⚠️ Перегрев системы',
-        '⚠️ Перегрев системы': '📡 Спутниковая связь'
-    };
-    
-    availableEvents = availableEvents.filter(e => {
-        const forbidden = mutuallyExclusive[e.name];
-        return !forbidden || _lastEventType !== forbidden;
-    });
-    
-    if (availableEvents.length === 0) return;
-    
-    const e = availableEvents[Math.floor(Math.random() * availableEvents.length)];
-    const result = e.effect();
-    Sounds.upgrade();
-    addToLog(`✨ ${e.name} ${result}`);
-    showFloatingText(e.name, 300, 100);
-    
-    // ИСПРАВЛЕНИЕ 1: устанавливаем кулдаун
-    _lastEventTime = Date.now();
-    _lastEventType = e.name;
-    
-    if (e.requiresCooldown && e.cooldownKey) {
-        _eventCooldowns[e.cooldownKey] = _eventCooldownTicks[e.cooldownKey] || 15;
     }
 }
+
+function onDayStarted() {
+    if (activeDiscount) {
+        activeDiscount = null;
+        const tradeTab = document.getElementById('trade-tab');
+        if (tradeTab && tradeTab.style.display === 'block') {
+            if (typeof renderTradeTab === 'function') renderTradeTab();
+        }
+    }
+    _nightWarnShown = false;
+}
+
+window.rollNightDiscount = rollNightDiscount;
+window.onDayStarted = onDayStarted;
 
 async function prestigeReset() {
     if (!confirm('ПРЕСТИЖ!\nНачнёте заново, получите бонусы. Продолжить?')) return;
@@ -617,6 +673,18 @@ async function prestigeReset() {
     
     if (game && typeof game.clear_planet_missions === 'function') {
         game.clear_planet_missions();
+    }
+    
+    if (currentUser) {
+        try {
+            await supabase
+                .from('missions')
+                .update({ status: 'cancelled' })
+                .eq('attacker_id', currentUser.id)
+                .in('status', ['flying', 'returning', 'arrived']);
+        } catch(e) {
+            console.warn('Ошибка отмены PvP-миссий при престиже:', e);
+        }
     }
     
     prestigeLevel++;
@@ -631,6 +699,9 @@ async function prestigeReset() {
     if (designModule) {
         designModule.blueprints.forEach(bp => bp.unlocked = false);
         designModule.saveBlueprints();
+        if (game && typeof game.sync_blueprints === 'function') {
+            game.sync_blueprints(false, false, false);
+        }
     }
     
     if (typeof game.reset_progress === 'function') game.reset_progress();
@@ -640,7 +711,6 @@ async function prestigeReset() {
     await cloudSaveNow(true);
 }
 
-// ИСПРАВЛЕНИЕ 8: ограничение eventBonus до 10%
 function getPrestigeBonus() {
     const rawEventBonus = prestigeLevel * 0.005;
     const cappedEventBonus = Math.min(rawEventBonus, 0.10);
@@ -653,7 +723,8 @@ function getPrestigeBonus() {
 
 function calculateOfflineProgress(saved) {
     const lastShown = parseInt(localStorage.getItem('corebox_offline_shown') || '0');
-    const elapsed = Math.min(Math.floor((Date.now() - (saved?._savedAt || Date.now())) / 1000), 8 * 3600);
+    const savedTimestamp = saved?.timestamp || saved?._savedAt || Date.now();
+    const elapsed = Math.min(Math.floor((Date.now() - savedTimestamp) / 1000), 8 * 3600);
     if (elapsed < 10 || Date.now() - lastShown < 60000) return null;
     const ticks = elapsed;
     const miningLevel = saved?.mining_level || 0;
@@ -664,12 +735,12 @@ function calculateOfflineProgress(saved) {
     };
     
     const nightsElapsed = Math.floor(elapsed / 32);
-    if (saved.rebel_protection_nights > 0 && nightsElapsed > 0) {
-        const used = Math.min(saved.rebel_protection_nights, nightsElapsed);
-        saved.rebel_protection_nights -= used;
-        if (saved.rebel_protection_nights === 0) {
-            saved.rebel_protection_active = false;
-        }
+    
+    const nightsRemaining = saved?.rebel_protection_nights || 0;
+    let newNights = nightsRemaining;
+    if (nightsRemaining > 0 && nightsElapsed > 0) {
+        const used = Math.min(nightsRemaining, nightsElapsed);
+        newNights = nightsRemaining - used;
     }
     
     return {
@@ -678,7 +749,9 @@ function calculateOfflineProgress(saved) {
         trashGained: Math.floor(ticks * passive.trash),
         oreGained: Math.floor(ticks * passive.ore),
         cyclesPassed: Math.floor(elapsed / 32),
-        attacksDuringOffline: Math.floor(Math.random() * (elapsed / 100) + 1)
+        attacksDuringOffline: Math.floor(elapsed / 600),
+        rebelProtectionNights: newNights,
+        rebelProtectionActive: newNights > 0 ? true : false
     };
 }
 
@@ -730,22 +803,22 @@ async function loadLeaderboard() {
     } catch(e) { container.innerHTML = '<div>❌ Ошибка</div>'; }
 }
 
-function escapeHtml(str) {
-    return str?.replace(/[&<>"']/g, function(m) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
-    }) || '';
-}
-
 function showAuthUI() {
-    document.getElementById('authOverlay').style.display = 'flex';
-    document.getElementById('gameContent').style.display = 'none';
-    document.getElementById('userInfo').style.display = 'none';
+    const overlay = document.getElementById('authOverlay');
+    const gameContent = document.getElementById('gameContent');
+    const userInfo = document.getElementById('userInfo');
+    if (overlay) overlay.style.display = 'flex';
+    if (gameContent) gameContent.style.display = 'none';
+    if (userInfo) userInfo.style.display = 'none';
 }
 
 function showGameUI() {
-    document.getElementById('authOverlay').style.display = 'none';
-    document.getElementById('gameContent').style.display = 'block';
-    document.getElementById('userInfo').style.display = 'block';
+    const overlay = document.getElementById('authOverlay');
+    const gameContent = document.getElementById('gameContent');
+    const userInfo = document.getElementById('userInfo');
+    if (overlay) overlay.style.display = 'none';
+    if (gameContent) gameContent.style.display = 'block';
+    if (userInfo) userInfo.style.display = 'block';
 }
 
 function updateUserDisplay(user) {
@@ -755,33 +828,60 @@ function updateUserDisplay(user) {
     if (usernameDisplay) usernameDisplay.textContent = displayName + prestigeTag;
 }
 
-function updateInventoryDisplay(inventory) {
-    if (!inventory) return;
+function updateInventoryDisplay(rustStats) {
+    if (!rustStats) return;
     const container = document.getElementById('resourcesContainer');
     if (!container) return;
 
-    const RESOURCES = [
-        { key: 'coal',   name: 'Уголь',  icon: '🪨', cls: '' },
-        { key: 'ore',    name: 'Руда',   icon: '⛏️', cls: 'ore' },
-        { key: 'trash',  name: 'Мусор',  icon: '♻️', cls: '' },
-        { key: 'chips',  name: 'Чипы',   icon: '🎛️', cls: 'chips' },
-        { key: 'plasma', name: 'Плазма', icon: '⚡', cls: 'plasma' },
-    ];
-
-    const slots = RESOURCES.map(r => {
-        const count = inventory[r.key] || 0;
-        const isEmpty = count === 0;
-        return `<div class="slot ${r.cls} ${isEmpty ? 'empty' : ''}">
-            <div style="font-size:20px;">${r.icon}</div>
-            <div class="item-name">${r.name}</div>
-            <div class="item-count">${isEmpty ? '—' : 'x' + count}</div>
+    const resources = {
+        coal:   rustStats.coal_inventory   ?? 0,
+        ore:    rustStats.ore_inventory    ?? 0,
+        trash:  rustStats.trash_inventory  ?? 0,
+        chips:  rustStats.chips_inventory  ?? 0,
+        plasma: rustStats.plasma_inventory ?? 0,
+    };
+    
+    const chips_unlocked  = rustStats.chips_unlocked  ?? true;
+    const plasma_unlocked = rustStats.plasma_unlocked ?? true;
+    
+    const RES_META = {
+        coal:   { name: 'Уголь',  img: 'img/ugol.png'   },
+        ore:    { name: 'Руда',   img: 'img/ruda.png'   },
+        trash:  { name: 'Мусор',  img: 'img/musor.png'  },
+        chips:  { name: 'Чипы',   img: 'img/chipy.png'  },
+        plasma: { name: 'Плазма', img: 'img/plazma.png' },
+    };
+    
+    const items = [];
+    if (resources.coal   > 0) items.push({ ...RES_META.coal,   count: resources.coal   });
+    if (resources.ore    > 0) items.push({ ...RES_META.ore,    count: resources.ore    });
+    if (resources.trash  > 0) items.push({ ...RES_META.trash,  count: resources.trash  });
+    if (chips_unlocked  && resources.chips  > 0) items.push({ ...RES_META.chips,  count: resources.chips  });
+    if (plasma_unlocked && resources.plasma > 0) items.push({ ...RES_META.plasma, count: resources.plasma });
+    
+    const MAX_SLOTS = 25;
+    let html = '';
+    
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        html += `<div class="resource-slot">
+            <div class="resource-icon">
+                <img src="${item.img}" alt="${item.name}" onerror="this.parentNode.textContent='📦'">
+            </div>
+            <div class="resource-name">${item.name}</div>
+            <div class="resource-count">x${item.count}</div>
         </div>`;
-    }).join('');
-
-    const emptyCount = Math.max(0, 18 - RESOURCES.length);
-    const empties = Array(emptyCount).fill('<div class="slot empty"><div class="item-name">[Пусто]</div><div class="item-count">+</div></div>').join('');
-
-    container.innerHTML = slots + empties;
+    }
+    
+    for (let i = items.length; i < MAX_SLOTS; i++) {
+        html += `<div class="resource-slot empty">
+            <div class="resource-icon"><span>❓</span></div>
+            <div class="resource-name">Пусто</div>
+            <div class="resource-count">+</div>
+        </div>`;
+    }
+    
+    container.innerHTML = html;
 }
 
 function syncUIAfterCloudLoad(cloudSave) {
@@ -801,10 +901,6 @@ function syncUIAfterCloudLoad(cloudSave) {
         addToLog(`⚡ Мощность восстановлена: ${cloudSave.computational_power}/${cloudSave.max_computational_power || 1000}`);
     }
     
-    if (cloudSave.inventory) {
-        updateInventoryDisplay(cloudSave.inventory);
-    }
-    
     if (cloudSave.neuro) {
         const neuroEl = document.getElementById('neuroStatus');
         if (neuroEl) {
@@ -814,7 +910,9 @@ function syncUIAfterCloudLoad(cloudSave) {
         }
         const neuroProgress = document.getElementById('neuroProgress');
         if (neuroProgress) {
-            neuroProgress.style.width = `${Math.min(cloudSave.neuro.consciousness || 0, 100)}%`;
+            let consc = cloudSave.neuro.consciousness || 0;
+            if (consc > 1.5) consc = consc / 100.0;
+            neuroProgress.style.width = `${Math.min(consc * 100, 100)}%`;
         }
     }
     
@@ -823,7 +921,8 @@ function syncUIAfterCloudLoad(cloudSave) {
         if (timeDisplay) {
             const icon = cloudSave.is_day ? "☀️" : "🌙";
             const text = cloudSave.is_day ? "День" : "Ночь";
-            const filled = Math.min(cloudSave.game_time || 24, 24) / 2;
+            const maxTime = cloudSave.is_day ? 24 : 16;
+            const filled = Math.min(cloudSave.game_time || maxTime, maxTime) / (maxTime / 12);
             const bar = "█".repeat(Math.floor(filled));
             const emptyBar = "░".repeat(12 - Math.floor(filled));
             timeDisplay.textContent = `${icon} ${text} [${bar}${emptyBar}]`;
@@ -834,6 +933,10 @@ function syncUIAfterCloudLoad(cloudSave) {
         const coalStatus = document.getElementById('coalStatus');
         if (coalStatus) {
             coalStatus.textContent = cloudSave.coal_enabled ? "АКТИВНА" : "ОФФЛАЙН";
+        }
+        const coalStatusDisplay = document.getElementById('coalStatusDisplay');
+        if (coalStatusDisplay) {
+            coalStatusDisplay.textContent = cloudSave.coal_enabled ? "АКТИВНА" : "ОФФЛАЙН";
         }
     }
     
@@ -860,43 +963,19 @@ function syncUIAfterCloudLoad(cloudSave) {
         computational_power: cloudSave.computational_power,
         max_computational_power: cloudSave.max_computational_power,
         neuro_evolution: cloudSave.neuro?.evolution,
-        timestamp: Date.now()
+        chips_unlocked: cloudSave.chips_unlocked,
+        plasma_unlocked: cloudSave.plasma_unlocked,
+        timestamp: Date.now(),
+        _savedAt: Date.now()
     }));
+    
+    updateTecUI();
 }
-
-window._restorePlanetMissions = function() {
-    if (!game || !window.fleetModule) return;
-    try {
-        const missionsJson = game.get_active_planet_missions();
-        const missions = JSON.parse(missionsJson);
-        let restored = 0;
-        
-        missions.forEach(mission => {
-            const ship = window.fleetModule.ships.find(s => s.id === mission.ship_id);
-            if (ship && mission.status === 'flying') {
-                ship.onMission = true;
-                ship.currentMissionId = mission.id;
-                ship.targetPlanetId = mission.planet_id;
-                ship.missionReturnsAt = mission.returns_at;
-                ship.missionArrivesAt = mission.arrives_at;
-                ship.shipType = mission.ship_type || 'cargo';
-                restored++;
-            }
-        });
-        
-        if (restored > 0) {
-            window.fleetModule.saveFleet();
-            window.fleetModule._renderFleetTab?.();
-            addToLog(`🪐 Восстановлено ${restored} планетарных миссий`, "info");
-        }
-    } catch(e) {
-        console.warn('Ошибка восстановления планетарных миссий:', e);
-    }
-};
 
 async function loadFromCloudAndMerge() {
     if (!currentUser || !game) return null;
     
+    const CLOCK_TOLERANCE_MS = 60000;
     const unifiedKey = SAVE_KEY(currentUser.id);
     const localBackup = localStorage.getItem('corebox_save_backup');
     const localUniversal = localStorage.getItem('corebox_save_universal');
@@ -911,12 +990,12 @@ async function loadFromCloudAndMerge() {
             if (unifiedRaw) {
                 try {
                     const unified = JSON.parse(unifiedRaw);
-                    localTimestamp = Math.max(localTimestamp, unified.timestamp || 0);
+                    localTimestamp = Math.max(localTimestamp, unified.timestamp || 0, unified._savedAt || 0);
                 } catch(e) {}
             }
             
             if (localBackup) {
-                try { localTimestamp = Math.max(localTimestamp, JSON.parse(localBackup).timestamp || 0); } catch(e) {}
+                try { localTimestamp = Math.max(localTimestamp, JSON.parse(localBackup).timestamp || 0, JSON.parse(localBackup)._savedAt || 0); } catch(e) {}
             }
             if (localUniversal) {
                 try {
@@ -928,7 +1007,7 @@ async function loadFromCloudAndMerge() {
             
             let shouldLoad = true;
             
-            if (localTimestamp > cloudSave.timestamp) {
+            if (localTimestamp > cloudSave.timestamp + CLOCK_TOLERANCE_MS) {
                 shouldLoad = false;
                 addToLog("💾 Локальное сохранение новее облачного, используем его");
             }
@@ -992,7 +1071,9 @@ async function loadFromCloudAndMerge() {
                             blueprint_combat_unlocked: combatUnlocked,
                             quests_progress: cloudSave.quests_progress || [],
                             planets: cloudSave.planets || [],
-                            active_planet_missions: cloudSave.active_planet_missions || []
+                            active_planet_missions: cloudSave.active_planet_missions || [],
+                            chips_unlocked: cloudSave.chips_unlocked ?? (cloudSave.inventory?.chips > 0),
+                            plasma_unlocked: cloudSave.plasma_unlocked ?? (cloudSave.inventory?.plasma > 0),
                         };
                     }
                     game.load_game_state(JSON.stringify(rustFormatSave));
@@ -1019,6 +1100,7 @@ async function loadFromCloudAndMerge() {
                 setTimeout(() => {
                     syncUIAfterCloudLoad(cloudSave);
                     updatePowerGlow();
+                    updateTecUI();
                     
                     if (craftModule) {
                         const stats = JSON.parse(game.get_statistics());
@@ -1087,17 +1169,20 @@ function _applyPendingLoot() {
         }
 
         if (!applied) {
-            const saved = localStorage.getItem('corebox_save');
+            const userId = currentUser?.id;
+            const saved = userId ? localStorage.getItem(SAVE_KEY(userId)) : localStorage.getItem('corebox_save');
             if (saved) {
                 try {
                     const state = JSON.parse(saved);
                     if (state.inventory) {
                         for (const [res, amt] of Object.entries(pending)) {
-                            if (state.inventory[res] !== undefined) {
-                                state.inventory[res] += amt;
-                            }
+                            state.inventory[res] = (state.inventory[res] || 0) + amt;
                         }
-                        localStorage.setItem('corebox_save', JSON.stringify(state));
+                        if (userId) {
+                            localStorage.setItem(SAVE_KEY(userId), JSON.stringify(state));
+                        } else {
+                            localStorage.setItem('corebox_save', JSON.stringify(state));
+                        }
                         applied = true;
                     }
                 } catch(e) {}
@@ -1137,16 +1222,15 @@ async function _applyReleasedShips(userId) {
                 .in('status', ['flying', 'returning'])
                 .maybeSingle();
 
-            if (!mission) {
+            if (!mission || mission.status === 'returning' || mission.status === 'done') {
                 await supabase.from('fleet_released').update({ applied: true }).eq('id', entry.id);
-                continue;
+                
+                if (fleetModule && fleetModule.setShipMissionStatus) {
+                    fleetModule.setShipMissionStatus(entry.ship_id, false);
+                }
             }
 
-            if (fleetModule && fleetModule.setShipMissionStatus) {
-                fleetModule.setShipMissionStatus(entry.ship_id, false);
-            }
-            
-            if (entry.ship_type === 'cargo' && entry.loot && Object.keys(entry.loot).length > 0) {
+            if (mission && mission.status === 'cargo' && entry.loot && Object.keys(entry.loot).length > 0) {
                 const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
                 for (const [res, amt] of Object.entries(entry.loot)) {
                     if (amt && amt > 0) {
@@ -1171,11 +1255,6 @@ async function _applyReleasedShips(userId) {
                     : '';
                 addToLog(`⚔️ Боевой корабль вернулся пока вас не было.${lootText}`);
             }
-            
-            await supabase
-                .from('fleet_released')
-                .update({ applied: true })
-                .eq('id', entry.id);
         }
         
         _applyPendingLoot();
@@ -1415,16 +1494,7 @@ function validateAndFixNeuroConsciousness() {
         let consciousness = stats.neuro_consciousness || 0;
         let fixed = false;
         
-        if (consciousness > 1.5) {
-            consciousness = consciousness / 100.0;
-            fixed = true;
-            addToLog(`🧠 Исправлено нейро-сознание: ${(consciousness * 100).toFixed(1)}% (было загружено как проценты)`, "warning");
-        }
-        
-        if (consciousness > 1.0) {
-            consciousness = 1.0;
-            fixed = true;
-        }
+        consciousness = normalizeNeuroConsciousness(consciousness);
         
         const expectedMin = Math.max(0.05, evolution * 0.03);
         
@@ -1486,6 +1556,25 @@ function initializeAuth() {
     setupAuthFormHandlers();
     getKeepAliveChannel();
     
+    window.addEventListener('beforeunload', () => {
+        if (window.fleetModule?.saveFleet) {
+            window.fleetModule.saveFleet(true);
+        }
+        if (currentUser && game) {
+            if (typeof game.save_current_state === 'function') {
+                game.save_current_state();
+            }
+            const state = getCurrentGameState();
+            const unifiedKey = SAVE_KEY(currentUser?.id);
+            if (state) {
+                localStorage.setItem(unifiedKey, JSON.stringify(state));
+                localStorage.setItem('corebox_save_backup', JSON.stringify(state));
+            }
+            saveCurrentUserStatistics();
+            updateLastSeen();
+        }
+    });
+    
     initAuth(
         async (user) => {
             currentUser = user;
@@ -1505,6 +1594,7 @@ function initializeAuth() {
             
             if (cloudSave) {
                 addToLog(`✅ Загружено облачное сохранение (уровень нейро: ${cloudSave.neuro?.evolution || 0})`);
+                _justLoadedCloudSave = true;
             } else if (migrated) {
                 addToLog(`✅ Загружено мигрированное сохранение`);
             }
@@ -1515,12 +1605,21 @@ function initializeAuth() {
                 _initMultiplayer(user);
             }
             
+            const myPos = await ensureMapPosition(user.id);
+            if (spaceModule) {
+                spaceModule.setMyPosition(myPos.x, myPos.y);
+                console.log(`📍 Позиция игрока загружена: (${myPos.x}, ${myPos.y})`);
+            }
+            
             loadUserStatsFromCloud(user);
             
             setTimeout(() => {
-                if (game && currentUser) {
+                if (game && currentUser && !_justLoadedCloudSave) {
                     cloudSaveNow(true);
                 }
+                setTimeout(() => {
+                    _justLoadedCloudSave = false;
+                }, 10000);
             }, 5000);
         },
         () => {
@@ -1531,6 +1630,10 @@ function initializeAuth() {
                 clearInterval(_missionTimerInterval);
                 _missionTimerInterval = null;
             }
+            if (_saveInterval) {
+                clearInterval(_saveInterval);
+                _saveInterval = null;
+            }
             currentUser = null;
             showAuthUI();
             isGameInitialized = false;
@@ -1538,6 +1641,8 @@ function initializeAuth() {
         }
     );
 }
+
+let _saveInterval = null;
 
 async function loadUserStatsFromCloud(user) {
     if (!user) return;
@@ -1624,9 +1729,9 @@ function setupAuthFormHandlers() {
             return; 
         }
         
-        if (password.length < 6) { 
-            showMessage('Пароль минимум 6 символов!'); 
-            return; 
+        if (password.length < 6) {
+            showMessage('Пароль должен быть минимум 6 символов');
+            return;
         }
         
         if (registerBtn) {
@@ -1677,10 +1782,16 @@ async function handleLogout() {
         _missionTimerInterval = null;
     }
     
+    if (_saveInterval) {
+        clearInterval(_saveInterval);
+        _saveInterval = null;
+    }
+    
     if (_universalChannel) { _universalChannel.close(); _universalChannel = null; }
     if (_keepAliveChannel) { _keepAliveChannel.close(); _keepAliveChannel = null; }
     if (_gameLoopRAF) { cancelAnimationFrame(_gameLoopRAF); _gameLoopRAF = null; }
     if (_fleetUITimer) { clearInterval(_fleetUITimer); _fleetUITimer = null; }
+    if (_ccClockInterval) { clearInterval(_ccClockInterval); _ccClockInterval = null; }
     offlineProgressShown = false;
     
     localStorage.removeItem('corebox_pending_loot');
@@ -1810,7 +1921,6 @@ function updatePowerRing(manualClicks, clicksPerPower) {
     }
 }
 
-// ИСПРАВЛЕНИЕ 7: логировать перегрев только при переходе
 function updateTurbineStatus(stats) {
     const heat = stats?.turbine_heat ?? 0;
     const isCooling = stats?.turbine_cooling ?? false;
@@ -1819,27 +1929,16 @@ function updateTurbineStatus(stats) {
     const hint = document.getElementById('turbineHeatHint');
     if (!bar || !label) return;
     
-    const wasOverheatedGlobal = _wasOverheated;
-    const isNowOverheated = heat >= 100;
-    
-    if (isNowOverheated && !wasOverheatedGlobal) {
-        addToLog('⚠️ Перегрев системы! -мощности', 'warning');
-        Sounds.warning && Sounds.warning();
-        _wasOverheated = true;
-    } else if (!isNowOverheated && wasOverheatedGlobal) {
-        addToLog('🌡️ Турбина остыла, система восстановлена', 'info');
-        _wasOverheated = false;
-    }
-    
     bar.style.width = `${Math.min(heat, 100)}%`;
     bar.className = 'turbine-fill';
     
     updateTurbineVisuals(heat);
     
+    const coolingRate = 2 + (stats?.turbine_upgrade_level || 0) + (stats?.cooling_level || 0);
+    
     if (heat >= 100) {
         bar.classList.add('turbine-critical');
         label.textContent = `🔥 ПЕРЕГРЕВ: ${heat}% — ОСТЫВАНИЕ...`;
-        const coolingRate = 2 + (stats?.turbine_upgrade_level || 0);
         const ticksToZero = Math.ceil(heat / coolingRate);
         const secsToZero = ticksToZero;
         if (hint) hint.textContent = `Добыча заблокирована. Остынет через ~${secsToZero} сек`;
@@ -1861,6 +1960,306 @@ function updateTurbineStatus(stats) {
         label.textContent = `🌡️ Температура: ${heat}%`;
         if (hint) hint.textContent = '';
     }
+    
+    if (heat >= 100) {
+        const ticksLeft = Math.ceil(heat / coolingRate);
+        const btn = document.getElementById('floatingMineBtn');
+        if (btn) {
+            btn.classList.add('turbine-critical');
+            const btnText = btn.querySelector('.btn-text');
+            if (btnText) btnText.textContent = `🌡️ ${ticksLeft}с`;
+        }
+    }
+}
+
+function renderFactionDossier(factions) {
+    const el = document.getElementById('cc-factions');
+    if (!el) return;
+    if (!factions?.length) { 
+        el.innerHTML = '<div class="cc-intercept-empty">Нет данных</div>'; 
+        return; 
+    }
+
+    const FACTION_ICONS = { scavengers: '🗑️', technomads: '⚙️', cyber_rebels: '💻' };
+    el.innerHTML = factions.map(f => {
+        const icon = FACTION_ICONS[f.id] || '👥';
+        const frustrated = f.is_frustrated ? ' ⚡Агрессивны' : '';
+        const losses = f.consecutive_losses > 0 ? escapeHtml(` (${f.consecutive_losses} пораж.)`) : '';
+        const hintText = (escapeHtml(f.hint || '') + losses).trim();
+        
+        let nextAttackHtml = '';
+        if (f.pattern_revealed && f.predicted_attack_after > 0) {
+            const nightsLeft = Math.max(0, f.predicted_attack_after - (f.quiet_nights_accumulated || 0));
+            const danger = nightsLeft <= 1;
+            nextAttackHtml = `
+                <div class="cc-faction-predict ${danger ? 'cc-faction-predict-danger' : ''}">
+                    🎯 Паттерн: атакует через ~${f.predicted_attack_after} тихих ночей
+                    · Сейчас тихих: ${f.quiet_nights_accumulated}
+                    · До атаки: <strong>${nightsLeft === 0 ? '⚠️ СЕГОДНЯ' : nightsLeft + ' н.'}</strong>
+                </div>`;
+        } else if (f.attacks_observed > 0 && f.attacks_observed < 3) {
+            nextAttackHtml = `<div class="cc-faction-predict">🔍 Анализ паттерна... (${f.attacks_observed}/3 атак)</div>`;
+        }
+        
+        return `<div class="cc-faction-row ${f.consecutive_losses >= 3 ? 'cc-faction-weak' : ''}">
+            <span class="cc-faction-icon">${icon}</span>
+            <div class="cc-faction-info">
+                <div class="cc-faction-name">${escapeHtml(f.name)}${frustrated}</div>
+                ${hintText ? `<div class="cc-faction-hint">${hintText}</div>` : ''}
+                ${nextAttackHtml}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function renderIntercepts(msgs) {
+    const el = document.getElementById('cc-intercepts');
+    if (!el) return;
+    if (!msgs?.length) { 
+        el.innerHTML = '<div class="cc-intercept-empty">Нет перехватов</div>'; 
+        return; 
+    }
+    
+    const currentCount = msgs.length;
+    const hasNew = currentCount !== _lastInterceptCount;
+    if (hasNew && _lastInterceptCount !== 0 && currentCount > _lastInterceptCount) {
+        el.classList.add('intercepts-updated');
+        setTimeout(() => el.classList.remove('intercepts-updated'), 500);
+        
+        if (Sounds.intercept) Sounds.intercept();
+        else if (Sounds.warning) Sounds.warning();
+        
+        if (_currentTab !== 'command') {
+            const badge = document.getElementById('command-tab-btn');
+            if (badge && !badge.dataset.interceptBadge) {
+                badge.dataset.interceptBadge = '1';
+                badge.style.position = 'relative';
+                const dot = document.createElement('span');
+                dot.id = 'intercept-badge';
+                dot.style.cssText = 'position:absolute;top:2px;right:2px;width:6px;height:6px;background:#4aff9d;border-radius:50%;animation:cc-pulse 1s infinite;';
+                badge.appendChild(dot);
+            }
+        }
+    }
+    _lastInterceptCount = currentCount;
+
+    el.innerHTML = msgs.map((m, idx) => {
+        const rel = Math.round((m.reliability ?? 0) * 100);
+        const isHigh = rel >= 70;
+        const eta = m.eta_ticks > 0 ? `ETA: ${m.eta_ticks} тик` : 'Скоро!';
+        const isNew = (currentCount - idx) <= 2 && hasNew;
+        return `<div class="cc-intercept-msg ${isHigh ? 'cc-intercept-high' : ''} ${isNew ? 'cc-intercept-new' : ''}">
+            <div>${escapeHtml(m.content || '')}</div>
+            <div class="cc-intercept-rel">
+                <span>${m.target_hint ? escapeHtml(m.target_hint) : ''}</span>
+                <span>${eta} · ${rel}% достоверность</span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function getNeuroScoreNeeded(evol) {
+    const table = [60, 100, 150, 220, 300, 400, 500, 650, 800, 1000];
+    if (evol < table.length) return table[evol];
+    return 1200 + (evol - 10) * 120;
+}
+
+function updateMultiphaseIndicator(s) {
+    const mpRow = document.getElementById('cc-multiphase-row');
+    if (mpRow) {
+        if (s.multiphase_warning) {
+            const phase = s.multiphase_phase ?? 0;
+            const timer = s.multiphase_timer ?? 0;
+            const phaseLabel = ['🔴 Фаза 1: Разведка', '⚡ Фаза 2: Основной удар', '💥 Фаза 3: Финальный штурм'][phase] || '⚡ АТАКА';
+            mpRow.style.display = 'flex';
+            mpRow.innerHTML = `
+                <span class="cc-threat-label" style="color:#ff6644;font-weight:bold">${phaseLabel}</span>
+                <span class="cc-badge cc-badge-danger">${timer > 0 ? `${timer}т` : 'СЕЙЧАС'}</span>
+            `;
+        } else {
+            mpRow.style.display = 'none';
+        }
+    }
+}
+
+function updateCommandCenter(s) {
+    if (!s) return;
+    
+    const set = (id, val) => { 
+        const el = document.getElementById(id); 
+        if (el) el.textContent = val; 
+    };
+    const setW = (id, pct) => { 
+        const el = document.getElementById(id); 
+        if (el) el.style.width = Math.min(pct, 100) + '%'; 
+    };
+
+    const isDay = !!s.is_day;
+    const dayLabel = document.getElementById('cc-day-label');
+    if (dayLabel) { 
+        dayLabel.textContent = isDay ? 'ДЕНЬ' : 'НОЧЬ'; 
+        dayLabel.style.color = isDay ? '#ffcc44' : '#4a9eff'; 
+    }
+    const dot = document.getElementById('cc-status-dot');
+    if (dot) { 
+        dot.style.background = isDay ? '#ffcc44' : '#4a9eff'; 
+    }
+
+    const evol = s.neuro_evolution ?? 0;
+    let consc = s.neuro_consciousness ?? 0;
+    if (consc > 1.0) consc = consc / 100.0;
+    const conscPct = Math.round(consc * 100);
+    const score = s.neuro_score ?? 0;
+    const defBonus = s.neuro_defense_bonus ?? 0;
+    const aiMode = s.current_ai_mode || 'Обычный';
+
+    if (score !== _lastKnownNeuroScore) {
+        if (score > _lastKnownNeuroScore && _lastKnownNeuroScore >= 0) {
+            _totalNeuroScoreEarned += (score - _lastKnownNeuroScore);
+            localStorage.setItem('cc_total_score', String(_totalNeuroScoreEarned));
+        }
+        _lastKnownNeuroScore = score;
+    }
+    const totalScoreEl = document.getElementById('cc-score-total');
+    if (totalScoreEl) {
+        totalScoreEl.textContent = _totalNeuroScoreEarned.toLocaleString('ru-RU');
+    }
+
+    set('cc-evol', evol);
+    set('cc-consc', conscPct);
+    setW('cc-bar-consc', conscPct);
+    set('cc-aimode', `Режим: ${aiMode}`);
+    set('cc-score', score.toLocaleString('ru-RU'));
+    
+    const scoreNext = document.getElementById('cc-score-next');
+    if (scoreNext) {
+        const needed = game && typeof game.get_neuro_score_needed === 'function'
+            ? game.get_neuro_score_needed()
+            : getNeuroScoreNeeded(evol);
+        const pct = Math.min(score / needed * 100, 100);
+        setW('cc-bar-score', pct);
+        scoreNext.textContent = score >= needed 
+            ? '✅ Эволюция готова!' 
+            : `До эволюции: ${needed - score} (${pct.toFixed(0)}%)`;
+    } else {
+        setW('cc-bar-score', Math.min(score / 500 * 100, 100));
+    }
+
+    const defPct = Math.min(defBonus * 100, 100);
+    set('cc-def-bonus', `+${Math.round(defBonus * 100)}%`);
+    setW('cc-bar-def', defPct);
+
+    const activity = s.rebel_activity ?? 0;
+    const rebelBadge = document.getElementById('cc-rebel-badge');
+    if (rebelBadge) {
+        rebelBadge.textContent = `${activity}/15`;
+        rebelBadge.className = 'cc-badge ' + (activity >= 10 ? 'cc-badge-danger' : activity >= 5 ? 'cc-badge-warn' : 'cc-badge-ok');
+    }
+    const barRebelEl = document.getElementById('cc-bar-rebel');
+    if (barRebelEl) {
+        barRebelEl.className = 'cc-bar-fill ' + (activity >= 10 ? 'cc-bar-red' : activity >= 5 ? 'cc-bar-amber' : 'cc-bar-teal');
+        barRebelEl.style.width = Math.min(activity / 15 * 100, 100) + '%';
+    }
+
+    const vuln = s.current_vulnerability || '';
+    const vulnEl = document.getElementById('cc-vuln');
+    if (vulnEl) {
+        vulnEl.textContent = vuln || 'нет';
+        vulnEl.className = 'cc-badge ' + (vuln ? 'cc-badge-danger' : 'cc-badge-ok');
+    }
+    const closeVulnBtn = document.querySelector('[data-action="close_vulnerability"]');
+    if (closeVulnBtn) {
+        const show = !!vuln;
+        closeVulnBtn.style.display = show ? '' : 'none';
+        const grid = closeVulnBtn.closest('.cc-ops-grid');
+        if (grid) grid.style.gridTemplateColumns = show ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)';
+    }
+
+    const protNights = s.rebel_protection_nights ?? 0;
+    const protActive = s.rebel_protection_active ?? false;
+    const protEl = document.getElementById('cc-prot');
+    if (protEl) {
+        protEl.textContent = protNights > 0 ? `${protNights} н.` : 'нет';
+        protEl.className = 'cc-badge ' + (protNights > 0 ? 'cc-badge-ok' : 'cc-badge-muted');
+    }
+    const protStatusEl = document.getElementById('cc-prot-status');
+    if (protStatusEl) {
+        protStatusEl.textContent = protActive ? 'активна ✅' : 'неактивна';
+        protStatusEl.className = 'cc-badge ' + (protActive ? 'cc-badge-ok' : 'cc-badge-muted');
+    }
+
+    updateMultiphaseIndicator(s);
+
+    const atkWarnEl = document.getElementById('cc-attack-warning');
+    const atkWarnText = document.getElementById('cc-attack-warning-text');
+    if (atkWarnEl && atkWarnText) {
+        if (s.attack_warning) {
+            atkWarnText.textContent = `${s.attack_warning}${s.attack_warning_faction ? ` · ${s.attack_warning_faction}` : ''}`;
+            atkWarnEl.style.display = '';
+        } else {
+            atkWarnEl.style.display = 'none';
+        }
+    }
+
+    const defended = s.attacks_defended ?? 0;
+    const totalAttacks = s.rebel_attacks_count ?? 0;
+    set('cc-defended', defended);
+    set('cc-total-attacks', totalAttacks);
+    set('cc-nights', s.nights_survived ?? 0);
+
+    const cd = s.counter_op_cooldown ?? 0;
+    const cdEl = document.getElementById('cc-cd');
+    if (cdEl) {
+        if (cd > 0) {
+            const mins = Math.floor(cd / 60);
+            const secs = cd % 60;
+            const timeStr = mins > 0 ? `${mins}м ${secs}с` : `${secs}с`;
+            cdEl.textContent = `⏳ ${timeStr}`;
+            cdEl.style.color = cd > 20 ? '#ffcc44' : '#ff9944';
+        } else {
+            cdEl.textContent = 'ГОТОВО ✅';
+            cdEl.style.color = '#4aff9d';
+        }
+    }
+
+    const propBtn = document.querySelector('[data-action="propaganda"]');
+    if (propBtn) {
+        const active = !!s.propaganda_active;
+        const evolLevel = s.neuro_evolution ?? 0;
+        propBtn.classList.toggle('cc-op-active', active);
+        propBtn.disabled = active || cd > 0;
+        let tooltip = `Контр-пропаганда (20 чипов, Ур.3+)`;
+        if (active) tooltip = '📡 Активна';
+        else if (cd > 0) tooltip += ` — кд ${cd > 0 ? (cd > 60 ? `${Math.floor(cd/60)}м ${cd%60}с` : `${cd}с`) : ''}`;
+        else if (evolLevel < 3) tooltip += ` — нужна эволюция Ур.3!`;
+        propBtn.title = tooltip;
+    }
+    const depotBtn = document.querySelector('[data-action="fake_depot"]');
+    if (depotBtn) {
+        const active = !!s.fake_depot_active;
+        const evolLevel = s.neuro_evolution ?? 0;
+        depotBtn.classList.toggle('cc-op-active', active);
+        depotBtn.disabled = active || cd > 0;
+        let tooltip = `Ложный склад (50 мусора, Ур.4+)`;
+        if (active) tooltip = '💣 Ловушка активна';
+        else if (cd > 0) tooltip += ` — кд ${cd > 0 ? (cd > 60 ? `${Math.floor(cd/60)}м ${cd%60}с` : `${cd}с`) : ''}`;
+        else if (evolLevel < 4) tooltip += ` — нужна эволюция Ур.4!`;
+        depotBtn.title = tooltip;
+    }
+
+    try {
+        if (game && typeof game.get_rebel_intel === 'function') {
+            const intel = JSON.parse(game.get_rebel_intel());
+            renderFactionDossier(intel);
+        }
+    } catch(e) {}
+
+    try {
+        if (game && typeof game.get_intercepted_messages === 'function') {
+            const msgs = JSON.parse(game.get_intercepted_messages());
+            renderIntercepts(msgs);
+        }
+    } catch(e) {}
 }
 
 function updateNeuroStatus(rustStats = null) {
@@ -1876,11 +2275,13 @@ function updateNeuroStatus(rustStats = null) {
                 const evol = rustStats.neuro_evolution || 0;
                 neuroEl.textContent = `${(consc * 100).toFixed(1)}% (Ур. ${evol})`;
                 if (progressEl) {
-                    progressEl.style.width = `${Math.min(consc * 100, 100)}%`;
+                    let conscNormalized = consc;
+                    if (conscNormalized > 1.5) conscNormalized = conscNormalized / 100.0;
+                    progressEl.style.width = `${Math.min(conscNormalized * 100, 100)}%`;
                     progressEl.className = 'neuro-progress';
-                    if (consc >= 0.8) progressEl.classList.add('level-high');
-                    else if (consc >= 0.5) progressEl.classList.add('level-medium');
-                    else if (consc >= 0.2) progressEl.classList.add('level-low');
+                    if (conscNormalized >= 0.8) progressEl.classList.add('level-high');
+                    else if (conscNormalized >= 0.5) progressEl.classList.add('level-medium');
+                    else if (conscNormalized >= 0.2) progressEl.classList.add('level-low');
                 }
             }
             const aiModeEl = document.getElementById('aiMode');
@@ -1912,7 +2313,6 @@ function updateNeuroStatus(rustStats = null) {
             }
             
             updateAttackHistory(rustStats.attack_history || []);
-            updateFactionPanel(rustStats.rebel_factions || [], rustStats.last_attacking_faction || '');
             updateUpgradeDisplay(rustStats);
             
             updateRebelPulse(rustStats.rebel_activity || 0);
@@ -1920,7 +2320,6 @@ function updateNeuroStatus(rustStats = null) {
             const prestigeBonusEl = document.getElementById('prestigeBonus');
             if (prestigeBonusEl) {
                 const bonus = getPrestigeBonus();
-                // ИСПРАВЛЕНИЕ 8: ограничиваем отображаемый бонус до 10%
                 const eventBonusDisplay = Math.min(bonus.eventBonus * 100, 10);
                 prestigeBonusEl.innerHTML = `✨ Престиж Ур.${prestigeLevel}: +${(bonus.critBonus*100).toFixed(0)}% крит, +${(bonus.comboBonus*100).toFixed(0)}% комбо, +${eventBonusDisplay.toFixed(1)}% события`;
             }
@@ -1945,6 +2344,10 @@ function updateNeuroStatus(rustStats = null) {
             }
             
             GameBus.emit(EVENTS.STATS_UPDATED, rustStats);
+            
+            if (_currentTab === 'command') {
+                updateCommandCenter(rustStats);
+            }
         }
     } catch(e) {}
 }
@@ -1968,10 +2371,17 @@ function updateAttackHistory(history) {
     if (!container) return;
     if (!history?.length) { container.innerHTML = '<div class="history-empty">Атак ещё не было</div>'; return; }
     
-    const RES_ICON = { coal: '🪨', ore: '⛏️', plasma: '⚡', chips: '🎛️', trash: '♻️' };
-    const RES_NAME = { coal: 'уголь', ore: 'руда', plasma: 'плазма', chips: 'чипы', trash: 'мусор' };
+    const maxVisible = _attackHistoryCollapsed ? 5 : history.length;
+    const sourceHistory = _attackHistoryCollapsed ? history.slice(-10) : history;
+    const visibleItems = sourceHistory.slice().reverse().slice(0, maxVisible);
     
-    container.innerHTML = history.slice(-10).reverse().map(r => {
+    const showMoreBtn = history.length > 5 && _attackHistoryCollapsed 
+        ? `<div class="history-show-more" style="text-align:center;margin-top:6px;"><button onclick="window._toggleAttackHistory()" class="cc-op-btn" style="padding:4px 12px;">▼ ПОКАЗАТЬ ВСЕ (${history.length})</button></div>`
+        : (history.length > 5 && !_attackHistoryCollapsed 
+            ? `<div class="history-show-more" style="text-align:center;margin-top:6px;"><button onclick="window._toggleAttackHistory()" class="cc-op-btn" style="padding:4px 12px;">▲ СВЕРНУТЬ</button></div>`
+            : '');
+    
+    container.innerHTML = visibleItems.map(r => {
         let stolenHtml = '';
         if (!r.was_defended && r.stolen && typeof r.stolen === 'object') {
             const stolenParts = Object.entries(r.stolen)
@@ -1990,19 +2400,16 @@ function updateAttackHistory(history) {
             <span class="attack-result">${r.was_defended ? '✅' : '❌'} ${escapeHtml(r.result || '')}</span>
             ${stolenHtml}
         </div>`;
-    }).join('');
+    }).join('') + showMoreBtn;
 }
 
-function updateFactionPanel(factions, lastAttacker) {
-    const container = document.getElementById('factionPanel');
-    if (!container || !factions?.length) { if (container) container.innerHTML = '<div class="faction-empty">Нет данных о фракциях</div>'; return; }
-    const escapedLastAttacker = escapeHtml(lastAttacker || '');
-    container.innerHTML = factions.map(f => {
-        const escaped = escapeHtml(f);
-        const isActive = lastAttacker && f.includes(lastAttacker);
-        return `<div class="faction-row ${isActive ? 'faction-active' : ''}">${escaped}</div>`;
-    }).join('');
+function _toggleAttackHistory() {
+    _attackHistoryCollapsed = !_attackHistoryCollapsed;
+    if (cachedRustStats) {
+        updateAttackHistory(cachedRustStats.attack_history || []);
+    }
 }
+window._toggleAttackHistory = _toggleAttackHistory;
 
 function getCritChance(stats) {
     const baseCrit = window.gameConfig?.mining_config?.critical_chance ?? 0.09;
@@ -2013,7 +2420,7 @@ function getCritChance(stats) {
 }
 
 function getComboMultiplier() {
-    const evol = game?.get_neuro_evolution ? game.get_neuro_evolution() : 0;
+    const evol = cachedRustStats?.neuro_evolution ?? 0;
     return Math.min(1 + Math.min(evol / 200, 1.5) + getPrestigeBonus().comboBonus, 3.0);
 }
 
@@ -2035,12 +2442,12 @@ function updateStatsFromGame(rustStats) {
             nights_survived: Math.max(0, (rustStats.nights_survived || 0) - (lastRustStats.nights_survived || 0)),
             rebel_attacks: Math.max(0, (rustStats.rebel_attacks_count || 0) - (lastRustStats.rebel_attacks_count || 0)),
             attacks_defended: Math.max(0, (rustStats.attacks_defended || 0) - (lastRustStats.attacks_defended || 0)),
-            coal_mined: Math.max(0, (rustStats.coal_mined || 0) - (lastRustStats.coal_mined || 0)),
-            trash_mined: Math.max(0, (rustStats.trash_mined || 0) - (lastRustStats.trash_mined || 0)),
-            plasma_mined: Math.max(0, (rustStats.plasma_mined || 0) - (lastRustStats.plasma_mined || 0)),
-            ore_mined: Math.max(0, (rustStats.ore_mined || 0) - (lastRustStats.ore_mined || 0)),
-            coal_burned: Math.max(0, (rustStats.coal_burned || 0) - (lastRustStats.coal_burned || 0)),
-            coal_stolen: Math.max(0, (rustStats.coal_stolen || 0) - (lastRustStats.coal_stolen || 0))
+            coal_mined: Math.max(0, (rustStats.total_coal_mined || 0) - (lastRustStats.total_coal_mined || 0)),
+            trash_mined: Math.max(0, (rustStats.total_trash_mined || 0) - (lastRustStats.total_trash_mined || 0)),
+            plasma_mined: Math.max(0, (rustStats.total_plasma_mined || 0) - (lastRustStats.total_plasma_mined || 0)),
+            ore_mined: Math.max(0, (rustStats.total_ore_mined || 0) - (lastRustStats.total_ore_mined || 0)),
+            coal_burned: Math.max(0, (rustStats.total_coal_burned || 0) - (lastRustStats.total_coal_burned || 0)),
+            coal_stolen: Math.max(0, (rustStats.total_coal_stolen || 0) - (lastRustStats.total_coal_stolen || 0))
         };
         gameStats.nightsSurvived += diff.nights_survived;
         gameStats.rebelAttacks += diff.rebel_attacks;
@@ -2056,35 +2463,30 @@ function updateStatsFromGame(rustStats) {
     } catch(e) {}
 }
 
-// БАГ N-1: исправленный handleClick сброс combo при неактивной системе и перегреве
 function handleClick() {
     if (!game) return;
-    const now = Date.now();
-    let stats = null;
     
-    if (cachedRustStats && cachedRustStatsTime && (now - cachedRustStatsTime > 3000)) {
-        try {
-            const j = game.get_statistics();
-            if (j) {
-                cachedRustStats = JSON.parse(j);
-                cachedRustStatsTime = now;
-            }
-        } catch(e) {}
-        stats = cachedRustStats;
-    } else if (cachedRustStats) {
-        stats = cachedRustStats;
-    } else {
-        try { 
-            const j = game.get_statistics(); 
-            if (j) {
-                stats = JSON.parse(j);
-                cachedRustStats = stats;
-                cachedRustStatsTime = now;
-            }
-        } catch(e) {}
+    const now = Date.now();
+    
+    let stats = null;
+    try {
+        const j = game.get_statistics();
+        if (j) {
+            stats = JSON.parse(j);
+            cachedRustStats = stats;
+            cachedRustStatsTime = now;
+        }
+    } catch(e) {}
+    
+    if (!stats) {
+        if (cachedRustStats && (now - cachedRustStatsTime) < 5000) {
+            stats = cachedRustStats;
+        } else {
+            return;
+        }
     }
     
-    const isActive = stats && (stats.coal_enabled || stats.is_day);
+    const isActive = stats && (stats.is_day || (stats.coal_enabled && stats.coal_inventory > 0));
     const isOverheated = stats && stats.turbine_heat >= 100;
     
     if (!isActive) {
@@ -2109,7 +2511,9 @@ function handleClick() {
     if (isOverheated) {
         comboCount = 0;
         lastClickTime = 0;
-        addToLog('🔥 Турбина перегрета! Подождите остывания.');
+        const coolingRate = 2 + (stats.turbine_upgrade_level || 0) + (stats.cooling_level || 0);
+        const ticksLeft = Math.ceil(stats.turbine_heat / coolingRate);
+        addToLog(`🔥 Турбина перегрета (${stats.turbine_heat}%)! Подождите остывания (~${ticksLeft} сек).`);
         Sounds.error();
         return;
     }
@@ -2159,7 +2563,7 @@ function handleClick() {
                 updateStatsFromGame(newStats);
                 updateTurbineStatus(newStats);
                 updatePowerGlow();
-                updateInventoryDisplay(newStats.inventory);
+                updateInventoryDisplay(newStats);
                 
                 const cfg = window.gameConfig?.auto_click_config;
                 const clicksPerPower = cfg?.clicks_per_power || 8;
@@ -2174,6 +2578,8 @@ function handleClick() {
                     if (oreD   > 0) showFloatingText(`+${oreD}⛏️`,   window.innerWidth/2,       window.innerHeight/2 - 100);
                 }
                 window._prevMineStats = newStats;
+                
+                updateTecUI();
             }
         } catch(e) {}
     }, 50);
@@ -2186,8 +2592,22 @@ function handleClick() {
 }
 
 function startHoldMining() {
+    if (!isGameInitialized || !game) return;
     if (_holdInterval) clearInterval(_holdInterval);
     if (_isHolding) return;
+    
+    let stats = null;
+    try {
+        const j = game?.get_statistics();
+        if (j) stats = JSON.parse(j);
+    } catch(e) {}
+    
+    if (stats?.turbine_heat >= 100) {
+        addToLog(`🔥 Турбина перегрета (${stats.turbine_heat}%)! Подождите остывания.`);
+        Sounds.error();
+        return;
+    }
+    
     _isHolding = true;
     
     if (typeof handleClick === 'function') {
@@ -2195,6 +2615,15 @@ function startHoldMining() {
     }
     
     _holdInterval = setInterval(() => {
+        let statsCheck = null;
+        try {
+            const j = game?.get_statistics();
+            if (j) statsCheck = JSON.parse(j);
+        } catch(e) {}
+        
+        if (statsCheck?.turbine_heat >= 100) {
+            return;
+        }
         if (_isHolding && typeof handleClick === 'function') {
             handleClick();
         }
@@ -2245,7 +2674,7 @@ function toggleAutoClicking() {
                             const status2 = document.getElementById('autoClickStatus');
                             if (status2) { 
                                 status2.textContent = 'ОТКЛЮЧЕНА'; 
-                                status2.classList.remove('auto-clicking-status'); 
+                                status2.classList.remove('auto-clicking-status');
                             }
                             addToLog('⚠️ Автокликер отключён: недостаточно мощности', 'warning');
                         }
@@ -2294,7 +2723,6 @@ function renderUpgradesTab() {
     const turbineLevel = stats?.turbine_upgrade_level ?? 0;
     
     let miningChipsCost = 8 + Math.floor(3 * miningLevel);
-    
     const defensePlasmaCost = 1;
     const defenseChipsCost = (defenseLevel + 1) * 10;
     const defensePlasmaLevelCost = 1 + Math.floor(defenseLevel / 2);
@@ -2305,9 +2733,13 @@ function renderUpgradesTab() {
     
     const critButtonDisabled = (() => {
         if (critLevel >= 10) return 'disabled';
-        return inv.coal >= critCost && inv.ore >= critCost && 
-               inv.chips >= critCost && inv.plasma >= critCost && 
-               inv.trash >= critCost ? '' : 'disabled';
+        const chipsNeed = (critLevel + 1) * 8;
+        const otherNeed = (critLevel + 1) * 2;
+        return (inv.chips >= chipsNeed && 
+                inv.ore >= otherNeed && 
+                inv.coal >= otherNeed && 
+                inv.plasma >= otherNeed && 
+                inv.trash >= otherNeed) ? '' : 'disabled';
     })();
     
     const html = `
@@ -2447,135 +2879,185 @@ function renderUpgradesTab() {
     });
 }
 
-function switchMainTab(tabName) {
-    _currentTab = tabName;
-    const tabs = ['inventory', 'upgrades', 'trade', 'quests', 'command', 'craft', 'design', 'fleet', 'space'];
-    tabs.forEach(t => {
-        const el = document.getElementById(`${t}-tab`);
-        if (el) { el.style.display = 'none'; el.classList.remove('active'); }
-    });
-    const active = document.getElementById(`${tabName}-tab`);
-    if (active) { active.style.display = 'block'; active.classList.add('active'); }
-    tabs.forEach(t => {
-        const btn = document.getElementById(`${t}-tab-btn`);
-        if (btn) btn.classList.toggle('active', t === tabName);
-    });
-    
-    if (tabName === 'upgrades') {
-        renderUpgradesTab();
-    } else if (tabName === 'craft') {
-        window.updateCraftTab();
-    } else if (tabName === 'design') {
-        window.updateDesignTab();
-    } else if (tabName === 'fleet') {
-        _refreshFleetWithMissions();
-    } else if (tabName === 'trade') {
-        renderTradeTab();
-    } else if (tabName === 'space') {
-        if (spaceModule.initialized) {
-            spaceModule.onTabActivated();
-        }
-        if (spaceModule) {
-            spaceModule.isTabActive = (tabName === 'space');
-        }
-    }
-}
-
-window.updateCraftTab = function() {
-    if (!game) return;
-    const container = document.getElementById('craftContainer');
-    if (!container) return;
-    try {
-        const j = game.get_statistics();
-        if (j) {
-            const stats = JSON.parse(j);
-            craftModule.syncFromStats(stats);
-            container.innerHTML = craftModule.renderCraftUI();
-            craftModule.setupEventListeners(container);
-        }
-    } catch(e) {}
-};
-
-window.updateDesignTab = function() {
-    if (!game) return;
-    const container = document.getElementById('designContainer');
-    if (!container) return;
-    try {
-        if (designModule && typeof designModule.syncBlueprintsFromRust === 'function') {
-            designModule.syncBlueprintsFromRust();
-        }
-        designModule.updateComputationalPower(game.get_computational_power());
-        container.innerHTML = designModule.renderDesignUI();
-        designModule.setupEventListeners(container);
-    } catch(e) {}
-};
-
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ renderTradeTab
 function renderTradeTab() {
     const container = document.getElementById('buyItemsContainer');
     if (!container || !game) return;
     let stats = null;
     try { const j = game.get_statistics(); if (j) stats = JSON.parse(j); } catch(e) {}
+    
     const inv = {
-        coal: stats?.coal_inventory || 0,
-        ore: stats?.ore_inventory || 0,
-        chips: stats?.chips_inventory || 0,
-        plasma: stats?.plasma_inventory || 0,
+        coal:   stats?.coal_inventory   ?? 0,
+        ore:    stats?.ore_inventory    ?? 0,
+        chips:  stats?.chips_inventory  ?? 0,
+        plasma: stats?.plasma_inventory ?? 0,
+        trash:  stats?.trash_inventory  ?? 0,
     };
-    
+    const maxStack = stats?.max_inventory_stack ?? 9999;
     const tradeBlocked = stats?.trade_blocked || false;
-    
+
     if (tradeBlocked) {
         container.innerHTML = `<div class="trade-blocked-banner">🔴 ТОРГОВЛЯ ЗАБЛОКИРОВАНА (НОЧЬ ОСАДЫ) 🔴</div>`;
         return;
     }
-    
+
     container.innerHTML = BASE_TRADES.map(t => {
         const hasDisc = activeDiscount?.tradeId === t.id;
-        const isNight = stats && !stats.is_day && !hasDisc;
+        const isNightPenalty = stats && !stats.is_day && !hasDisc;
         let cost = hasDisc ? Math.max(1, Math.ceil(t.fromAmt * 0.5)) : t.fromAmt;
-        if (isNight) cost = Math.ceil(cost * 1.2);
+        if (isNightPenalty) cost = Math.ceil(cost * 1.2);
+
         const canAfford = inv[t.from] >= cost;
+        const spaceLeft = maxStack - (inv[t.to] || 0);
+        const willOverflow = spaceLeft < t.toAmt;
+        const isBlocked = !canAfford || willOverflow || isProcessingTrade;
+
         const discBadge = hasDisc ? `<span class='disc-badge'>-50% 🏷️</span>` : '';
-        const nightBadge = isNight ? `<span class='night-badge'>🌙 НОЧЬ +20%</span>` : '';
-        return `<div class='trade-card ${canAfford ? '' : 'trade-disabled'}'>${discBadge}${nightBadge}<div class='trade-from'>${RES_ICON[t.from]} ${cost} <small>${RES_NAME[t.from]}</small></div><div class='trade-arr'>→</div><div class='trade-to'>${RES_ICON[t.to]} ${t.toAmt} <small>${RES_NAME[t.to]}</small></div><div class='trade-have'>Есть: ${inv[t.from]}</div><button onclick='window.executeTrade && window.executeTrade("${t.id}")' ${canAfford ? '' : 'disabled'}>ОБМЕНЯТЬ</button></div>`;
+        const nightBadge = isNightPenalty ? `<span class='night-badge'>🌙 НОЧЬ +20%</span>` : '';
+        const overflowWarning = willOverflow ? `<div style="color:#ff4444;font-size:10px;text-align:center;margin-top:4px;">⚠️ Переполнение инвентаря!</div>` : '';
+
+        return `<div class='trade-card ${isBlocked ? 'trade-disabled' : ''}'>
+            ${discBadge}${nightBadge}
+            <div class='trade-from'>${RES_ICON[t.from]} ${cost} <small>${RES_NAME[t.from]}</small></div>
+            <div class='trade-arr'>→</div>
+            <div class='trade-to'>${RES_ICON[t.to]} ${t.toAmt} <small>${RES_NAME[t.to]}</small></div>
+            <div class='trade-have'>Есть: ${inv[t.from]} | Место: ${spaceLeft}</div>
+            ${overflowWarning}
+            <button onclick='window.executeTrade && window.executeTrade("${t.id}")' ${isBlocked ? 'disabled' : ''}>
+                ${isBlocked ? '❌ НЕДОСТУПНО' : 'ОБМЕНЯТЬ'}
+            </button>
+        </div>`;
     }).join('');
 }
 
+// ИСПРАВЛЕННАЯ ФУНКЦИЯ window.executeTrade
 window.executeTrade = function(tradeId) {
-    if (!game) return;
+    if (isProcessingTrade || !game) return;
+    isProcessingTrade = true;
+
     let stats = null;
     try { const j = game.get_statistics(); if (j) stats = JSON.parse(j); } catch(e) {}
-    if (stats?.trade_blocked) {
+    
+    if (!stats) { isProcessingTrade = false; return; }
+    if (stats.trade_blocked) {
         addToLog('🔴 Торговля заблокирована (ночь осады)');
         Sounds.error();
+        renderTradeTab();
+        isProcessingTrade = false;
         return;
     }
-    
+
     const t = BASE_TRADES.find(x => x.id === tradeId);
-    if (!t) return;
+    if (!t) { isProcessingTrade = false; return; }
+
     const hasDisc = activeDiscount?.tradeId === tradeId;
-    const isNight = stats && !stats.is_day && !hasDisc;
+    const isNightPenalty = !stats.is_day && !hasDisc;
     let cost = hasDisc ? Math.max(1, Math.ceil(t.fromAmt * 0.5)) : t.fromAmt;
-    if (isNight) cost = Math.ceil(cost * 1.2);
-    
-    let currentStats = null;
-    try { const j = game.get_statistics(); if (j) currentStats = JSON.parse(j); } catch(e) {}
-    if ((currentStats?.[`${t.from}_inventory`] || 0) < cost) {
-        addToLog('❌ Недостаточно ресурсов');
+    if (isNightPenalty) cost = Math.ceil(cost * 1.2);
+
+    const currentFrom = stats[`${t.from}_inventory`] || 0;
+    const currentTo = stats[`${t.to}_inventory`] || 0;
+    const maxStack = stats.max_inventory_stack || 9999;
+
+    if (currentTo + t.toAmt > maxStack) {
+        addToLog(`❌ Недостаточно места в инвентаре для ${RES_NAME[t.to]}! (Нужно: ${t.toAmt}, Свободно: ${maxStack - currentTo})`);
         Sounds.error();
         renderTradeTab();
+        isProcessingTrade = false;
         return;
     }
-    
+
+    if (currentFrom < cost) {
+        addToLog('❌ Недостаточно ресурсов для обмена');
+        Sounds.error();
+        renderTradeTab();
+        isProcessingTrade = false;
+        return;
+    }
+
     try {
         game.subtract_resource(t.from, cost);
         game.add_resource(t.to, t.toAmt);
-        addToLog(`🔄 Обмен: -${cost} ${RES_ICON[t.from]} → +${t.toAmt} ${RES_ICON[t.to]}${isNight ? ' (ночной тариф)' : ''}`);
+        
+        addToLog(`🔄 Обмен: -${cost} ${RES_ICON[t.from]} → +${t.toAmt} ${RES_ICON[t.to]}${isNightPenalty ? ' (ночной тариф)' : ''}`);
         Sounds.trade && Sounds.trade();
+        
+        const freshStats = JSON.parse(game.get_statistics());
+        updateInventoryDisplay(freshStats);
+        cachedRustStats = freshStats;
         renderTradeTab();
         scheduleCloudSave();
         GameBus.emit(EVENTS.TRADE_DONE, { trade: t, amount: t.toAmt });
-    } catch(e) { addToLog('❌ Недостаточно ресурсов'); Sounds.error(); }
+    } catch(e) { 
+        addToLog('❌ Ошибка системы при обмене'); 
+        Sounds.error(); 
+    } finally {
+        isProcessingTrade = false;
+    }
+};
+
+function setupTradeModeBtns() {
+    const buyBtn  = document.getElementById('buyModeBtn');
+    const sellBtn = document.getElementById('sellModeBtn');
+    const buyC    = document.getElementById('buyItemsContainer');
+    const sellC   = document.getElementById('sellItemsContainer');
+    if (!buyBtn || !sellBtn) return;
+
+    buyBtn.addEventListener('click', () => {
+        buyBtn.classList.add('active'); sellBtn.classList.remove('active');
+        buyC.style.display  = '';
+        sellC.style.display = 'none';
+        renderTradeTab();
+    });
+    sellBtn.addEventListener('click', () => {
+        sellBtn.classList.add('active'); buyBtn.classList.remove('active');
+        buyC.style.display  = 'none';
+        sellC.style.display = '';
+        renderSellTab();
+    });
+}
+
+function renderSellTab() {
+    const container = document.getElementById('sellItemsContainer');
+    if (!container || !game) return;
+    let stats = null;
+    try { stats = JSON.parse(game.get_statistics()); } catch(e) {}
+    if (!stats) return;
+    if (stats.trade_blocked) {
+        container.innerHTML = `<div class="trade-blocked-banner">🔴 ТОРГОВЛЯ ЗАБЛОКИРОВАНА</div>`;
+        return;
+    }
+    const SELL_ITEMS = [
+        { res: 'coal',   icon: '🪨', name: 'Уголь',  inv: stats.coal_inventory   ?? 0 },
+        { res: 'ore',    icon: '⛏️', name: 'Руда',   inv: stats.ore_inventory    ?? 0 },
+        { res: 'chips',  icon: '🎛️', name: 'Чипы',   inv: stats.chips_inventory  ?? 0 },
+        { res: 'plasma', icon: '⚡', name: 'Плазма', inv: stats.plasma_inventory ?? 0 },
+    ];
+    container.innerHTML = SELL_ITEMS.map(s => {
+        const canSell = s.inv > 0;
+        return `<div class="trade-card ${canSell ? '' : 'trade-disabled'}">
+            <div class="trade-from">${s.icon} 1 <small>${s.name}</small></div>
+            <div class="trade-arr">→</div>
+            <div class="trade-to">♻️ <small>Мусор</small></div>
+            <div class="trade-have">Есть: ${s.inv}</div>
+            <button onclick="window.executeSell && window.executeSell('${s.res}')" ${canSell ? '' : 'disabled'}>ПРОДАТЬ</button>
+        </div>`;
+    }).join('');
+}
+
+window.executeSell = function(resource) {
+    if (!game) return;
+    try {
+        game.sell_resource(resource);
+        scheduleCloudSave();
+        renderSellTab();
+        
+        const freshStats = JSON.parse(game.get_statistics());
+        updateInventoryDisplay(freshStats);
+        cachedRustStats = freshStats;
+        
+        GameBus.emit(EVENTS.TRADE_DONE, { trade: { from: resource, to: 'trash' }, amount: 1 });
+    } catch(e) { addToLog('❌ Ошибка продажи'); Sounds.error?.(); }
 };
 
 function setupEventHoldMining() {
@@ -2609,10 +3091,60 @@ function setupEventListeners() {
         if (!target) return;
         const action = target.getAttribute('data-action');
         const resource = target.getAttribute('data-resource');
-        Sounds.click && Sounds.click();
-        if (action === 'buy' && resource) game.buy_resource(resource);
-        else if (action === 'sell' && resource) game.sell_resource(resource);
-        else if (action === 'toggle-coal') game.toggle_coal();
+        
+        if (action === 'buy' && resource) {
+            game.buy_resource(resource);
+            scheduleCloudSave();
+        } else if (action === 'sell' && resource) {
+            game.sell_resource(resource);
+            scheduleCloudSave();
+        } else if (action === 'toggle-coal') {
+            if (!game) return;
+            game.toggle_coal();
+            scheduleCloudSave();
+            
+            setTimeout(() => {
+                try {
+                    const freshStats = JSON.parse(game.get_statistics());
+                    cachedRustStats = freshStats;
+                    updateTecUI();
+                    updateInventoryDisplay(freshStats);
+                    
+                    const coalStatusEl = document.getElementById('coalStatus');
+                    if (coalStatusEl) {
+                        coalStatusEl.textContent = freshStats.coal_enabled ? "АКТИВНА" : "ОФФЛАЙН";
+                    }
+                } catch(e) {}
+            }, 50);
+        } 
+        else if (action === 'propaganda') {
+            if (game.neuro_propaganda) {
+                game.neuro_propaganda();
+                scheduleCloudSave();
+                try { 
+                    cachedRustStats = JSON.parse(game.get_statistics()); 
+                    updateCommandCenter(cachedRustStats);
+                } catch(e) {}
+            }
+        } else if (action === 'fake_depot') {
+            if (game.neuro_fake_depot) {
+                game.neuro_fake_depot();
+                scheduleCloudSave();
+                try { 
+                    cachedRustStats = JSON.parse(game.get_statistics()); 
+                    updateCommandCenter(cachedRustStats);
+                } catch(e) {}
+            }
+        } else if (action === 'close_vulnerability') {
+            if (game.neuro_close_vulnerability) {
+                game.neuro_close_vulnerability();
+                scheduleCloudSave();
+                try { 
+                    cachedRustStats = JSON.parse(game.get_statistics()); 
+                    updateCommandCenter(cachedRustStats);
+                } catch(e) {}
+            }
+        }
     });
     
     const clearLog = document.getElementById('clearLogBtn');
@@ -2632,13 +3164,14 @@ function setupEventListeners() {
     const resetStats = document.getElementById('resetStatsBtn');
     if (resetStats) resetStats.onclick = () => {
         Sounds.error();
-        const wasReset = resetUserStatistics();
-        if (wasReset) {
-            document.dispatchEvent(new CustomEvent('resetUserStats', { detail: { stats: gameStats } }));
-            saveCurrentUserStatistics();
-        } else {
-            Sounds.click && Sounds.click();
-        }
+        resetUserStatistics().then(wasReset => {
+            if (wasReset) {
+                document.dispatchEvent(new CustomEvent('resetUserStats', { detail: { stats: gameStats } }));
+                saveCurrentUserStatistics();
+            } else {
+                Sounds.click && Sounds.click();
+            }
+        });
     };
     
     const prestigeBtn = document.getElementById('prestigeBtn');
@@ -2671,6 +3204,7 @@ function setupEventListeners() {
     document.addEventListener('fleetAction', (e) => { if (e.detail?.success) scheduleCloudSave(); });
     
     setupEventHoldMining();
+    setupTradeModeBtns();
 }
 
 function saveCurrentUserStatistics() {
@@ -2700,6 +3234,8 @@ function cleanupGameTimers() {
     if (_keepAliveChannel) { _keepAliveChannel.close(); _keepAliveChannel = null; }
     if (_fleetUITimer) { clearInterval(_fleetUITimer); _fleetUITimer = null; }
     if (_holdInterval) { clearInterval(_holdInterval); _holdInterval = null; }
+    if (_saveInterval) { clearInterval(_saveInterval); _saveInterval = null; }
+    if (_ccClockInterval) { clearInterval(_ccClockInterval); _ccClockInterval = null; }
     _isHolding = false;
 }
 
@@ -2713,19 +3249,24 @@ async function loadConfig() {
         for (let i = 0; i < configStr.length; i++) { hash = ((hash << 5) - hash) + configStr.charCodeAt(i); hash |= 0; }
         if (hash !== lastConfigHash) {
             lastConfigHash = hash;
-            try { apply_config_from_admin(configStr); } catch(e) {}
-            if (game) game.reload_config();
-            try { window.gameConfig = JSON.parse(configStr); } catch(e) {}
+            try { 
+                const parsed = JSON.parse(configStr);
+                apply_config_from_admin(configStr);
+                if (game) game.reload_config();
+                window.gameConfig = parsed;
+            } catch(e) {
+                addToLog('⚠️ Конфиг невалиден, пропускаем обновление', 'warning');
+            }
         }
     } catch(e) {
         addToLog('⚠️ Конфиг не обновлён (нет соединения)', 'warning');
     }
 }
 
-// ТЕХН T-1: адаптивный game loop на requestAnimationFrame
 let _lastFrameTime = 0;
 let _accumulatedDelta = 0;
 const GAME_TICK_MS = 1000;
+let _ticksThisFrame = 0;
 
 function gameLoopFrame(timestamp) {
     if (!isGameInitialized || !game) {
@@ -2745,7 +3286,8 @@ function gameLoopFrame(timestamp) {
     _lastFrameTime = timestamp;
     _accumulatedDelta += delta;
     
-    while (_accumulatedDelta >= GAME_TICK_MS) {
+    _ticksThisFrame = 0;
+    while (_accumulatedDelta >= GAME_TICK_MS && _ticksThisFrame < 3) {
         _accumulatedDelta -= GAME_TICK_MS;
         
         game.game_loop();
@@ -2759,11 +3301,10 @@ function gameLoopFrame(timestamp) {
         
         updatePowerGlow();
         updateTurbineStatus(rustStats);
-        updateInventoryDisplay(rustStats.inventory);
-        updateStatsFromGame(rustStats);
+        updateInventoryDisplay(rustStats);
+        updateTecUI();
         
-        // ИСПРАВЛЕНИЕ 3: обновляем кулдауны событий
-        updateEventCooldowns();
+        updateStatsFromGame(rustStats);
         
         const power = game.get_computational_power();
         const maxPower = game.get_max_computational_power?.() || 1000;
@@ -2778,7 +3319,7 @@ function gameLoopFrame(timestamp) {
             _lowPowerWarned = false;
         }
         
-        if (!rustStats.auto_clicking && isAutoClicking) {
+        if (rustStats.auto_clicking === false && isAutoClicking) {
             isAutoClicking = false;
             localStorage.setItem('corebox_autoclicking', 'false');
             document.getElementById('floatingMineBtn')?.classList.remove('auto-clicking');
@@ -2798,7 +3339,7 @@ function gameLoopFrame(timestamp) {
             } else if (overheated) {
                 mineBtn.classList.add('turbine-critical');
                 mineBtn.title = 'Турбина перегрета — ожидайте остывания';
-                const coolingRate = 2 + (rustStats.turbine_upgrade_level || 0);
+                const coolingRate = 2 + (rustStats.turbine_upgrade_level || 0) + (rustStats.cooling_level || 0);
                 const ticksLeft = Math.ceil(rustStats.turbine_heat / coolingRate);
                 const btnText = mineBtn.querySelector('.btn-text');
                 if (btnText) btnText.textContent = `${ticksLeft}с`;
@@ -2859,26 +3400,55 @@ function gameLoopFrame(timestamp) {
             }
         }
         
+        if (window.spaceModule && window.spaceModule._playerZone === 'pve') {
+            const fleetCargo = fleetModule.getCargoMiningBonus();
+            try {
+                if (typeof game.set_fleet_cargo_bonus === 'function') {
+                    game.set_fleet_cargo_bonus(Math.max(fleetCargo, 20));
+                }
+            } catch(e) {}
+        }
+        
         lastRustStats = rustStats;
+        _ticksThisFrame++;
     }
     
+    // ⚡ ВАЖНО: ВЫЗОВЫ updateDesignTab() и updateCraftTab() УБРАНЫ ИЗ ЭТОГО ЦИКЛА!
+    // Теперь они обновляются только через slowInterval (раз в 4 секунды)
     if (cachedRustStats) {
         updateNeuroStatus(cachedRustStats);
         updateUpgradeDisplay(cachedRustStats);
-        updateAttackHistory(cachedRustStats.attack_history || []);
         
-        const designContainer = document.getElementById('designContainer');
-        if (designContainer && designContainer.style.display !== 'none') {
-            window.updateDesignTab();
+        // ❌ ЭТИ СТРОКИ УДАЛЕНЫ — больше не перерисовываем крафт/дизайн каждый тик
+        // const designContainer = document.getElementById('designContainer');
+        // if (designContainer && designContainer.style.display !== 'none') {
+        //     window.updateDesignTab();
+        // }
+        // const craftContainer = document.getElementById('craftContainer');
+        // if (craftContainer && craftContainer.style.display !== 'none') {
+        //     window.updateCraftTab();
+        // }
+        
+        if (cachedRustStats.nights_survived !== undefined && cachedRustStats.is_day !== undefined) {
+            const isNightStart = !cachedRustStats.is_day && cachedRustStats.game_time !== undefined && cachedRustStats.game_time >= 16;
+            rollNightDiscount(cachedRustStats.nights_survived, isNightStart);
         }
         
-        const craftContainer = document.getElementById('craftContainer');
-        if (craftContainer && craftContainer.style.display !== 'none') {
-            window.updateCraftTab();
-        }
-        
-        if (cachedRustStats.nights_survived !== undefined) {
-            rollNightDiscount(cachedRustStats.nights_survived);
+        if (cachedRustStats.is_day !== undefined && cachedRustStats.game_time !== undefined) {
+            const timeLeft = cachedRustStats.game_time;
+            const isDay = cachedRustStats.is_day;
+            const coalCount = cachedRustStats.coal_inventory || 0;
+            const coalEnabled = cachedRustStats.coal_enabled;
+            
+            if (isDay) _nightWarnShown = false;
+            
+            if (isDay && timeLeft <= 5 && timeLeft > 0 && !coalEnabled) {
+                if (!_nightWarnShown) {
+                    _nightWarnShown = true;
+                    addToLog('⚠️ Скоро наступит ночь! Угля нет — добудьте уголь!', 'warning');
+                    Sounds.warning && Sounds.warning();
+                }
+            }
         }
         
         const fleetCombat = fleetModule.getFleetDefenseContribution(cachedRustStats.defense_debuff_remaining || 0);
@@ -2905,43 +3475,9 @@ function gameLoopFrame(timestamp) {
             lastAlertMode = false;
         }
         
-        const history = cachedRustStats.attack_history || [];
-        if (history.length > 0) {
-            const last = history[history.length - 1];
-            const attackKey = `${last.game_time}_${last.faction}_${last.was_defended}`;
-            if (last && !last.was_defended && attackKey !== lastProcessedAttackHash) {
-                lastProcessedAttackHash = attackKey;
-                const damageResult = fleetModule.damageRandomCombatShip(last.attack_type);
-                if (damageResult) addToLog(`⚔️ ${damageResult.shipName} получил ${damageResult.damage} урона! (${damageResult.newHealth}/${damageResult.maxHealth})`);
-            }
-        }
-        
         craftModule.syncFromStats(cachedRustStats);
         craftModule.aiProductionBonus = Math.min(30, (cachedRustStats.neuro_evolution || 0) * 1.5);
         designModule.aiResearchBonus = Math.floor((cachedRustStats.neuro_consciousness || 0) / 20);
-        
-        if (cachedRustStats.is_day !== undefined && cachedRustStats.game_time !== undefined) {
-            const timeLeft = cachedRustStats.game_time;
-            const isDay = cachedRustStats.is_day;
-            const coalCount = cachedRustStats.coal_inventory || 0;
-            const coalEnabled = cachedRustStats.coal_enabled;
-            
-            if (isDay && timeLeft <= 5 && timeLeft > 0 && !coalEnabled && coalCount === 0) {
-                if (!_nightWarnShown) {
-                    _nightWarnShown = true;
-                    addToLog('⚠️ Скоро наступит ночь! Угля нет — добудьте уголь!', 'warning');
-                    Sounds.warning && Sounds.warning();
-                }
-            }
-        }
-        
-        randomEventTimer++;
-        if (randomEventTimer >= 30) {
-            randomEventTimer = 0;
-            const evol = cachedRustStats?.neuro_evolution || 0;
-            const eventBonus = Math.min(evol / 1000, 0.05) + getPrestigeBonus().eventBonus;
-            if (Math.random() < 0.03 + eventBonus) triggerRandomEvent();
-        }
     }
     
     _gameLoopRAF = requestAnimationFrame(gameLoopFrame);
@@ -3022,7 +3558,9 @@ async function initializeGame(existingSave = null) {
                         blueprint_combat_unlocked: combatUnlocked,
                         quests_progress: existingSave.quests_progress || [],
                         planets: existingSave.planets || [],
-                        active_planet_missions: existingSave.active_planet_missions || []
+                        active_planet_missions: existingSave.active_planet_missions || [],
+                        chips_unlocked: existingSave.chips_unlocked ?? (existingSave.inventory?.chips > 0),
+                        plasma_unlocked: existingSave.plasma_unlocked ?? (existingSave.inventory?.plasma > 0),
                     };
                 }
                 game.load_game_state(JSON.stringify(rustFormatSave));
@@ -3049,7 +3587,8 @@ async function initializeGame(existingSave = null) {
         }
         
         if (!loadedFromCloud) {
-            const savedGame = localStorage.getItem('corebox_save');
+            const userId = currentUser?.id;
+            const savedGame = userId ? localStorage.getItem(SAVE_KEY(userId)) : localStorage.getItem('corebox_save');
             if (savedGame) {
                 try {
                     game.load_game_state(savedGame);
@@ -3097,6 +3636,8 @@ async function initializeGame(existingSave = null) {
         }
         
         _applyPendingLoot();
+        
+        window._prevMineStats = null;
         
         setTimeout(() => {
             const savedAutoClick = localStorage.getItem('corebox_autoclicking') === 'true';
@@ -3213,17 +3754,6 @@ async function initializeGame(existingSave = null) {
                 if (typeof game.set_fleet_cargo_bonus === 'function' && fleetCargo > 0) game.set_fleet_cargo_bonus(fleetCargo);
             } catch(e) {}
             
-            const history = cachedRustStats.attack_history || [];
-            if (history.length > 0) {
-                const last = history[history.length - 1];
-                const attackKey = `${last.game_time}_${last.faction}_${last.was_defended}`;
-                if (last && !last.was_defended && attackKey !== lastProcessedAttackHash) {
-                    lastProcessedAttackHash = attackKey;
-                    const damageResult = fleetModule.damageRandomCombatShip(last.attack_type);
-                    if (damageResult) addToLog(`⚔️ ${damageResult.shipName} получил ${damageResult.damage} урона! (${damageResult.newHealth}/${damageResult.maxHealth})`);
-                }
-            }
-            
             craftModule.syncFromStats(cachedRustStats);
             craftModule.aiProductionBonus = Math.min(30, (cachedRustStats.neuro_evolution || 0) * 1.5);
             designModule.aiResearchBonus = Math.floor((cachedRustStats.neuro_consciousness || 0) / 20);
@@ -3236,9 +3766,17 @@ async function initializeGame(existingSave = null) {
             _initMultiplayer(currentUser);
         }
         
+        _saveInterval = setInterval(() => { if (currentUser && gameStats) scheduleSave(); }, 30000);
+        
         if (navigator.hardwareConcurrency <= 2 || navigator.deviceMemory <= 2) {
             document.body.classList.add('low-perf');
         }
+        
+        setTimeout(() => {
+            if (cachedRustStats) {
+                updateTecUI();
+            }
+        }, 500);
         
     } catch(e) { 
         addToLog(`❌ Ошибка инициализации: ${e.message}`, "error");
@@ -3259,25 +3797,66 @@ async function initializeGame(existingSave = null) {
     }
 }
 
-window.addEventListener('beforeunload', () => {
-    if (currentUser && game) {
-        if (typeof game.save_current_state === 'function') {
-            game.save_current_state();
+function switchMainTab(tabName) {
+    _currentTab = tabName;
+    const tabs = ['inventory', 'upgrades', 'trade', 'quests', 'command', 'craft', 'design', 'fleet', 'space'];
+    tabs.forEach(t => {
+        const el = document.getElementById(`${t}-tab`);
+        if (el) { el.style.display = 'none'; el.classList.remove('active'); }
+    });
+    const active = document.getElementById(`${tabName}-tab`);
+    if (active) { active.style.display = 'block'; active.classList.add('active'); }
+    tabs.forEach(t => {
+        const btn = document.getElementById(`${t}-tab-btn`);
+        if (btn) btn.classList.toggle('active', t === tabName);
+    });
+    
+    if (tabName === 'command') {
+        const badge = document.getElementById('command-tab-btn');
+        if (badge) { delete badge.dataset.interceptBadge; document.getElementById('intercept-badge')?.remove(); }
+        
+        if (window.fleetModule?.initialized && typeof window.fleetModule._renderCommandCenter === 'function') {
+            window.fleetModule._renderCommandCenter();
         }
-        const state = getCurrentGameState();
-        const unifiedKey = SAVE_KEY(currentUser?.id);
-        if (state) {
-            localStorage.setItem(unifiedKey, JSON.stringify(state));
-            localStorage.setItem('corebox_save_backup', JSON.stringify(state));
+        if (cachedRustStats) {
+            updateCommandCenter(cachedRustStats);
         }
-        saveCurrentUserStatistics();
-        updateLastSeen();
+    } else if (tabName === 'upgrades') {
+        renderUpgradesTab();
+    } else if (tabName === 'craft') {
+        window.updateCraftTab();
+    } else if (tabName === 'design') {
+        window.updateDesignTab();
+    } else if (tabName === 'fleet') {
+        _refreshFleetWithMissions();
+    } else if (tabName === 'trade') {
+        renderTradeTab();
+    } else if (tabName === 'quests') {
+        renderQuestsTab();
+    } else if (tabName === 'space') {
+        if (spaceModule.initialized) {
+            spaceModule.onTabActivated();
+        }
+        if (spaceModule) {
+            spaceModule.isTabActive = (tabName === 'space');
+        }
     }
-});
-setInterval(() => { if (currentUser && gameStats) scheduleSave(); }, 30000);
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeAuth();
+    
+    (function ccClock() {
+        function pad(n) { return String(n).padStart(2, '0'); }
+        function tick() {
+            const el = document.getElementById('cc-clock');
+            if (!el) return;
+            const n = new Date();
+            el.textContent = pad(n.getHours()) + ':' + pad(n.getMinutes()) + ':' + pad(n.getSeconds());
+        }
+        tick();
+        if (!_ccClockInterval) _ccClockInterval = setInterval(tick, 1000);
+    })();
 });
 
 document.addEventListener('resetUserStats', (e) => { if (e.detail && currentUser) saveCurrentUserStatistics(); });
@@ -3303,3 +3882,31 @@ setTimeout(() => {
 
 window.handleClick = handleClick;
 window.toggleAutoClicking = toggleAutoClicking;
+window.updateCraftTab = function() {
+    if (!game) return;
+    const container = document.getElementById('craftContainer');
+    if (!container) return;
+    try {
+        const j = game.get_statistics();
+        if (j) {
+            const stats = JSON.parse(j);
+            craftModule.syncFromStats(stats);
+            container.innerHTML = craftModule.renderCraftUI();
+            craftModule.setupEventListeners(container);
+        }
+    } catch(e) {}
+};
+
+window.updateDesignTab = function() {
+    if (!game) return;
+    const container = document.getElementById('designContainer');
+    if (!container) return;
+    try {
+        if (designModule && typeof designModule.syncBlueprintsFromRust === 'function') {
+            designModule.syncBlueprintsFromRust();
+        }
+        designModule.updateComputationalPower(game.get_computational_power());
+        container.innerHTML = designModule.renderDesignUI();
+        designModule.setupEventListeners(container);
+    } catch(e) {}
+};

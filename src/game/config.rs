@@ -1,3 +1,6 @@
+// src/game/config.rs - ИСПРАВЛЕН
+// БАГ #13: синхронизация AutoClickConfig и CoalConsumptionConfig с config.json
+
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -112,7 +115,7 @@ pub struct RebelConfig {
     pub max_adaptation_level: u32,
     pub psychological_warfare_chance: f64,
     pub strategy_adaptation_speed: f64,
-    pub enable_activity_messages: bool,  // НОВОЕ ПОЛЕ
+    pub enable_activity_messages: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -129,6 +132,7 @@ pub struct DisableChances {
     pub power_reset: f64,
 }
 
+// БАГ #13: исправлен AutoClickConfig в соответствии с config.json
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AutoClickConfig {
     pub enabled: bool,
@@ -143,6 +147,7 @@ pub struct AutoClickConfig {
     pub visual_feedback: bool,
 }
 
+// БАГ #13: исправлен CoalConsumptionConfig в соответствии с config.json
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CoalConsumptionConfig {
     pub day_coal_min: u32,
@@ -186,127 +191,104 @@ pub struct DebugConfig {
 impl Default for GameConfig {
     fn default() -> Self {
         Self {
-            version: "3.0".to_string(),
+            version: "3.2".to_string(),
             cycle_duration: 32,
             max_slots: 18,
             time_config: TimeConfig {
-                day_duration: 20,
-                night_duration: 12,
+                day_duration: 24,
+                night_duration: 16,
                 initial_time: 12,
                 start_at_day: true,
             },
             mining_config: MiningConfig {
                 base_chances: BaseChances {
-                    coal: 0.25,
-                    trash: 0.4,
-                    ore: 0.15,
+                    coal: 0.28,
+                    trash: 0.25,
+                    ore: 0.18,
                 },
-                upgrade_bonus: 0.01,
-                coal_bonus: 0.02,
-                critical_chance: 0.05,
+                upgrade_bonus: 0.015,
+                coal_bonus: 0.025,
+                critical_chance: 0.09,
                 critical_multiplier: 2,
                 passive_chances: PassiveChances {
-                    coal: 0.003,
-                    trash: 0.007,
-                    ore: 0.002,
+                    coal: 0.008,
+                    trash: 0.006,
+                    ore: 0.005,
                 },
             },
             economy_config: EconomyConfig {
                 trash_base_price: 2,
                 trade_prices: TradePrices {
-                    coal_buy: 15,
+                    coal_buy: 12,
                     coal_sell: 10,
                     chips_buy: 50,
-                    chips_sell: 30,
-                    plasma_buy: 150,
-                    plasma_sell: 100,
+                    chips_sell: 38,
+                    plasma_buy: 140,
+                    plasma_sell: 120,
                     ore_buy: 25,
                     ore_sell: 18,
                 },
             },
             upgrade_config: UpgradeConfig {
-                mining_base_cost: 10,
-                mining_cost_multiplier: 2,
+                mining_base_cost: 8,
+                mining_cost_multiplier: 3,
                 mining_max_level: 10,
                 defense_activation_cost: 1,
-                defense_base_power: 30,
-                defense_level_bonus: 10,
+                defense_base_power: 45,
+                defense_level_bonus: 14,
                 defense_max_level: 5,
             },
             rebels: RebelConfig {
-                base_attack_chance: 0.05,
+                base_attack_chance: 0.03,
                 activity_increase: 2,
                 activity_decrease: 1,
                 max_activity: 15,
-                activity_bonus_per_level: 0.02,
-                max_attack_chance: 0.1,
-                defense_base_power: 50,
-                defense_level_bonus: 15,
+                activity_bonus_per_level: 0.015,
+                max_attack_chance: 0.12,
+                defense_base_power: 45,
+                defense_level_bonus: 14,
                 steal_rates: StealRates {
-                    low_activity_trash: 0.1,
-                    medium_activity_coal: 0.05,
-                    high_activity_chips: 0.03,
-                    very_high_activity_ore: 0.04,
+                    low_activity_trash: 0.06,
+                    medium_activity_coal: 0.03,
+                    high_activity_chips: 0.02,
+                    very_high_activity_ore: 0.025,
                 },
                 disable_chances: DisableChances {
-                    coal_plant_disable: 0.1,
-                    power_reset: 0.08,
+                    coal_plant_disable: 0.08,
+                    power_reset: 0.06,
                 },
-                power_reset_rate: 0.2,
-                log_activity_threshold: 8,
+                power_reset_rate: 0.15,
+                log_activity_threshold: 7,
                 enable_attack_messages: true,
                 enable_defense_messages: true,
                 enable_strategic_behavior: true,
                 max_adaptation_level: 100,
-                psychological_warfare_chance: 0.1,
-                strategy_adaptation_speed: 0.5,
-                enable_activity_messages: false,  // ВЫКЛЮЧАЕМ СПАМ
+                psychological_warfare_chance: 0.08,
+                strategy_adaptation_speed: 0.4,
+                enable_activity_messages: false,
             },
-            quests: vec![
-                QuestConfig {
-                    id: "3bd16a6a-3c3a-44dd-bca7-75add0883e4a".to_string(),
-                    title: "Автономный режим запустился не полностью".to_string(),
-                    description: "Энергии почти нет. Автономный режим держится на последних процентах. Для запуска основных модулей требуется первичная добыча. Соберите 50 единиц ресурса.".to_string(),
-                    quest_type: "MineAny".to_string(),
-                    target: 50,
-                    reward: 100,
-                    enabled: false,
-                    order: 1,
-                    unlocks: vec![],
-                },
-                QuestConfig {
-                    id: "046d9d57-8748-4a38-b930-271680f9ed62".to_string(),
-                    title: "Ночной цикл".to_string(),
-                    description: "Переживите 5 ночей".to_string(),
-                    quest_type: "SurviveNight".to_string(),
-                    target: 5,
-                    reward: 150,
-                    enabled: false,
-                    order: 2,
-                    unlocks: vec![],
-                },
-            ],
+            quests: vec![],
             auto_click_config: AutoClickConfig {
                 enabled: true,
                 max_computational_power: 1000,
-                clicks_per_power: 15,
-                power_per_manual_click: 2,
-                auto_click_interval: 5,
+                clicks_per_power: 8,           // было 15
+                power_per_manual_click: 4,     // было 2
+                auto_click_interval: 8,        // было 5
                 power_per_auto_click: 3,
-                use_same_chances_as_manual: false,
-                auto_click_chance_multiplier: 0.8,
+                use_same_chances_as_manual: true,
+                auto_click_chance_multiplier: 1.0,
                 long_press_duration: 600,
                 visual_feedback: true,
             },
             coal_consumption_config: CoalConsumptionConfig {
                 day_coal_min: 1,
-                day_coal_max: 2,
-                night_coal_min: 2,
-                night_coal_max: 5,
-                plasma_conversion_rate: 50,
+                day_coal_max: 1,
+                night_coal_min: 1,
+                night_coal_max: 3,              // было 5
+                plasma_conversion_rate: 40,     // было 50
             },
             ui_config: UiConfig {
-                max_log_entries: 200,
+                max_log_entries: 50,
                 auto_save_interval: 30,
                 panel_collapse_enabled: true,
                 power_glow_enabled: true,
@@ -322,7 +304,7 @@ impl Default for GameConfig {
                 rebel_protection_cost: 100,
                 base_mining_bonus: 3,
                 coal_mining_bonus: 2,
-                ore_mining_bonus: 1,
+                ore_mining_bonus: 2,
             },
             debug_config: DebugConfig {
                 enable_debug_commands: true,

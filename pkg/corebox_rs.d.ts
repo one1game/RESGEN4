@@ -24,9 +24,13 @@ export class CoreGame {
     get_active_planet_missions(): string;
     get_blueprint_status(): string;
     get_computational_power(): number;
+    get_intercepted_messages(): string;
     get_max_computational_power(): number;
+    get_neuro_analytics(): string;
     get_neuro_evolution(): number;
+    get_neuro_score_needed(): number;
     get_planets(): string;
+    get_rebel_intel(): string;
     get_resource(resource: string): number;
     get_statistics(): string;
     get_turbine_heat(): number;
@@ -36,6 +40,9 @@ export class CoreGame {
     is_auto_clicking(): boolean;
     is_turbine_cooling(): boolean;
     load_game_state(state_json: string): void;
+    neuro_close_vulnerability(): void;
+    neuro_fake_depot(): void;
+    neuro_propaganda(): void;
     constructor();
     reload_config(): void;
     repair_systems(): void;
@@ -45,8 +52,9 @@ export class CoreGame {
     sell_resource(resource: string): void;
     send_ship_to_planet(ship_id: string, planet_id: string): string;
     set_fleet_cargo_bonus(bonus: number): void;
-    set_fleet_defense_bonus(bonus: number): void;
+    set_fleet_defense_bonus(_bonus: number): void;
     set_max_power(max: number): void;
+    set_neuro_consciousness(consciousness: number): void;
     start_auto_clicking(): void;
     stop_auto_clicking(): void;
     subtract_power(amount: number): void;
@@ -94,9 +102,13 @@ export interface InitOutput {
     readonly coregame_get_active_planet_missions: (a: number) => [number, number];
     readonly coregame_get_blueprint_status: (a: number) => [number, number];
     readonly coregame_get_computational_power: (a: number) => number;
+    readonly coregame_get_intercepted_messages: (a: number) => [number, number];
     readonly coregame_get_max_computational_power: (a: number) => number;
+    readonly coregame_get_neuro_analytics: (a: number) => [number, number];
     readonly coregame_get_neuro_evolution: (a: number) => number;
+    readonly coregame_get_neuro_score_needed: (a: number) => number;
     readonly coregame_get_planets: (a: number) => [number, number];
+    readonly coregame_get_rebel_intel: (a: number) => [number, number];
     readonly coregame_get_resource: (a: number, b: number, c: number) => number;
     readonly coregame_get_statistics: (a: number) => [number, number];
     readonly coregame_get_turbine_heat: (a: number) => number;
@@ -106,6 +118,9 @@ export interface InitOutput {
     readonly coregame_is_auto_clicking: (a: number) => number;
     readonly coregame_is_turbine_cooling: (a: number) => number;
     readonly coregame_load_game_state: (a: number, b: number, c: number) => [number, number];
+    readonly coregame_neuro_close_vulnerability: (a: number) => void;
+    readonly coregame_neuro_fake_depot: (a: number) => void;
+    readonly coregame_neuro_propaganda: (a: number) => void;
     readonly coregame_new: () => number;
     readonly coregame_reload_config: (a: number) => void;
     readonly coregame_repair_systems: (a: number) => void;
@@ -117,6 +132,7 @@ export interface InitOutput {
     readonly coregame_set_fleet_cargo_bonus: (a: number, b: number) => void;
     readonly coregame_set_fleet_defense_bonus: (a: number, b: number) => void;
     readonly coregame_set_max_power: (a: number, b: number) => void;
+    readonly coregame_set_neuro_consciousness: (a: number, b: number) => void;
     readonly coregame_start_auto_clicking: (a: number) => void;
     readonly coregame_stop_auto_clicking: (a: number) => void;
     readonly coregame_subtract_power: (a: number, b: number) => void;

@@ -1,4 +1,13 @@
-
+// ======== save.js (ИСПРАВЛЕНАЯ ВЕРСИЯ v3.6) ========
+// ИСПРАВЛЕНИЯ:
+// БАГ SV-01: loadGameFromCloud — флаг _justLoadedCloudSave сбрасывается
+// БАГ SV-02: saveGameToCloud — last_game_change исправлен на timestamp
+// БАГ SV-03: migrateSave — версия 1→3 устанавливает флаг MIGRATION_KEY
+// БАГ SV-04: getFleet — фильтрация невалидных кораблей
+// БАГ SV-05: loadGameFromCloud — unified восстановление defense_ship
+// БАГ #7: cloudSaveNow через 5 секунд после входа затирает данные
+// + НОВАЯ: ensureMapPosition — инициализация координат игрока
+// + INV-SAVE-CHIPS: сохранение chips_unlocked и plasma_unlocked
 
 import { supabase } from './supabase.js';
 
@@ -20,18 +29,23 @@ export async function applyPendingLoot() {
     if (Object.keys(pending).length === 0) return;
     if (!window.game) return;
     
-    if (pending.ore > 0) window.game.add_resource('ore', pending.ore);
-    if (pending.chips > 0) window.game.add_resource('chips', pending.chips);
-    if (pending.plasma > 0) window.game.add_resource('plasma', pending.plasma);
+    for (const [res, amt] of Object.entries(pending)) {
+        if (amt > 0 && typeof window.game.add_resource === 'function') {
+            window.game.add_resource(res, amt);
+        }
+    }
     
-    if (window.addToLog) window.addToLog(`📦 Восстановлен лут из предыдущей сессии`);
+    if (window.addToLog) {
+        window.addToLog(`📦 Восстановлен лут: ${Object.entries(pending).map(([r,a])=>`${a} ${r}`).join(', ')}`);
+    }
     localStorage.removeItem('corebox_pending_loot');
 }
 
 function getFleet() {
     if (window.fleetModule && window.fleetModule.ships && window.fleetModule.ships.length > 0) {
-        console.log(`📦 getFleet: возвращаем ${window.fleetModule.ships.length} кораблей из fleetModule`);
-        return window.fleetModule.ships;
+        return window.fleetModule.ships.filter(s => 
+            s && typeof s.id === 'string' && typeof s.type === 'string'
+        );
     }
     
     try {
@@ -39,8 +53,10 @@ function getFleet() {
         const saved = localStorage.getItem(key);
         if (saved) {
             const parsed = JSON.parse(saved);
-            console.log(`📦 getFleet: загружено ${parsed.length} кораблей из localStorage`);
-            return parsed;
+            const validShips = parsed.filter(s => 
+                s && typeof s.id === 'string' && typeof s.type === 'string'
+            );
+            return validShips;
         }
     } catch(e) {
         console.warn('Ошибка загрузки флота из localStorage:', e);
@@ -50,15 +66,18 @@ function getFleet() {
 
 function restoreFleet(fleet) {
     if (fleet && Array.isArray(fleet)) {
+        const validFleet = fleet.filter(s => 
+            s && typeof s.id === 'string' && typeof s.type === 'string'
+        );
         const key = getFleetStorageKey();
-        localStorage.setItem(key, JSON.stringify(fleet));
+        localStorage.setItem(key, JSON.stringify(validFleet));
         if (window.fleetModule) {
-            window.fleetModule.ships = fleet;
+            window.fleetModule.ships = validFleet;
             if (window.fleetModule._renderFleetTab) {
                 window.fleetModule._renderFleetTab();
             }
         }
-        console.log(`📦 restoreFleet: восстановлено ${fleet.length} кораблей`);
+        console.log(`📦 restoreFleet: восстановлено ${validFleet.length} кораблей`);
     }
 }
 
@@ -127,12 +146,15 @@ function migrateSave(oldSave, userId) {
     }
     
     const MIGRATION_KEY = 'corebox_migration_v3_done';
-    if (localStorage.getItem(MIGRATION_KEY) === 'true') {
+    const migrationDone = localStorage.getItem(MIGRATION_KEY) === 'true';
+    
+    if (migrationDone) {
         console.log('Миграция уже выполнена ранее');
         return oldSave;
     }
     
     if (oldSave.version === 2) {
+        console.log('Миграция сохранения версии 2 -> 3');
         let consciousness = oldSave.neuro?.consciousness || 0.05;
         if (consciousness > 1.5) {
             consciousness = consciousness / 100.0;
@@ -141,7 +163,8 @@ function migrateSave(oldSave, userId) {
         const migrated = {
             version: 3,
             timestamp: oldSave.timestamp || Date.now(),
-            last_game_change: oldSave.last_game_change || Date.now(),
+            _savedAt: oldSave._savedAt || oldSave.timestamp || Date.now(),
+            last_game_change: Date.now(),
             inventory: oldSave.inventory || {},
             upgrades: oldSave.upgrades || {},
             computational_power: oldSave.computational_power || 0,
@@ -175,7 +198,9 @@ function migrateSave(oldSave, userId) {
             quests_progress: oldSave.quests_progress || [],
             auto_clicking: oldSave.auto_clicking || false,
             planets: oldSave.planets || [],
-            active_planet_missions: oldSave.active_planet_missions || []
+            active_planet_missions: oldSave.active_planet_missions || [],
+            chips_unlocked: oldSave.chips_unlocked ?? false,
+            plasma_unlocked: oldSave.plasma_unlocked ?? false,
         };
         
         try {
@@ -213,6 +238,7 @@ function migrateSave(oldSave, userId) {
     }
     
     if (oldSave.version === 1) {
+        console.log('Миграция сохранения версии 1 -> 3');
         let consciousness = oldSave.neuro_consciousness || 0.05;
         if (consciousness > 1.5) {
             consciousness = consciousness / 100.0;
@@ -221,6 +247,7 @@ function migrateSave(oldSave, userId) {
         const migrated = {
             version: 3,
             timestamp: Date.now(),
+            _savedAt: Date.now(),
             last_game_change: Date.now(),
             inventory: {
                 coal: oldSave.coal || 0,
@@ -267,7 +294,9 @@ function migrateSave(oldSave, userId) {
             quests_progress: [],
             auto_clicking: false,
             planets: [],
-            active_planet_missions: []
+            active_planet_missions: [],
+            chips_unlocked: false,
+            plasma_unlocked: false,
         };
         
         try {
@@ -298,46 +327,39 @@ function migrateSave(oldSave, userId) {
         return migrated;
     }
     
-    console.error(`Неизвестная версия сохранения: ${oldSave.version}. Попытка частичного восстановления.`);
-    return {
-        version: SAVE_VERSION,
-        timestamp: Date.now(),
-        last_game_change: Date.now(),
-        inventory: oldSave.inventory || { coal: 0, ore: 0, chips: 0, plasma: 0, trash: 0 },
-        upgrades: { mining: 0, defense: false, defense_level: 0, crit_level: 0, cooling_level: 0 },
-        computational_power: oldSave.computational_power || 0,
-        max_computational_power: oldSave.max_computational_power || 1000,
-        nights_survived: oldSave.nights_survived || 0,
-        total_mined: oldSave.total_mined || 0,
-        neuro: { 
-            evolution: 0, 
-            consciousness: 0.05, 
-            score: 0, 
-            ai_mode: "Обычный" 
-        },
-        game_time: 24,
-        is_day: true,
-        coal_enabled: false,
-        rebel_activity: 0,
-        rebel_protection_nights: 0,
-        rebel_protection_active: false,
-        blueprints: [],
-        fleet: [],
-        defense_ship_id: null,
-        fleet_log: [],
-        prestige_level: 0,
-        turbine_heat: 0,
-        turbine_upgrade_level: 0,
-        statistics: {},
-        passive_rates: { coal: 0.008, trash: 0.006, ore: 0.005 },
-        last_ai_coal_threshold: 0,
-        current_night_type: "",
-        attack_history: [],
-        quests_progress: [],
-        auto_clicking: false,
-        planets: [],
-        active_planet_missions: []
-    };
+    console.warn(`⚠️ Неизвестная версия сохранения: ${oldSave.version}, возвращаем как есть`);
+    return oldSave;
+}
+
+export async function ensureMapPosition(userId) {
+    try {
+        const { data } = await supabase
+            .from('game_saves')
+            .select('map_x, map_y')
+            .eq('user_id', userId)
+            .maybeSingle();
+        
+        if (data?.map_x != null && data?.map_y != null) {
+            return { x: data.map_x, y: data.map_y };
+        }
+        
+        const { data: pos, error } = await supabase
+            .rpc('assign_map_position', { p_user_id: userId });
+        
+        if (error || !pos?.length) {
+            const x = 300 + Math.random() * 400;
+            const y = 300 + Math.random() * 400;
+            await supabase.from('game_saves')
+                .update({ map_x: x, map_y: y })
+                .eq('user_id', userId);
+            return { x, y };
+        }
+        
+        return { x: pos[0].x, y: pos[0].y };
+    } catch(e) {
+        console.warn('ensureMapPosition error:', e);
+        return { x: 500, y: 500 };
+    }
 }
 
 export async function saveGameToCloud(gameInstance, force = false) {
@@ -406,10 +428,13 @@ export async function saveGameToCloud(gameInstance, force = false) {
             if (rustState?.active_planet_missions) activePlanetMissions = rustState.active_planet_missions;
         } catch(e) {}
         
+        const now = Date.now();
+        
         const saveData = {
             version: SAVE_VERSION,
-            timestamp: Date.now(),
-            last_game_change: Date.now(),
+            timestamp: now,
+            _savedAt: now,
+            last_game_change: now,
             
             inventory: {
                 coal: rustState?.coal_inventory ?? 0,
@@ -471,29 +496,13 @@ export async function saveGameToCloud(gameInstance, force = false) {
             auto_clicking: localStorage.getItem('corebox_autoclicking') === 'true',
             
             planets: planets,
-            active_planet_missions: activePlanetMissions
+            active_planet_missions: activePlanetMissions,
+            
+            chips_unlocked: rustState?.chips_unlocked ?? false,
+            plasma_unlocked: rustState?.plasma_unlocked ?? false,
         };
         
         localStorage.setItem('corebox_save_backup', JSON.stringify(saveData));
-        
-        if (!force) {
-            const existing = await getLatestCloudSave(user.id);
-            if (existing) {
-                const diff = existing.last_game_change - saveData.last_game_change;
-                const hasNewShips = fleet.length > (existing.fleet?.length || 0);
-                
-                if (hasNewShips && diff > 0) {
-                    console.log(`🛡️ Обнаружены новые корабли (${fleet.length} vs ${existing.fleet?.length || 0}), сохраняем несмотря на конфликт`);
-                } else if (existing && diff > 60000) {
-                    console.warn("Облачное сохранение новее, пропускаем", { diff });
-                    return { 
-                        success: false, 
-                        error: "Конфликт: облако новее",
-                        server_save: existing
-                    };
-                }
-            }
-        }
         
         const { error } = await supabase.from('game_saves').upsert({
             user_id: user.id,
@@ -558,7 +567,6 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
             cloudSave.neuro.consciousness = 1.0;
         }
         
-        // БАГ N-6: при загрузке сохранения сбрасываем trade_blocked если день
         if (cloudSave.is_day === true) {
             cloudSave.trade_blocked = false;
         }
@@ -566,12 +574,16 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
         if (mergeWithLocal) {
             const localSave = getLocalSave();
             const CLOCK_TOLERANCE_MS = 60 * 1000;
-            if (localSave && localSave.last_game_change > cloudSave.last_game_change + CLOCK_TOLERANCE_MS) {
+            const localTimestamp = localSave?.timestamp || localSave?._savedAt || 0;
+            const cloudTimestamp = cloudSave.timestamp || cloudSave._savedAt || 0;
+            
+            if (localSave && localTimestamp > cloudTimestamp + CLOCK_TOLERANCE_MS) {
                 console.log("Локальное сохранение новее облачного, используем его");
                 return localSave;
             }
         }
         
+        // INV-SAVE-CHIPS: восстанавливаем chips_unlocked и plasma_unlocked
         if (cloudSave.blueprints) {
             restoreBlueprints(cloudSave.blueprints);
         }
@@ -590,12 +602,16 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
             const userId = window.currentUser?.id;
             const key = userId ? `corebox_defense_ship_${userId}` : 'corebox_defense_ship';
             localStorage.setItem(key, JSON.stringify(cloudSave.defense_ship_id));
+            window.fleetModule.defenseShipId = cloudSave.defense_ship_id;
+            const ship = window.fleetModule.ships.find(s => s.id === cloudSave.defense_ship_id);
+            if (ship) ship.onDefense = true;
         }
         
         if (cloudSave.fleet_log && window.fleetModule) {
             const userId = window.currentUser?.id;
             const key = `corebox_fleet_log_${userId || 'anon'}`;
             localStorage.setItem(key, JSON.stringify(cloudSave.fleet_log));
+            window.fleetModule.fleetLog = cloudSave.fleet_log;
         }
         
         if (cloudSave.prestige_level) {
@@ -605,6 +621,24 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
         if (cloudSave.auto_clicking !== undefined) {
             localStorage.setItem('corebox_autoclicking', cloudSave.auto_clicking ? 'true' : 'false');
         }
+        
+        // INV-SAVE-CHIPS: сохраняем в localStorage универсального сохранения
+        const universalSave = {
+            inventory: cloudSave.inventory,
+            computational_power: cloudSave.computational_power,
+            max_computational_power: cloudSave.max_computational_power,
+            neuro_evolution: cloudSave.neuro?.evolution,
+            chips_unlocked: cloudSave.chips_unlocked,
+            plasma_unlocked: cloudSave.plasma_unlocked,
+            timestamp: Date.now()
+        };
+        localStorage.setItem('corebox_save_universal', JSON.stringify(universalSave));
+        
+        window._justLoadedCloudSave = true;
+        
+        setTimeout(() => {
+            window._justLoadedCloudSave = false;
+        }, 10000);
         
         console.log(`✅ Загружено облачное сохранение от ${new Date(cloudSave.timestamp).toLocaleString()}`);
         return cloudSave;
