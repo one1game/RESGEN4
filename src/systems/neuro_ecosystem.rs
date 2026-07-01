@@ -1,45 +1,35 @@
-// ========== src/systems/neuro_ecosystem.rs (ПОЛНОСТЬЮ ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
-// БАГ #15: prng теперь имеет внутренний счётчик для детерминированности
-// + НОВАЯ СИСТЕМА: Перехват сообщений, профили командиров, контр-операции, гонка вооружений
-// ИСПРАВЛЕНИЯ: все методы сделаны pub для доступа из lib.rs
-
 use crate::game::{GameState, GameEvent};
 use crate::game::config::GameConfig;
 use crate::systems::rebel::RebelSystem;
 use std::collections::{VecDeque, HashMap};
 use serde::{Serialize, Deserialize};
 
-// ─── КОНСТАНТЫ Q-LEARNING ────────────────────────────────────────────────────
 const Q_ALPHA: f64 = 0.15;
 const Q_GAMMA: f64 = 0.90;
 const Q_EPSILON_START: f64 = 0.20;
 const Q_EPSILON_MIN: f64 = 0.03;
 const Q_EPSILON_DECAY: f64 = 0.98;
 
-// ─── СОСТОЯНИЯ ИИ ─────────────────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub enum AIState {
     Calm, Alert, Danger, Critical, PostAttack, NightSiege,
 }
 
-// ─── ДЕЙСТВИЯ ИИ ─────────────────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 pub enum AIAction {
     Monitor, RaiseDefenses, PredictiveScanning, AggressiveCounter, ResourceConserve, PsychWarfare,
 }
 
-// ─── ПЕРЕХВАЧЕННОЕ СООБЩЕНИЕ ──────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct InterceptedMessage {
     pub content: String,
     pub target_hint: String,
     pub eta_ticks: i32,
-    pub intercepted_at: i32,
+    pub intercepted_at: i64,
     pub reliability: f64,
     pub is_read: bool,
 }
 
-// ─── ПРОФИЛЬ КОМАНДИРА (на стороне нейро) ────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct CommanderProfile {
     pub faction_id: String,
@@ -50,11 +40,10 @@ pub struct CommanderProfile {
     pub times_frustrated: u32,
 }
 
-// ─── БАЙЕСОВСКИЙ УЗЕЛ УГРОЗЫ ─────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct BayesianThreatNode {
     pub prior_attack: f64,
-    pub observations: VecDeque<(bool, i32)>,
+    pub observations: VecDeque<(bool, i64)>,
     pub ewma_probability: f64,
     pub variance: f64,
 }
@@ -68,7 +57,7 @@ impl BayesianThreatNode {
             variance: 0.1,
         }
     }
-    fn update(&mut self, attack_happened: bool, time: i32) {
+    fn update(&mut self, attack_happened: bool, time: i64) {
         while let Some(&(_, t)) = self.observations.front() {
             if time - t > 200 { self.observations.pop_front(); } else { break; }
         }
@@ -93,7 +82,6 @@ impl BayesianThreatNode {
     }
 }
 
-// ─── МАРКОВСКАЯ ЦЕПЬ ПЕРЕХОДОВ ───────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct MarkovTransition {
     pub matrix: HashMap<AIState, HashMap<AIState, f64>>,
@@ -140,7 +128,6 @@ impl MarkovTransition {
     }
 }
 
-// ─── Q-LEARNING ТАБЛИЦА ───────────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct QTable {
     pub table: HashMap<AIState, HashMap<AIAction, f64>>,
@@ -199,7 +186,6 @@ impl QTable {
     }
 }
 
-// ─── ВРЕМЕННОЙ ПАТТЕРН ───────────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TemporalPattern {
     pub pattern_id: String,
@@ -207,8 +193,8 @@ pub struct TemporalPattern {
     pub attack_rate_day: f64,
     pub mean_interval: f64,
     pub std_interval: f64,
-    pub interval_history: VecDeque<i32>,
-    pub last_attack_time: i32,
+    pub interval_history: VecDeque<i64>,
+    pub last_attack_time: i64,
 }
 
 impl TemporalPattern {
@@ -223,13 +209,13 @@ impl TemporalPattern {
             last_attack_time: 0,
         }
     }
-    fn record_attack(&mut self, time: i32, is_night: bool) {
+    fn record_attack(&mut self, time: i64, is_night: bool) {
         let interval = time - self.last_attack_time;
         if interval > 0 && self.last_attack_time > 0 {
             self.interval_history.push_back(interval);
             if self.interval_history.len() > 30 { self.interval_history.pop_front(); }
             let n = self.interval_history.len() as f64;
-            self.mean_interval = self.interval_history.iter().sum::<i32>() as f64 / n;
+            self.mean_interval = self.interval_history.iter().sum::<i64>() as f64 / n;
             let var = self.interval_history.iter().map(|&x| (x as f64 - self.mean_interval).powi(2)).sum::<f64>() / n;
             self.std_interval = var.sqrt().max(1.0);
         }
@@ -241,7 +227,7 @@ impl TemporalPattern {
             self.attack_rate_day = (self.attack_rate_day * 0.9 + 0.05).min(0.5);
         }
     }
-    fn urgency_score(&self, current_time: i32) -> f64 {
+    fn urgency_score(&self, current_time: i64) -> f64 {
         if self.last_attack_time == 0 || self.std_interval < 0.1 { return 0.5; }
         let elapsed = (current_time - self.last_attack_time) as f64;
         let z = (elapsed - self.mean_interval) / self.std_interval;
@@ -249,10 +235,9 @@ impl TemporalPattern {
     }
 }
 
-// ─── ЗАПИСЬ УГРОЗЫ ───────────────────────────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ThreatRecord {
-    pub timestamp: i32,
+    pub timestamp: i64,
     pub threat_level: u32,
     pub threat_type: String,
     pub was_real_attack: bool,
@@ -273,7 +258,7 @@ pub struct Pattern {
     pub pattern_type: String,
     pub effectiveness: f64,
     pub usage_count: u32,
-    pub last_used: i32,
+    pub last_used: i64,
     pub success_rate: f64,
     pub counter_strategy: String,
     pub confidence: f64,
@@ -295,7 +280,7 @@ pub struct NeuroStats {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub enum AIDecision { Normal, PredictiveMode, DefensiveMode, AggressiveCounter, StrategicRetreat, PsychWarfare, ResourceOptimize }
 
-// ─── БОНУСЫ СОЗНАНИЯ ─────────────────────────────────────────────────────────
+#[allow(dead_code)]
 pub struct ConsciousnessBonus {
     pub mining_chance_bonus: f64,
     pub heat_reduction: f64,
@@ -308,7 +293,6 @@ pub struct ConsciousnessBonus {
     pub global_multiplier: f64,
 }
 
-// ─── ГЛАВНАЯ СТРУКТУРА НЕЙРО-ЭКОСИСТЕМЫ ──────────────────────────────────────
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub struct NeuroEcosystem {
@@ -322,7 +306,7 @@ pub struct NeuroEcosystem {
     pub avg_reaction_time: f32,
     pub total_attacks_processed: u32,
     pub successful_predictions: u32,
-    pub last_processed_time: i32,
+    pub last_processed_time: i64,
     pub cooldown: i32,
     pub reaction_cooldown: i32,
     pub attack_counter: u32,
@@ -343,22 +327,24 @@ pub struct NeuroEcosystem {
     pub cusum_threshold: f64,
     pub decision_log: VecDeque<String>,
     pub prng_counter: u64,
-    
-    // ── НОВЫЕ ПОЛЯ ──
+
     pub intercepted_messages: VecDeque<InterceptedMessage>,
-    pub last_intercept_at: i32,
+    pub last_intercept_at: i64,
     pub intercept_cooldown: i32,
     pub commander_profiles: HashMap<String, CommanderProfile>,
     pub propaganda_active: bool,
-    pub propaganda_expires_at: i32,
+    pub propaganda_expires_at: i64,
     pub fake_depot_active: bool,
-    pub fake_depot_expires_at: i32,
+    pub fake_depot_expires_at: i64,
+    pub fake_depot_ttl: i32,
     pub pending_vulnerability: Option<String>,
-    pub counter_op_cooldown: i32,
-    pub last_counter_op_at: i32,
+    pub counter_op_cooldowns: HashMap<String, (i64, i32)>,
+    pub last_counter_op_at: i64,
     pub avg_player_reaction: f64,
-    pub last_warning_time: i32,
+    pub last_warning_time: i64,
     pub enemy_encryption_level: u32,
+    pub last_log_time: i64,
+    pub last_mode_log_at: i64,
 }
 
 impl Default for NeuroEcosystem {
@@ -368,6 +354,53 @@ impl Default for NeuroEcosystem {
 }
 
 impl NeuroEcosystem {
+    fn restore_effect_cooldown(
+        &mut self,
+        effect_key: &str,
+        current_tick: i64,
+        expires_at: i64,
+        active_duration: i64,
+        cooldown_duration: i32,
+    ) {
+        if self.get_cooldown_remaining(effect_key, current_tick) > 0 {
+            return;
+        }
+
+        let remaining = (expires_at - current_tick - active_duration).max(0) as i32;
+        if remaining > 0 {
+            self.counter_op_cooldowns.insert(
+                effect_key.to_string(),
+                (current_tick - (cooldown_duration - remaining) as i64, cooldown_duration),
+            );
+        }
+    }
+
+    fn restore_timed_counter_op(
+        &mut self,
+        effect_key: &str,
+        current_tick: i64,
+        is_active: bool,
+        expires_at: i64,
+        active_duration: i64,
+        cooldown_duration: i32,
+    ) -> i64 {
+        if !is_active {
+            return 0;
+        }
+
+        let normalized_expires_at = if expires_at <= current_tick {
+            current_tick + active_duration
+        } else {
+            expires_at
+        };
+
+        if self.get_cooldown_remaining(effect_key, current_tick) == 0 {
+            self.set_cooldown(effect_key, current_tick, cooldown_duration);
+        }
+
+        normalized_expires_at
+    }
+
     pub fn new() -> Self {
         let bayesian_nodes: Vec<BayesianThreatNode> = (0..=15).map(|level| {
             let prior = (level as f64 * 0.05).min(0.8).max(0.02);
@@ -423,12 +456,15 @@ impl NeuroEcosystem {
             propaganda_expires_at: 0,
             fake_depot_active: false,
             fake_depot_expires_at: 0,
+            fake_depot_ttl: 0,
             pending_vulnerability: None,
-            counter_op_cooldown: 30,
+            counter_op_cooldowns: HashMap::new(),
             last_counter_op_at: -999,
             avg_player_reaction: 15.0,
             last_warning_time: 0,
             enemy_encryption_level: 0,
+            last_log_time: -100,
+            last_mode_log_at: -100,
         }
     }
 
@@ -442,7 +478,7 @@ impl NeuroEcosystem {
 
     fn classify_state(&self, state: &GameState) -> AIState {
         if state.current_night_type == "siege" { return AIState::NightSiege; }
-        let recently_attacked = state.game_time - self.temporal_pattern.last_attack_time < 15;
+        let recently_attacked = state.tick_count - self.temporal_pattern.last_attack_time < 15;
         if recently_attacked { return AIState::PostAttack; }
         match state.rebel_activity {
             0..=2 => AIState::Calm,
@@ -479,6 +515,94 @@ impl NeuroEcosystem {
         state.neuro_prediction_bonus = self.get_prediction_bonus();
     }
 
+    pub fn restore_runtime_from_state(&mut self, state: &GameState) {
+        self.evolution_level = state.neuro_evolution;
+        self.system_consciousness = state.neuro_consciousness;
+        self.evolution_score = state.neuro_score;
+
+        self.fake_depot_active = state.fake_depot_active;
+        if self.fake_depot_active {
+            if self.fake_depot_ttl <= 0 {
+                self.fake_depot_ttl = 70;
+            }
+        } else {
+            self.fake_depot_ttl = 0;
+        }
+        self.fake_depot_expires_at = self.restore_timed_counter_op(
+            "fake_depot",
+            state.tick_count,
+            self.fake_depot_active,
+            self.fake_depot_expires_at,
+            self.fake_depot_ttl as i64,
+            45,
+        );
+
+        self.propaganda_active = state.propaganda_active;
+        self.propaganda_expires_at = self.restore_timed_counter_op(
+            "propaganda",
+            state.tick_count,
+            self.propaganda_active,
+            self.propaganda_expires_at,
+            40,
+            35,
+        );
+
+        if state.fleet_shield_active {
+            self.restore_effect_cooldown(
+                "fleet_shield",
+                state.tick_count,
+                state.fleet_shield_expires_at,
+                10,
+                50,
+            );
+        }
+
+        if state.blueprints_encrypted {
+            self.restore_effect_cooldown(
+                "encrypt_blueprints",
+                state.tick_count,
+                state.blueprint_encryption_expires_at,
+                30,
+                60,
+            );
+        }
+
+        if state.planets_fortified {
+            self.restore_effect_cooldown(
+                "fortify_planets",
+                state.tick_count,
+                state.planet_fortification_expires_at,
+                40,
+                80,
+            );
+        }
+    }
+
+    pub fn tick_passive(&mut self, _efficiency: f64) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        if self.fake_depot_active {
+            self.fake_depot_ttl -= 1;
+            if self.fake_depot_ttl <= 0 {
+                self.fake_depot_active = false;
+                events.push(GameEvent::LogMessage(
+                    "💨 Фальшивый склад рассеялся (время вышло)".to_string()
+                ));
+            }
+        }
+
+        if self.propaganda_active {
+
+        }
+
+        events
+    }
+
+    pub fn emergency_process(&mut self, _state: &mut GameState, _efficiency: f64) -> Vec<GameEvent> {
+
+        Vec::new()
+    }
+
     pub fn process_threat(&mut self, state: &mut GameState, rebel_system: &mut RebelSystem, config: &GameConfig, had_real_attack: bool, was_defended: bool) -> Vec<GameEvent> {
         let mut events = Vec::new();
         self.stats.total_threats_processed += 1;
@@ -487,12 +611,14 @@ impl NeuroEcosystem {
             if was_defended { self.stats.successful_defenses += 1; }
             else { self.stats.failed_defenses += 1; }
         }
-        let effective_cooldown = self.calculate_cooldown(had_real_attack, state.rebel_activity);
-        if state.game_time - self.last_processed_time < effective_cooldown { return events; }
-        self.last_processed_time = state.game_time;
+        let effective_cooldown = self.calculate_cooldown(had_real_attack, state.rebel_activity, state);
+        if state.tick_count - self.last_processed_time < effective_cooldown as i64 {
+            return events;
+        }
+        self.last_processed_time = state.tick_count;
         let activity_idx = (state.rebel_activity as usize).min(15);
-        self.bayesian_nodes[activity_idx].update(had_real_attack, state.game_time);
-        if had_real_attack { self.temporal_pattern.record_attack(state.game_time, !state.is_day); }
+        self.bayesian_nodes[activity_idx].update(had_real_attack, state.tick_count);
+        if had_real_attack { self.temporal_pattern.record_attack(state.tick_count, !state.is_day); }
         let expected_prob = self.bayesian_nodes[activity_idx].prior_attack;
         let observed = if had_real_attack { 1.0 } else { 0.0 };
         let anomaly_detected = self.update_cusum(observed, expected_prob);
@@ -506,7 +632,7 @@ impl NeuroEcosystem {
         }
         let prev_state = self.current_ai_state.clone();
         self.current_ai_state = new_state.clone();
-        let rng_val = self.prng(state.game_time as u64 + self.stats.q_learning_steps);
+        let rng_val = self.prng(state.tick_count as u64 + self.stats.q_learning_steps as u64);
         let chosen_action = self.q_table.select_action(&new_state, rng_val);
         self.stats.q_learning_steps += 1;
         let bayes_prob = self.bayesian_threat_probability(state.rebel_activity, !state.is_day);
@@ -514,7 +640,7 @@ impl NeuroEcosystem {
         let markov_danger = matches!(markov_next, AIState::Danger | AIState::Critical | AIState::NightSiege);
         let final_threat_prob = bayes_prob * 0.6 + (if markov_danger { 0.8 } else { 0.2 }) * 0.4;
         let was_predicted = final_threat_prob > self.adaptive_alarm_threshold;
-        self.record_threat_weighted(state.rebel_activity, had_real_attack, state.game_time, state.upgrades.defense_level, was_defended, was_predicted, final_threat_prob, &chosen_action);
+        self.record_threat_weighted(state.rebel_activity, had_real_attack, state.tick_count, state.upgrades.defense_level, was_defended, was_predicted, final_threat_prob, &chosen_action);
         if was_predicted && had_real_attack {
             self.successful_predictions += 1;
             self.correct_prediction_streak += 1;
@@ -532,15 +658,31 @@ impl NeuroEcosystem {
             self.prediction_accuracy = self.successful_predictions as f64 / self.total_attacks_processed as f64;
             self.stats.avg_prediction_accuracy = self.prediction_accuracy;
         }
-        let points = self.calculate_evolution_points(had_real_attack, state.rebel_activity, was_defended, was_predicted);
+
+        let points = self.calculate_evolution_points(had_real_attack, state.rebel_activity, was_defended, was_predicted, state);
         if points > 0 {
             self.evolution_score += points;
-            let reason = if self.correct_prediction_streak >= 3 { format!("серия точных прогнозов x{}", self.correct_prediction_streak) }
-                else if had_real_attack { "реальная атака".to_string() }
-                else if was_predicted { "точное предсказание".to_string() }
-                else { "анализ угрозы".to_string() };
-            events.push(GameEvent::LogMessage(format!("🧠 {}: +{} очков эволюции (активность: {})", reason, points, state.rebel_activity)));
+
+            let should_log = had_real_attack
+                || self.correct_prediction_streak >= 4
+                || (was_predicted && state.rebel_activity >= 9)
+                || state.tick_count - self.last_log_time > 90;
+
+            if should_log {
+                let reason = if self.correct_prediction_streak >= 3 {
+                    format!("серия точных прогнозов x{}", self.correct_prediction_streak)
+                } else if had_real_attack {
+                    "реальная атака".to_string()
+                } else if was_predicted {
+                    "точное предсказание".to_string()
+                } else {
+                    "анализ угрозы".to_string()
+                };
+                events.push(GameEvent::LogMessage(format!("🧠 {}: +{} очков эволюции (активность: {})", reason, points, state.rebel_activity)));
+                self.last_log_time = state.tick_count;
+            }
         }
+
         self.learn_pattern(state, rebel_system, had_real_attack, was_defended);
         let action_events = self.apply_q_action(state, rebel_system, config, &chosen_action, final_threat_prob);
         events.extend(action_events);
@@ -556,31 +698,300 @@ impl NeuroEcosystem {
                 events.push(GameEvent::LogMessage(format!("🔥 Серия из {} атак! +{} бонусных очков эволюции", self.attack_counter, bonus)));
             }
         } else { self.attack_counter = 0; }
-        self.cleanup_old_memory(state.game_time);
+        self.cleanup_old_memory(state.tick_count);
         self.update_bonuses();
         self.update_metrics(had_real_attack, was_defended, was_predicted);
-        
+
         if let Some(intercept_event) = self.try_intercept_message(rebel_system, state) {
             events.push(intercept_event);
         }
-        if let Some(trap_event) = self.tick_fake_depot(state, rebel_system) {
-            events.push(trap_event);
-        }
-        if self.propaganda_active && state.game_time > self.propaganda_expires_at {
+
+        if self.propaganda_active && state.tick_count > self.propaganda_expires_at {
             self.propaganda_active = false;
             if state.current_ai_mode.contains("Дезинформация") {
                 state.current_ai_mode = "⚙️ Мониторинг".to_string();
             }
             events.push(GameEvent::LogMessage("📡 Контр-пропаганда завершила работу.".to_string()));
         }
-        
+
         self.sync_to_state(state);
-        
+
         events
+    }
+
+    pub fn try_intercept_message(&mut self, rebel_system: &RebelSystem, state: &GameState) -> Option<GameEvent> {
+        if state.tick_count - self.last_intercept_at < self.intercept_cooldown as i64 { return None; }
+        if self.evolution_level < 2 { return None; }
+
+        let base_chance = 0.08 + self.system_consciousness * 0.25;
+        let encryption_penalty = self.enemy_encryption_level as f64 * 0.08;
+        let intercept_chance = (base_chance - encryption_penalty).max(0.03);
+
+        let rng = self.prng(state.tick_count as u64 * 7919 + self.stats.q_learning_steps);
+        if rng > intercept_chance { return None; }
+
+        let rng2 = self.prng(state.tick_count as u64 * 1031);
+        let rng3 = self.prng(state.tick_count as u64 * 2053);
+
+        let target_hint = if rng2 < 0.3 {
+            "неизвестная цель"
+        } else if rebel_system.htn_plans.front().and_then(|p| p.subtasks.front()).map(|t| t.target.contains("plasma")).unwrap_or(false) {
+            "рудник плазмы"
+        } else {
+            let targets = ["рудник-3", "энергоблок", "склад чипов", "командный пункт", "зарядная станция"];
+            targets[(rng2 * targets.len() as f64) as usize % targets.len()]
+        };
+
+        let eta = if rng3 < 0.2 {
+            6
+        } else {
+            10 + (rng3 * 30.0) as i32
+        };
+
+        let reliability = if self.evolution_level >= 5 {
+            (0.55 + self.prediction_accuracy * 0.35).min(0.85)
+        } else if self.evolution_level >= 3 {
+            (0.45 + self.prediction_accuracy * 0.30).min(0.75)
+        } else {
+            (0.35 + self.prediction_accuracy * 0.25).min(0.65)
+        };
+
+        let content = if self.evolution_level >= 5 {
+            if target_hint == "неизвестная цель" {
+                format!("📡 ПЕРЕХВАТ [Надёжность {:.0}%]: «Цель скрыта, атака через ~{} сек»", reliability * 100.0, eta)
+            } else if eta == 0 {
+                format!("📡 ПЕРЕХВАТ [Надёжность {:.0}%]: «Цель: {}, время атаки неизвестно»", reliability * 100.0, target_hint)
+            } else {
+                format!("📡 ПЕРЕХВАТ [Надёжность {:.0}%]: «Цель: {}, атакуем через ~{} сек»", reliability * 100.0, target_hint, eta * 2)
+            }
+        } else if self.evolution_level >= 3 {
+            if target_hint == "неизвестная цель" {
+                "📡 ОБРЫВОК: «...цель скрыта... операция скоро...»".to_string()
+            } else {
+                format!("📡 ОБРЫВОК: «...{}... операция скоро...»", target_hint)
+            }
+        } else {
+            "📡 ШУМ ЭФИРА: «...подтверждено... ждите приказа...»".to_string()
+        };
+
+        let msg = InterceptedMessage {
+            content: content.clone(),
+            target_hint: target_hint.to_string(),
+            eta_ticks: eta,
+            intercepted_at: state.tick_count,
+            reliability,
+            is_read: false,
+        };
+
+        let should_broadcast = reliability >= 0.72
+            && state.tick_count - self.last_warning_time >= 30;
+        self.last_intercept_at = state.tick_count;
+        self.last_warning_time = state.tick_count;
+        self.intercept_cooldown = (40 - self.evolution_level as i32 * 2).max(15);
+
+        if self.intercepted_messages.len() >= 8 { self.intercepted_messages.pop_front(); }
+        self.intercepted_messages.push_back(msg);
+
+        if should_broadcast {
+            Some(GameEvent::LogMessage(content))
+        } else {
+            None
+        }
+    }
+
+    pub fn get_cooldown_remaining(&self, op: &str, current_tick: i64) -> i32 {
+        if let Some(&(last_at, duration)) = self.counter_op_cooldowns.get(op) {
+            let elapsed = current_tick - last_at;
+            (duration as i64 - elapsed).max(0) as i32
+        } else {
+            0
+        }
+    }
+
+    pub fn set_cooldown(&mut self, op: &str, current_tick: i64, duration: i32) {
+        self.counter_op_cooldowns.insert(op.to_string(), (current_tick, duration));
+    }
+
+    #[allow(dead_code)]
+    pub fn get_ui_cooldown(&self, current_tick: i64) -> i32 {
+        ["propaganda", "fake_depot", "close_vulnerability",
+         "fleet_shield", "encrypt_blueprints", "fortify_planets"]
+            .iter()
+            .map(|op| self.get_cooldown_remaining(op, current_tick))
+            .max()
+            .unwrap_or(0)
+    }
+
+    pub fn deploy_fleet_shield(&mut self, state: &mut GameState, _rebel_system: &mut RebelSystem) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        if self.evolution_level < 4 {
+            events.push(GameEvent::LogMessage("❌ Защита флота требует эволюцию Ур.4+".to_string()));
+            return events;
+        }
+
+        if self.get_cooldown_remaining("fleet_shield", state.tick_count) > 0 {
+            events.push(GameEvent::LogMessage("⏳ Защита флота на перезарядке".to_string()));
+            return events;
+        }
+
+        if state.inventory.chips < 25 {
+            events.push(GameEvent::LogMessage("❌ Нужно 25 чипов для защиты флота".to_string()));
+            return events;
+        }
+
+        state.inventory.chips -= 25;
+
+        state.fleet_shield_active = true;
+        state.fleet_shield_expires_at = state.tick_count + 60;
+
+        self.set_cooldown("fleet_shield", state.tick_count, 50);
+
+        events.push(GameEvent::LogMessage(
+            "🛡️ ЗАЩИТА ФЛОТА АКТИВНА: нейро развернула щит вокруг кораблей. Шанс атаки на флот -40% на 60 сек. Стоимость: 25 чипов.".to_string()
+        ));
+
+        self.sync_to_state(state);
+        events
+    }
+
+    pub fn encrypt_blueprints(&mut self, state: &mut GameState, _rebel_system: &mut RebelSystem) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        if self.evolution_level < 5 {
+            events.push(GameEvent::LogMessage("❌ Шифрование чертежей требует эволюцию Ур.5+".to_string()));
+            return events;
+        }
+
+        if self.get_cooldown_remaining("encrypt_blueprints", state.tick_count) > 0 {
+            events.push(GameEvent::LogMessage("⏳ Шифрование на перезарядке".to_string()));
+            return events;
+        }
+
+        if state.inventory.chips < 30 {
+            events.push(GameEvent::LogMessage("❌ Нужно 30 чипов для шифрования".to_string()));
+            return events;
+        }
+
+        state.inventory.chips -= 30;
+
+        state.blueprints_encrypted = true;
+        state.blueprint_encryption_expires_at = state.tick_count + 90;
+
+        self.set_cooldown("encrypt_blueprints", state.tick_count, 60);
+
+        events.push(GameEvent::LogMessage(
+            "🔐 ЧЕРТЕЖИ ЗАШИФРОВАНЫ: нейро защитила производственные цепочки. Кража чертежей заблокирована на 90 сек. Стоимость: 30 чипов.".to_string()
+        ));
+
+        self.sync_to_state(state);
+        events
+    }
+
+    pub fn fortify_planets(&mut self, state: &mut GameState, _rebel_system: &mut RebelSystem) -> Vec<GameEvent> {
+        let mut events = Vec::new();
+
+        if self.evolution_level < 6 {
+            events.push(GameEvent::LogMessage("❌ Укрепление планет требует эволюцию Ур.6+".to_string()));
+            return events;
+        }
+
+        if self.get_cooldown_remaining("fortify_planets", state.tick_count) > 0 {
+            events.push(GameEvent::LogMessage("⏳ Укрепление на перезарядке".to_string()));
+            return events;
+        }
+
+        if state.inventory.plasma < 3 {
+            events.push(GameEvent::LogMessage("❌ Нужно 3 плазмы для укрепления планет".to_string()));
+            return events;
+        }
+
+        state.inventory.plasma -= 3;
+
+        state.planets_fortified = true;
+        state.planet_fortification_expires_at = state.tick_count + 120;
+
+        self.set_cooldown("fortify_planets", state.tick_count, 80);
+
+        events.push(GameEvent::LogMessage(
+            "🏰 ПЛАНЕТЫ УКРЕПЛЕНЫ: нейро развернула орбитальные щиты. Урон планетам -50% на 120 сек. Стоимость: 3 плазмы.".to_string()
+        ));
+
+        self.sync_to_state(state);
+        events
+    }
+
+    pub fn analyze_commander_behavior(&mut self, faction_id: &str, quiet_nights_before: u32, had_attack: bool) -> Option<GameEvent> {
+        if !had_attack { return None; }
+
+        if !self.commander_profiles.contains_key(faction_id) {
+            self.commander_profiles.insert(faction_id.to_string(), CommanderProfile {
+                faction_id: faction_id.to_string(),
+                attacks_observed: 0,
+                quiet_nights_before_attack: VecDeque::with_capacity(15),
+                predicted_quiet_threshold: 3,
+                signature_revealed: false,
+                times_frustrated: 0,
+            });
+        }
+
+        {
+            let profile = self.commander_profiles.get_mut(faction_id).unwrap();
+            profile.attacks_observed += 1;
+            profile.quiet_nights_before_attack.push_back(quiet_nights_before);
+
+            if profile.quiet_nights_before_attack.len() > 12 {
+                profile.quiet_nights_before_attack.pop_front();
+            }
+        }
+
+        let (attacks_observed, signature_revealed, predicted_quiet_threshold, new_threshold) = {
+            let profile = self.commander_profiles.get(faction_id).unwrap();
+
+            if profile.attacks_observed < 5 { return None; }
+
+            let avg = profile.quiet_nights_before_attack.iter().sum::<u32>() as f64
+                      / profile.quiet_nights_before_attack.len() as f64;
+            let new_threshold = avg.round().max(1.0) as u32;
+
+            (profile.attacks_observed, profile.signature_revealed, profile.predicted_quiet_threshold, new_threshold)
+        };
+
+        let rng = self.prng(attacks_observed as u64 * 31337);
+        let tactic_change = attacks_observed >= 7 && rng < 0.08;
+
+        if !signature_revealed || new_threshold != predicted_quiet_threshold || tactic_change {
+            let profile = self.commander_profiles.get_mut(faction_id).unwrap();
+            profile.predicted_quiet_threshold = new_threshold;
+
+            if !signature_revealed {
+                profile.signature_revealed = true;
+                return Some(GameEvent::LogMessage(format!(
+                    "🔍 НЕЙРО РАСКРЫЛА ПАТТЕРН: командир «{}» атакует после {} тихих ночей. ⚠️ Но повстанцы могут изменить тактику!",
+                    faction_id, new_threshold
+                )));
+            } else if tactic_change {
+                return Some(GameEvent::LogMessage(format!(
+                    "⚠️ НЕЙРО фиксирует: командир «{}» ИЗМЕНИЛ ТАКТИКУ! Теперь атакует после ~{} ночей. Паттерн нестабилен!",
+                    faction_id, new_threshold
+                )));
+            } else {
+                return Some(GameEvent::LogMessage(format!(
+                    "🔍 Нейро уточняет: командир «{}» атакует после ~{} ночей.",
+                    faction_id, new_threshold
+                )));
+            }
+        }
+
+        None
     }
 
     fn apply_q_action(&mut self, state: &mut GameState, rebel_system: &mut RebelSystem, config: &GameConfig, action: &AIAction, threat_prob: f64) -> Vec<GameEvent> {
         let mut events = Vec::new();
+        let mode_changed = self.last_q_action != *action;
+        let should_broadcast = mode_changed
+            || threat_prob > 0.78
+            || state.tick_count - self.last_mode_log_at > 45;
         match action {
             AIAction::Monitor => {
                 state.current_ai_mode = "⚙️ Мониторинг".to_string();
@@ -590,10 +1001,10 @@ impl NeuroEcosystem {
             AIAction::RaiseDefenses => {
                 self.active_defense_bonus = 0.25 + self.prediction_trust * 0.15;
                 state.current_ai_mode = "🛡️ Усиленная защита".to_string();
-                if threat_prob > 0.7 {
+                if threat_prob > 0.7 && should_broadcast {
                     events.push(GameEvent::LogMessage(format!("🛡️ ИИ поднял уровень защиты (угроза {:.0}%): +{:.0}% к эффективности", threat_prob * 100.0, self.active_defense_bonus * 100.0)));
                 }
-                if !state.upgrades.defense && state.inventory.plasma >= config.upgrade_config.defense_activation_cost {
+                if should_broadcast && !state.upgrades.defense && state.inventory.plasma >= config.upgrade_config.defense_activation_cost {
                     events.push(GameEvent::LogMessage("🤖 ИИ рекомендует: активируйте защиту!".to_string()));
                 }
                 rebel_system.on_ai_evolution(self.evolution_level, "defensive");
@@ -602,10 +1013,10 @@ impl NeuroEcosystem {
                 self.prediction_bonus = 0.3 + self.prediction_trust * 0.2;
                 state.current_ai_mode = "🔮 Предсказательный режим".to_string();
                 let (lo, hi) = self.bayesian_nodes[(state.rebel_activity as usize).min(15)].confidence_interval();
-                state.attack_warning = format!("⚠️ Угроза: {:.0}–{:.0}%", lo * 100.0, hi * 100.0);
+                state.attack_warning = format!("Угроза: {:.0}–{:.0}%", lo * 100.0, hi * 100.0);
                 state.attack_warning_faction = self.predict_attack_faction(rebel_system);
-                state.last_warning_issued_at = state.game_time;
-                if threat_prob > self.adaptive_alarm_threshold {
+                state.last_warning_issued_at = state.tick_count as i32;
+                if should_broadcast && threat_prob > self.adaptive_alarm_threshold {
                     events.push(GameEvent::LogMessage(format!("🔮 ИИ прогнозирует атаку: {:.0}% вероятность (ДИ {:.0}–{:.0}%) от {}", threat_prob * 100.0, lo * 100.0, hi * 100.0, state.attack_warning_faction)));
                 }
                 rebel_system.on_ai_prediction(self.prediction_accuracy);
@@ -618,21 +1029,30 @@ impl NeuroEcosystem {
                     let eff_reduction = (state.rebel_activity as f64 * 0.35) as u32;
                     let reduction = eff_reduction.max(1).min(state.rebel_activity);
                     state.rebel_activity = state.rebel_activity.saturating_sub(reduction);
-                    events.push(GameEvent::LogMessage(format!("⚔️ Упреждающий удар! Активность повстанцев: -{} (осталось: {})", reduction, state.rebel_activity)));
+                    if should_broadcast {
+                        events.push(GameEvent::LogMessage(format!("⚔️ Упреждающий удар! Активность повстанцев: -{} (осталось: {})", reduction, state.rebel_activity)));
+                    }
                 }
                 rebel_system.on_ai_evolution(self.evolution_level, "aggressive");
             }
             AIAction::ResourceConserve => {
                 state.current_ai_mode = "📦 Экономия ресурсов".to_string();
                 self.active_defense_bonus = 0.10;
-                events.push(GameEvent::LogMessage("📦 ИИ переводит системы в режим экономии: пассивная добыча +20%".to_string()));
+                if should_broadcast {
+                    events.push(GameEvent::LogMessage("📦 ИИ переводит системы в режим экономии: пассивная добыча +20%".to_string()));
+                }
             }
             AIAction::PsychWarfare => {
                 state.current_ai_mode = "📡 Психо-операция".to_string();
                 self.prediction_bonus = 0.2;
                 rebel_system.apply_morale_damage(0.08);
-                events.push(GameEvent::LogMessage("📡 ИИ запустил контр-пропаганду: мораль повстанцев снижена".to_string()));
+                if should_broadcast {
+                    events.push(GameEvent::LogMessage("📡 ИИ запустил контр-пропаганду: мораль повстанцев снижена".to_string()));
+                }
             }
+        }
+        if should_broadcast {
+            self.last_mode_log_at = state.tick_count;
         }
         let log_entry = format!("[t={}] {:?} → {:?} (угроза:{:.0}%)", self.last_processed_time, self.current_ai_state, action, threat_prob * 100.0);
         self.decision_log.push_back(log_entry.clone());
@@ -673,7 +1093,7 @@ impl NeuroEcosystem {
         reward
     }
 
-    fn record_threat_weighted(&mut self, threat_level: u32, was_real_attack: bool, timestamp: i32, defense_level: u32, was_defended: bool, predicted: bool, confidence: f64, action: &AIAction) {
+    fn record_threat_weighted(&mut self, threat_level: u32, was_real_attack: bool, timestamp: i64, defense_level: u32, was_defended: bool, predicted: bool, confidence: f64, action: &AIAction) {
         let outcome = if was_defended { Outcome::Success } else if was_real_attack { Outcome::Failure } else if predicted { Outcome::Predicted } else { Outcome::Neutral };
         let weight = if was_real_attack { 2.0 } else if predicted { 1.5 } else { 1.0 };
         let record = ThreatRecord {
@@ -692,14 +1112,14 @@ impl NeuroEcosystem {
         if let Some(idx) = pattern_index {
             let p = &mut self.learned_patterns[idx];
             p.usage_count += 1;
-            p.last_used = state.game_time;
+            p.last_used = state.tick_count;
             let delta = if success { 0.08 } else { -0.04 };
             p.effectiveness = (p.effectiveness + delta).clamp(0.05, 1.0);
             p.success_rate = p.success_rate * 0.9 + (if success { 0.1 } else { 0.0 });
             p.confidence = (1.0 - 1.0 / (p.usage_count as f64).sqrt()).min(0.95);
             if p.effectiveness > 0.65 { p.counter_strategy = counter_strategy; }
         } else {
-            self.learned_patterns.push(Pattern { pattern_type, effectiveness: 0.5, usage_count: 1, last_used: state.game_time, success_rate: if success { 0.6 } else { 0.4 }, counter_strategy, confidence: 0.1 });
+            self.learned_patterns.push(Pattern { pattern_type, effectiveness: 0.5, usage_count: 1, last_used: state.tick_count, success_rate: if success { 0.6 } else { 0.4 }, counter_strategy, confidence: 0.1 });
         }
     }
 
@@ -727,25 +1147,63 @@ impl NeuroEcosystem {
             self.evolution_level += 1;
             self.evolution_score -= required;
             self.stats.evolutions += 1;
-            let gain = 0.07 + (self.evolution_level as f64 * 0.005).min(0.03);
+
+            let gain = 0.08 + (self.evolution_level as f64 * 0.005).min(0.03);
             self.system_consciousness = (self.system_consciousness + gain).min(1.0);
             self.stats.consciousness_gains.push(self.system_consciousness);
             self.cooldown = (self.cooldown - 1).max(4);
             self.reaction_cooldown = (self.reaction_cooldown - 1).max(2);
             self.q_table.epsilon = (self.q_table.epsilon + 0.05).min(Q_EPSILON_START);
             self.cusum_threshold = (self.cusum_threshold - 0.3).max(2.0);
-            
+
             state.neuro_evolution = self.evolution_level;
             state.neuro_consciousness = self.system_consciousness;
             state.neuro_score = self.evolution_score;
-            
-            events.push(GameEvent::LogMessage(format!("🌟 НЕЙРО-ЭВОЛЮЦИЯ! {} → {} (Сознание: {:.0}% | Q-шаги: {})", old_level, self.evolution_level, self.system_consciousness * 100.0, self.stats.q_learning_steps)));
+
+            events.push(GameEvent::LogMessage(format!("🌟 НЕЙРО-ЭВОЛЮЦИЯ! {} → {} (Сознание: {:.0}% | Q-шаги: {})",
+                old_level, self.evolution_level, self.system_consciousness * 100.0, self.stats.q_learning_steps)));
+
             match self.evolution_level {
-                1 => { events.push(GameEvent::LogMessage("🧠 Разблокировано: Байесовское предсказание угроз".to_string())); rebel_system.on_ai_evolution(self.evolution_level, "prediction_unlocked"); }
-                3 => { events.push(GameEvent::LogMessage("🧠 Разблокировано: Адаптивная оборона (Q-Learning)".to_string())); rebel_system.on_ai_evolution(self.evolution_level, "adaptive_defense"); }
-                5 => { events.push(GameEvent::LogMessage("🧠 Разблокировано: Марковский контрудар".to_string())); rebel_system.on_ai_evolution(self.evolution_level, "counter_attack"); }
-                7 => { events.push(GameEvent::LogMessage("🧠 Разблокировано: Психологическая война (CUSUM-детектор)".to_string())); rebel_system.on_ai_evolution(self.evolution_level, "psychological_warfare"); }
-                10 => { events.push(GameEvent::LogMessage("🧠 ПОЛНОЕ СОЗНАНИЕ: ИИ достиг максимальной эффективности".to_string())); rebel_system.on_ai_evolution(self.evolution_level, "full_consciousness"); }
+                1 => {
+                    events.push(GameEvent::LogMessage("🧠 Разблокировано: Байесовское предсказание угроз".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "prediction_unlocked");
+                }
+                3 => {
+                    events.push(GameEvent::LogMessage("🧠 Разблокировано: Адаптивная оборона (Q-Learning)".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "adaptive_defense");
+                }
+                5 => {
+                    events.push(GameEvent::LogMessage("🧠 Разблокировано: Марковский контрудар".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "counter_attack");
+                }
+                7 => {
+                    events.push(GameEvent::LogMessage("🧠 Разблокировано: Психологическая война (CUSUM-детектор)".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "psychological_warfare");
+                }
+                10 => {
+                    events.push(GameEvent::LogMessage("🧠 ПОЛНОЕ СОЗНАНИЕ: ИИ достиг максимальной эффективности".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "full_consciousness");
+                }
+                11 => {
+                    events.push(GameEvent::LogMessage("🧠 КВАНТОВОЕ УСКОРЕНИЕ: глобальный множитель добычи x1.20".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "quantum_acceleration");
+                }
+                12 => {
+                    events.push(GameEvent::LogMessage("🧠 ТЕРМОДИНАМИЧЕСКИЙ ЩИТ: глобальный множитель x1.30".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "thermo_shield");
+                }
+                13 => {
+                    events.push(GameEvent::LogMessage("🧠 СВЕРХПРОВОДИМОСТЬ: глобальный множитель x1.45".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "superconductivity");
+                }
+                14 => {
+                    events.push(GameEvent::LogMessage("🧠 НЕЙРОННАЯ СИНГУЛЯРНОСТЬ: глобальный множитель x1.60".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "singularity");
+                }
+                15 => {
+                    events.push(GameEvent::LogMessage("🧠 АБСОЛЮТНОЕ ДОМИНИРОВАНИЕ: глобальный множитель x1.80".to_string()));
+                    rebel_system.on_ai_evolution(self.evolution_level, "absolute_dominance");
+                }
                 _ => {}
             }
             if self.evolution_level >= 3 {
@@ -757,21 +1215,55 @@ impl NeuroEcosystem {
         events
     }
 
+    pub fn get_evolution_requirement(&self) -> u32 {
+        match self.evolution_level {
+            0 => 60,
+            1 => 100,
+            2 => 150,
+            3 => 220,
+            4 => 300,
+            5 => 400,
+            6 => 500,
+            7 => 650,
+            8 => 800,
+            9 => 1000,
+            10 => 1250,
+            11 => 1550,
+            12 => 1900,
+            13 => 2300,
+            14 => 2800,
+            _ => 3400 + (self.evolution_level - 15) * 150,
+        }
+    }
+
     pub fn get_consciousness_bonuses(&self) -> ConsciousnessBonus {
         let c = self.system_consciousness;
         let lvl = self.evolution_level;
-        let global = if lvl >= 10 { 1.3 } else if lvl >= 8 { 1.2 } else if lvl >= 5 { 1.1 } else { 1.0 };
-        let q_bonus = (self.q_table.average_reward() * 0.02).max(0.0).min(0.05);
-        let streak_bonus = (self.correct_prediction_streak as f64 * 0.01).min(0.1);
+        let global = if lvl >= 15 { 1.80 }
+            else if lvl >= 14 { 1.60 }
+            else if lvl >= 13 { 1.45 }
+            else if lvl >= 12 { 1.30 }
+            else if lvl >= 11 { 1.20 }
+            else if lvl >= 10 { 1.40 }
+            else if lvl >= 8 { 1.25 }
+            else if lvl >= 5 { 1.15 }
+            else { 1.0 };
+        let _q_bonus = (self.q_table.average_reward() * 0.02).max(0.0).min(0.05);
+        let _streak_bonus = (self.correct_prediction_streak as f64 * 0.01).min(0.1);
         ConsciousnessBonus {
-            mining_chance_bonus: if lvl >= 1 { c * 0.05 + q_bonus } else { 0.0 },
-            heat_reduction: if lvl >= 2 { c * 0.12 } else { 0.0 },
-            crit_bonus: if lvl >= 3 { c * 0.04 + streak_bonus } else { 0.0 },
-            autoclick_speed: if lvl >= 4 { 1.0 - c * 0.12 } else { 1.0 },
-            defense_bonus: if lvl >= 5 { (c * 12.0) as u32 } else { 0 },
-            passive_multiplier: if lvl >= 6 { 1.0 + c * 0.6 } else { 1.0 },
-            trade_discount_chance: if lvl >= 7 { 0.25 + c * 0.08 } else { 0.25 },
-            power_bonus: if lvl >= 8 { 1 + (c * 2.0) as u32 } else { 0 },
+            mining_chance_bonus: (if lvl >= 1 { c * 0.08 } else { 0.0 })
+                + (if lvl >= 11 { 0.08 } else { 0.0 }),
+            heat_reduction: (if lvl >= 2 { c * 0.15 } else { 0.0 })
+                + (if lvl >= 12 { 0.20 } else { 0.0 }),
+            crit_bonus: (if lvl >= 3 { c * 0.06 } else { 0.0 })
+                + (if lvl >= 11 { 0.03 } else { 0.0 })
+                + (if lvl >= 14 { 0.05 } else { 0.0 }),
+            autoclick_speed: if lvl >= 4 { 1.0 - c * 0.15 } else { 1.0 },
+            defense_bonus: if lvl >= 5 { (c * 15.0) as u32 } else { 0 },
+            passive_multiplier: if lvl >= 6 { 1.0 + c * 0.8 } else { 1.0 },
+            trade_discount_chance: if lvl >= 7 { 0.30 + c * 0.08 } else { 0.25 },
+            power_bonus: (if lvl >= 8 { 1 + (c * 3.0) as u32 } else { 0 })
+                + (if lvl >= 13 { 2 } else { 0 }),
             global_multiplier: global,
         }
     }
@@ -791,6 +1283,7 @@ impl NeuroEcosystem {
         (base + acc_bonus + trust_bonus).min(0.65)
     }
 
+    #[allow(dead_code)]
     pub fn get_attack_prediction(&self) -> Option<(f64, String)> {
         if self.threat_memory.is_empty() { return None; }
         let recent: Vec<_> = self.threat_memory.iter().rev().take(30).collect();
@@ -804,17 +1297,53 @@ impl NeuroEcosystem {
         } else { None }
     }
 
-    fn calculate_cooldown(&self, had_real_attack: bool, rebel_activity: u32) -> i32 {
-        let base = if had_real_attack { 4 } else if rebel_activity >= 7 { 5 } else if rebel_activity >= 4 { 7 } else { 10 };
-        (base - (self.evolution_level / 3) as i32).max(2)
+    fn calculate_cooldown(&self, had_real_attack: bool, rebel_activity: u32, state: &GameState) -> i32 {
+        let base = if had_real_attack { 8 }
+            else if rebel_activity >= 7 { 12 }
+            else if rebel_activity >= 4 { 20 }
+            else { 45 };
+        let reduction = (self.evolution_level / 5) as i32;
+        let mut result = (base - reduction).max(8);
+
+        if state.fear_level >= 5 {
+            result = ((result as f64) * 0.7) as i32;
+        }
+        result.max(4)
     }
 
-    fn calculate_evolution_points(&self, had_real_attack: bool, rebel_activity: u32, was_defended: bool, predicted: bool) -> u32 {
-        let base = if had_real_attack { 35 + rebel_activity * 6 } else { 15 + rebel_activity * 2 };
-        let bonus_defend = if was_defended { (self.defense_success_rate * 25.0) as u32 } else { 0 };
-        let bonus_predict = if predicted && had_real_attack { (self.prediction_accuracy * 20.0) as u32 + self.correct_prediction_streak * 3 } else { 0 };
-        let evo_bonus = self.evolution_level * 3;
-        base + bonus_defend + bonus_predict + evo_bonus
+    fn calculate_evolution_points(&self, had_real_attack: bool, rebel_activity: u32, was_defended: bool, predicted: bool, state: &GameState) -> u32 {
+        let base = if had_real_attack {
+            45 + rebel_activity * 8
+        } else if rebel_activity > 0 {
+            10 + rebel_activity * 2
+        } else {
+            0
+        };
+
+        let bonus_defend = if was_defended {
+            (self.defense_success_rate * 30.0) as u32
+        } else {
+            0
+        };
+
+        let bonus_predict = if predicted && had_real_attack {
+            (self.prediction_accuracy * 25.0) as u32 + self.correct_prediction_streak * 4
+        } else {
+            0
+        };
+
+        let activity_multiplier = if had_real_attack { 1.0 }
+            else if rebel_activity > 0 { 0.5 }
+            else { 0.0 };
+        let evo_bonus = (self.evolution_level as f64 * 4.0 * activity_multiplier) as u32;
+
+        let mut result = base + bonus_defend + bonus_predict + evo_bonus;
+
+        if state.fear_level >= 5 {
+            result = ((result as f64) * 1.5) as u32;
+        }
+
+        result
     }
 
     fn update_metrics(&mut self, had_attack: bool, was_defended: bool, predicted: bool) {
@@ -835,7 +1364,7 @@ impl NeuroEcosystem {
         }
     }
 
-    fn cleanup_old_memory(&mut self, current_time: i32) {
+    fn cleanup_old_memory(&mut self, current_time: i64) {
         for record in self.threat_memory.iter_mut() {
             let age = current_time - record.timestamp;
             if age > 100 { record.weight *= 0.995; }
@@ -844,26 +1373,33 @@ impl NeuroEcosystem {
         self.learned_patterns.retain(|p| p.usage_count > 0 || current_time - p.last_used < 900);
     }
 
-    pub fn get_evolution_requirement(&self) -> u32 {
-        match self.evolution_level {
-            0 => 60, 1 => 100, 2 => 150, 3 => 220, 4 => 300, 5 => 400, 6 => 500, 7 => 650, 8 => 800, 9 => 1000,
-            _ => 1200 + (self.evolution_level - 10) * 120,
-        }
-    }
-
+    #[allow(dead_code)]
     pub fn get_status(&self) -> String {
         let (next, _) = self.get_next_level_requirements();
-        format!("🧬 Ур.{} | {}/{} | Сознание:{:.1}% | Точность:{:.0}% | Защита:+{:.0}% | Q-шаги:{} | Доверие:{:.0}%", self.evolution_level, self.evolution_score, next, self.system_consciousness * 100.0, self.prediction_accuracy * 100.0, self.get_defense_bonus() * 100.0, self.stats.q_learning_steps, self.prediction_trust * 100.0)
+        format!("🧬 Ур.{} | {}/{} | Сознание:{:.1}% | Точность:{:.0}% | Защита:+{:.0}% | Q-шаги:{} | Доверие:{:.0}%",
+            self.evolution_level, self.evolution_score, next, self.system_consciousness * 100.0,
+            self.prediction_accuracy * 100.0, self.get_defense_bonus() * 100.0,
+            self.stats.q_learning_steps, self.prediction_trust * 100.0)
     }
 
+    #[allow(dead_code)]
     pub fn get_next_level_requirements(&self) -> (u32, u32) {
         (self.get_evolution_requirement(), 50 + self.evolution_level * 5)
     }
 
+    #[allow(dead_code)]
     pub fn get_debug_info(&self) -> String {
-        format!("Neuro Lvl:{} Score:{} Consc:{:.0}% PredAcc:{:.0}% DefBonus:{:.0}% | Bayesian[act]:{:.0}% Markov→{:?} | Q-ε:{:.2} AvgR:{:.2} | CUSUM:{:.1}/{:.1} AlarmThr:{:.0}% Streak:{} Trust:{:.0}%", self.evolution_level, self.evolution_score, self.system_consciousness * 100.0, self.prediction_accuracy * 100.0, self.get_defense_bonus() * 100.0, self.bayesian_nodes[0].ewma_probability * 100.0, self.markov_chain.predict_next(&self.current_ai_state).0, self.q_table.epsilon, self.q_table.average_reward(), self.cusum_sum, self.cusum_threshold, self.adaptive_alarm_threshold * 100.0, self.correct_prediction_streak, self.prediction_trust * 100.0)
+        format!("Neuro Lvl:{} Score:{} Consc:{:.0}% PredAcc:{:.0}% DefBonus:{:.0}% | Bayesian[act]:{:.0}% Markov→{:?} | Q-ε:{:.2} AvgR:{:.2} | CUSUM:{:.1}/{:.1} AlarmThr:{:.0}% Streak:{} Trust:{:.0}%",
+            self.evolution_level, self.evolution_score, self.system_consciousness * 100.0,
+            self.prediction_accuracy * 100.0, self.get_defense_bonus() * 100.0,
+            self.bayesian_nodes[0].ewma_probability * 100.0,
+            self.markov_chain.predict_next(&self.current_ai_state).0,
+            self.q_table.epsilon, self.q_table.average_reward(),
+            self.cusum_sum, self.cusum_threshold, self.adaptive_alarm_threshold * 100.0,
+            self.correct_prediction_streak, self.prediction_trust * 100.0)
     }
 
+    #[allow(dead_code)]
     pub fn threat_memory_len(&self) -> usize { self.threat_memory.len() }
     pub fn get_evolution_score(&self) -> u32 { self.evolution_score }
 
@@ -883,69 +1419,11 @@ impl NeuroEcosystem {
         self.last_intercept_at = -100;
         self.propaganda_active = false;
         self.fake_depot_active = false;
+        self.fake_depot_ttl = 0;
         self.pending_vulnerability = None;
         self.enemy_encryption_level = 0;
-    }
-
-    pub fn try_intercept_message(&mut self, rebel_system: &RebelSystem, state: &GameState) -> Option<GameEvent> {
-        if state.game_time - self.last_intercept_at < self.intercept_cooldown { return None; }
-        if self.evolution_level < 2 { return None; }
-        let base_chance = 0.08 + self.system_consciousness * 0.35 + (self.evolution_level as f64 * 0.02).min(0.15);
-        let encryption_penalty = self.enemy_encryption_level as f64 * 0.05;
-        let intercept_chance = (base_chance - encryption_penalty).max(0.03);
-        let rng = self.prng(state.game_time as u64 * 7919 + self.stats.q_learning_steps);
-        if rng > intercept_chance { return None; }
-        let rng2 = self.prng(state.game_time as u64 * 1031);
-        let rng3 = self.prng(state.game_time as u64 * 2053);
-        let target_hint = if rebel_system.htn_plans.front().and_then(|p| p.subtasks.front()).map(|t| t.target.contains("plasma")).unwrap_or(false) {
-            "рудник плазмы"
-        } else {
-            let targets = ["рудник-3", "энергоблок", "склад чипов", "командный пункт", "зарядная станция"];
-            targets[(rng2 * targets.len() as f64) as usize % targets.len()]
-        };
-        let eta = 15 + (rng3 * 45.0) as i32;
-        let reliability = (0.45 + self.prediction_accuracy * 0.45).min(0.95);
-        let content = if self.evolution_level >= 5 {
-            let templates = [format!("📡 ПЕРЕХВАТ [Надёжность {:.0}%]: «Цель: {}, атакуем через ~{} сек»", reliability * 100.0, target_hint, eta * 2),
-                             format!("📡 ПЕРЕХВАТ: «...все к {}... ждём сигнала через {}...»", target_hint, eta)];
-            templates[(rng2 * 2.0) as usize % 2].clone()
-        } else if self.evolution_level >= 3 {
-            let templates = [format!("📡 ОБРЫВОК: «...{}... операция скоро...»", target_hint),
-                             "📡 ФРАГМЕНТ: «...готовимся... цель подтверждена...»".to_string()];
-            templates[(rng2 * 2.0) as usize % 2].clone()
-        } else {
-            "📡 ШУМ ЭФИРА: «...подтверждено... ждите приказа...»".to_string()
-        };
-        let msg = InterceptedMessage { content: content.clone(), target_hint: target_hint.to_string(), eta_ticks: eta, intercepted_at: state.game_time, reliability, is_read: false };
-        self.last_intercept_at = state.game_time;
-        self.last_warning_time = state.game_time;
-        self.intercept_cooldown = (25 - self.evolution_level as i32 * 2).max(8);
-        if self.intercepted_messages.len() >= 8 { self.intercepted_messages.pop_front(); }
-        self.intercepted_messages.push_back(msg);
-        Some(GameEvent::LogMessage(content))
-    }
-
-    pub fn analyze_commander_behavior(&mut self, faction_id: &str, quiet_nights_before: u32, had_attack: bool) -> Option<GameEvent> {
-        let profile = self.commander_profiles.entry(faction_id.to_string()).or_insert(CommanderProfile {
-            faction_id: faction_id.to_string(), attacks_observed: 0, quiet_nights_before_attack: VecDeque::with_capacity(15), predicted_quiet_threshold: 3, signature_revealed: false, times_frustrated: 0,
-        });
-        if !had_attack { return None; }
-        profile.attacks_observed += 1;
-        profile.quiet_nights_before_attack.push_back(quiet_nights_before);
-        if profile.quiet_nights_before_attack.len() > 12 { profile.quiet_nights_before_attack.pop_front(); }
-        if profile.attacks_observed < 3 { return None; }
-        let avg = profile.quiet_nights_before_attack.iter().sum::<u32>() as f64 / profile.quiet_nights_before_attack.len() as f64;
-        let new_threshold = avg.round() as u32;
-        if !profile.signature_revealed || new_threshold != profile.predicted_quiet_threshold {
-            profile.predicted_quiet_threshold = new_threshold;
-            if !profile.signature_revealed {
-                profile.signature_revealed = true;
-                return Some(GameEvent::LogMessage(format!("🔍 НЕЙРО РАСКРЫЛА ПАТТЕРН: командир «{}» атакует после {} тихих ночей. Используйте это!", faction_id, profile.predicted_quiet_threshold)));
-            } else {
-                return Some(GameEvent::LogMessage(format!("🔍 Нейро уточняет: командир «{}» изменил ритм — теперь атакует после ~{} ночей.", faction_id, profile.predicted_quiet_threshold)));
-            }
-        }
-        None
+        self.counter_op_cooldowns.clear();
+        self.last_log_time = -100;
     }
 
     pub fn launch_propaganda(&mut self, state: &mut GameState, rebel_system: &mut RebelSystem) -> Vec<GameEvent> {
@@ -954,8 +1432,8 @@ impl NeuroEcosystem {
             events.push(GameEvent::LogMessage("❌ Контр-пропаганда требует эволюцию нейро Ур.3+".to_string()));
             return events;
         }
-        if state.game_time - self.last_counter_op_at < self.counter_op_cooldown {
-            let remaining = self.counter_op_cooldown - (state.game_time - self.last_counter_op_at);
+        if self.get_cooldown_remaining("propaganda", state.tick_count) > 0 {
+            let remaining = self.get_cooldown_remaining("propaganda", state.tick_count);
             events.push(GameEvent::LogMessage(format!("⏳ Контр-пропаганда на перезарядке: {} тиков", remaining)));
             return events;
         }
@@ -966,12 +1444,11 @@ impl NeuroEcosystem {
         state.inventory.chips -= 20;
         let morale_damage = 0.15 + self.system_consciousness * 0.15;
         rebel_system.apply_morale_damage(morale_damage);
-        rebel_system.last_neuro_propaganda = state.game_time;
+        rebel_system.last_neuro_propaganda = state.tick_count;
         self.enemy_encryption_level = (self.enemy_encryption_level + 1).min(5);
         self.propaganda_active = true;
-        self.propaganda_expires_at = state.game_time + 40;
-        self.last_counter_op_at = state.game_time;
-        self.counter_op_cooldown = 35;
+        self.propaganda_expires_at = state.tick_count + 40;
+        self.set_cooldown("propaganda", state.tick_count, 35);
         state.current_ai_mode = "📡 Дезинформация активна".to_string();
         events.push(GameEvent::LogMessage(format!("📡 КОНТР-ПРОПАГАНДА: нейро взломала {:.0}% каналов повстанцев. Мораль врага -{:.0}%. Работает 40 тиков. Стоимость: 20 чипов.", (1.0 - rebel_system.ai_adaptation.prediction_evasion) * 100.0, morale_damage * 100.0)));
         self.sync_to_state(state);
@@ -992,52 +1469,24 @@ impl NeuroEcosystem {
             events.push(GameEvent::LogMessage("❌ Нужно 50 мусора для создания ловушки".to_string()));
             return events;
         }
-        if state.game_time - self.last_counter_op_at < self.counter_op_cooldown {
+        if self.get_cooldown_remaining("fake_depot", state.tick_count) > 0 {
             events.push(GameEvent::LogMessage("⏳ Нужна перезарядка перед новой операцией".to_string()));
             return events;
         }
         state.inventory.trash -= 50;
         self.fake_depot_active = true;
-        self.fake_depot_expires_at = state.game_time + 70;
-        self.last_counter_op_at = state.game_time;
-        self.counter_op_cooldown = 45;
+        self.fake_depot_expires_at = state.tick_count + 70;
+        self.fake_depot_ttl = 70;
+        self.set_cooldown("fake_depot", state.tick_count, 45);
         state.current_ai_mode = "🪤 Ловушка расставлена".to_string();
         events.push(GameEvent::LogMessage("💣 ЛОВУШКА АКТИВНА: нейро создала фальшивый склад ресурсов (50 мусора). Если повстанцы попытаются его ограбить — взрыв! Время жизни: 70 тиков.".to_string()));
         self.sync_to_state(state);
         events
     }
 
-    pub fn tick_fake_depot(&mut self, state: &mut GameState, rebel_system: &mut RebelSystem) -> Option<GameEvent> {
-        if !self.fake_depot_active { return None; }
-        if state.game_time > self.fake_depot_expires_at {
-            self.fake_depot_active = false;
-            if state.current_ai_mode.contains("Ловушка") {
-                state.current_ai_mode = "⚙️ Мониторинг".to_string();
-            }
-            self.sync_to_state(state);
-            return Some(GameEvent::LogMessage("💣 Ловушка-склад устарела — повстанцы её обнаружили и обошли.".to_string()));
-        }
-        if state.rebel_activity >= 5 && !state.is_day {
-            let trap_chance = 0.12 + self.system_consciousness * 0.20;
-            let rng = self.prng(state.game_time as u64 * 3571 + rebel_system.stats.total_attacks as u64);
-            if rng < trap_chance {
-                self.fake_depot_active = false;
-                let activity_cut = (3 + self.evolution_level / 2).min(state.rebel_activity);
-                state.rebel_activity = state.rebel_activity.saturating_sub(activity_cut);
-                if let Some(active) = rebel_system.active_faction.clone() {
-                    rebel_system.record_commander_defeat(&active, state.game_time);
-                }
-                state.current_ai_mode = "🎯 Ловушка сработала!".to_string();
-                self.sync_to_state(state);
-                return Some(GameEvent::LogMessage(format!("💥 ЛОВУШКА СРАБОТАЛА! Отряд повстанцев уничтожен на фальшивом складе! Активность -{}, мораль врага подорвана.", activity_cut)));
-            }
-        }
-        None
-    }
-
     pub fn close_vulnerability(&mut self, state: &mut GameState, rebel_system: &mut RebelSystem) -> Vec<GameEvent> {
         let mut events = Vec::new();
-        let vuln = match rebel_system.current_vulnerability.clone() {
+        let _vuln = match rebel_system.current_vulnerability.clone() {
             Some(v) => v,
             None => {
                 events.push(GameEvent::LogMessage("✅ Нейро не обнаружила активных уязвимостей. Системы в порядке.".to_string()));
@@ -1052,37 +1501,19 @@ impl NeuroEcosystem {
             events.push(GameEvent::LogMessage("❌ Нужно 15 чипов для патча".to_string()));
             return events;
         }
-        if state.game_time - self.last_counter_op_at < self.counter_op_cooldown / 2 {
+        if self.get_cooldown_remaining("close_vulnerability", state.tick_count) > 0 {
             events.push(GameEvent::LogMessage("⏳ Ещё не готова к патчингу".to_string()));
             return events;
         }
         state.inventory.chips -= 15;
-        match vuln.as_str() {
-            "prediction" => {
-                self.prediction_bonus = (self.prediction_bonus + 0.12).min(0.65);
-                self.adaptive_alarm_threshold = (self.adaptive_alarm_threshold - 0.05).max(0.3);
-                events.push(GameEvent::LogMessage(format!("🔒 УЯЗВИМОСТЬ ЗАКРЫТА: «{}» → точность предсказания +12%. Повстанцы ищут новую брешь...", vuln)));
-            }
-            "defense" => {
-                self.active_defense_bonus = (self.active_defense_bonus + 0.10).min(0.8);
-                events.push(GameEvent::LogMessage(format!("🔒 УЯЗВИМОСТЬ ЗАКРЫТА: «{}» → оборонный бонус +10%.", vuln)));
-            }
-            "craft_chain" => {
-                rebel_system.cyber_attack_unlocked = false;
-                events.push(GameEvent::LogMessage(format!("🔒 УЯЗВИМОСТЬ ЗАКРЫТА: «{}» → кибератаки на крафт нейтрализованы!", vuln)));
-            }
-            "communication" => {
-                self.enemy_encryption_level = self.enemy_encryption_level.saturating_sub(2);
-                self.intercept_cooldown = (self.intercept_cooldown - 5).max(5);
-                events.push(GameEvent::LogMessage(format!("🔒 УЯЗВИМОСТЬ ЗАКРЫТА: «{}» → связь восстановлена, перехват улучшен.", vuln)));
-            }
-            _ => {}
+
+        if rebel_system.arms_race_level > 0 {
+            rebel_system.arms_race_level = rebel_system.arms_race_level.saturating_sub(1);
         }
         rebel_system.current_vulnerability = None;
-        self.last_counter_op_at = state.game_time;
-        self.counter_op_cooldown = 25;
-        let escalate_events = rebel_system.escalate_arms_race(&vuln);
-        events.extend(escalate_events);
+        events.push(GameEvent::LogMessage("🔒 Уязвимость закрыта. Гонка вооружений откатилась назад.".to_string()));
+
+        self.set_cooldown("close_vulnerability", state.tick_count, 25);
         self.sync_to_state(state);
         events
     }

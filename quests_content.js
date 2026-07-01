@@ -1,11 +1,5 @@
-// ============================================================
-// CoreBox — КОНТЕНТ ЗАДАНИЙ (редактируемый файл)
-// Отдельный от логики: только тексты, условия, награды
-// ============================================================
-
 export const QUESTS_CONTENT = [
 
-    // ── ОНБОРДИНГ ─────────────────────────────────────────────
     {
         id: "3bd16a6a-3c3a-44dd-bca7-75add0883e4a",
         order: 1,
@@ -42,7 +36,6 @@ export const QUESTS_CONTENT = [
         unlocks: [],
     },
 
-    // ── ЗАЩИТА И НЕЙРО ────────────────────────────────────────
     {
         id: "4a391a8b-34ef-45b3-8e92-a734a373dad9",
         order: 3,
@@ -97,7 +90,6 @@ export const QUESTS_CONTENT = [
         unlocks: ["ore"],
     },
 
-    // ── НОВЫЙ КВЕСТ: Вовлечение в экономику Нейро ────────────
     {
         id: "quest_neuro_tactician",
         order: 6,
@@ -117,7 +109,6 @@ export const QUESTS_CONTENT = [
         unlocks: [],
     },
 
-    // ── ФЛОТ ──────────────────────────────────────────────────
     {
         id: "quest_fleet_blueprint",
         order: 7,
@@ -135,18 +126,19 @@ export const QUESTS_CONTENT = [
         enabled: true,
         unlocks: [],
     }
+
 ];
 
 export function applyQuestReward(questId, game) {
     const q = QUESTS_CONTENT.find(x => x.id === questId);
     if (!q || !game) return false;
-    
+
     if (q.reward_coal  > 0) game.add_resource('coal',   q.reward_coal);
     if (q.reward_trash > 0) game.add_resource('trash',  q.reward_trash);
     if (q.reward_ore   > 0) game.add_resource('ore',    q.reward_ore);
     if (q.reward_chips > 0) game.add_resource('chips',  q.reward_chips);
     if (q.reward_plasma > 0) game.add_resource('plasma', q.reward_plasma);
-    
+
     if (window.addToLog) {
         const rewards = [];
         if (q.reward_coal > 0) rewards.push(`${q.reward_coal}🪨`);
@@ -158,7 +150,7 @@ export function applyQuestReward(questId, game) {
             window.addToLog(`🎁 Награда за квест "${q.title}": +${rewards.join(', ')}`, "success");
         }
     }
-    
+
     return true;
 }
 

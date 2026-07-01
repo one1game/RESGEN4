@@ -1,11 +1,3 @@
-// ======== src/web/ui.rs (ИСПРАВЛЕННАЯ ВЕРСИЯ v5.1) ========
-// ИСПРАВЛЕНИЯ:
-// CC-05: убран блок контр-операций из update_rebel_protection() (дублирование кнопок)
-// BUG-INV-14: update_inventory теперь проверяет активную вкладку перед рендером
-// BUG-INV-15: ресурсы с нулевым количеством НЕ отображаются в инвентаре
-// BUG-INV-16: РАДИКАЛЬНО ИСПРАВЛЕН рендер инвентаря: добавлены PNG иконки, правильные классы resource-slot
-// БАГ-3: Убран onclick с угля (ТЭЦ управляется через отдельную панель)
-
 use crate::game::{GameState, GameEvent, QuestType};
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, HtmlElement};
@@ -93,7 +85,7 @@ impl GameUI {
             Self::clear_storage();
         }
     }
-    
+
     fn clear_storage() {
         if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok()).flatten() {
             let _ = storage.remove_item(LOG_STORAGE_KEY);
@@ -144,50 +136,55 @@ impl GameUI {
         Ok(())
     }
 
-    fn update_time(&self, state: &GameState) -> Result<(), JsValue> {
-        if let Some(el) = self.document.get_element_by_id("timeDisplay") {
-            let icon = if state.is_day { "☀️" } else { "🌙" };
-            let text = if state.is_day { "День" } else { "Ночь" };
-            let max_time = if state.is_day { 24 } else { 16 };
-            let filled = ((state.game_time as usize) * 12 / max_time).min(12);
-            let empty = 12usize.saturating_sub(filled);
-            let bar = "█".repeat(filled);
-            let empty_bar = "░".repeat(empty);
-            el.set_text_content(Some(&format!("{} {} [{}{}]", icon, text, bar, empty_bar)));
-        }
+    fn update_time(&self, _state: &GameState) -> Result<(), JsValue> {
+
         Ok(())
     }
 
     fn update_status(&self, state: &GameState) -> Result<(), JsValue> {
-        let set = |id, val| if let Some(el) = self.document.get_element_by_id(id) { el.set_text_content(Some(val)); };
-        
-        // БАГ-3: обновляем оба элемента статуса ТЭЦ
-        set("coalStatus", if state.coal_enabled { "АКТИВНА" } else { "ОФФЛАЙН" });
-        set("coalStatusDisplay", if state.coal_enabled { "АКТИВНА" } else { "ОФФЛАЙН" });
+        let set = |id, val| if let Some(el) = self.document.get_element_by_id(id) {
+            el.set_text_content(Some(val));
+        };
+
+        let update_indicator = |text_id: &str, is_online: bool| {
+            if let Some(text_el) = self.document.get_element_by_id(text_id) {
+                if let Some(sibling) = text_el.next_element_sibling() {
+                    let cls = if is_online { "status-indicator online" } else { "status-indicator offline" };
+                    let _ = sibling.set_class_name(cls);
+                }
+            }
+        };
+
+        update_indicator("coalStatus", state.coal_enabled);
+
         set("aiStatusText", if state.is_ai_active() { "АКТИВЕН" } else { "НЕАКТИВЕН" });
-        
+        update_indicator("aiStatusText", state.is_ai_active());
+
         let defense_text = if state.upgrades.defense {
-            format!("АКТИВНА (УР. {})", state.upgrades.defense_level)
+            if state.upgrades.defense_level == 0 {
+                "АКТИВНА (базовая)".to_string()
+            } else {
+                format!("АКТИВНА (УР. {})", state.upgrades.defense_level)
+            }
         } else {
             "НЕАКТИВНА".to_string()
         };
-        if let Some(el) = self.document.get_element_by_id("defenseStatusText") {
-            el.set_text_content(Some(&defense_text));
-        }
-        
-        let rebel_text = if state.rebel_protection_active {
-            "🛡️ ОТКУП"
-        } else {
-            match state.rebel_activity {
-                0..=3 => "НИЗКИЙ",
-                4..=6 => "СРЕДНИЙ",
-                7..=10 => "ВЫСОКИЙ",
-                _ => "КРИТИЧЕСКИЙ"
-            }
+        set("defenseStatusText", &defense_text);
+        update_indicator("defenseStatusText", state.upgrades.defense);
+
+        let threat_text = match state.rebel_activity {
+            0..=3 => "НИЗКИЙ УРОВЕНЬ",
+            4..=6 => "СРЕДНИЙ УРОВЕНЬ",
+            7..=10 => "ВЫСОКИЙ УРОВЕНЬ",
+            _ => "КРИТИЧЕСКИЙ УРОВЕНЬ",
         };
-        if let Some(el) = self.document.get_element_by_id("rebelStatus") {
-            el.set_text_content(Some(rebel_text));
-        }
+        let rebel_text = if state.rebel_protection_active {
+            format!("🛡️ ОТКУП · Угроза: {}", threat_text)
+        } else {
+            threat_text.to_string()
+        };
+        set("rebelStatus", &rebel_text);
+
         Ok(())
     }
 
@@ -209,7 +206,7 @@ impl GameUI {
         let cfg = crate::CONFIG.lock().unwrap();
         let active = state.is_ai_active();
         let perc = (state.computational_power as f32 / state.max_computational_power as f32 * 100.0) as u32;
-        
+
         if let Some(el) = self.document.get_element_by_id("powerFill") {
             el.set_attribute("style", &format!("width: {}%", perc))?;
         }
@@ -236,18 +233,14 @@ impl GameUI {
         Ok(())
     }
 
-    // BUG-INV-15: ресурсы с нулевым количеством НЕ отображаются
-    // BUG-INV-14: update_inventory проверяет активную вкладку
-    // BUG-INV-16: ИСПРАВЛЕН рендер инвентаря: PNG иконки, класс resource-slot
-    // БАГ-3: Убран onclick с угля (ТЭЦ управляется через отдельную панель)
     fn update_inventory(&self, state: &GameState) -> Result<(), JsValue> {
         if self.current_tab != "inventory" {
             return Ok(());
         }
-        
+
         if let Some(container) = &self.inventory_div {
             let mut resources: Vec<(&str, &str, &str, u32)> = Vec::new();
-            
+
             if state.inventory.coal > 0 {
                 resources.push(("coal", "img/ugol.png", "Уголь", state.inventory.coal));
             }
@@ -263,9 +256,9 @@ impl GameUI {
             if state.plasma_unlocked && state.inventory.plasma > 0 {
                 resources.push(("plasma", "img/plazma.png", "Плазма", state.inventory.plasma));
             }
-            
+
             let max_slots: usize = 25;
-            
+
             let mut slots: Vec<String> = resources.iter()
                 .map(|(cls, img, name, count)| {
                     format!(
@@ -274,11 +267,11 @@ impl GameUI {
                     )
                 })
                 .collect();
-            
+
             while slots.len() < max_slots {
                 slots.push(r#"<div class="resource-slot empty"><div class="resource-icon"><span>❓</span></div><div class="resource-name">Пусто</div><div class="resource-count">+</div></div>"#.to_string());
             }
-            
+
             container.set_inner_html(&slots.join(""));
         }
         Ok(())
@@ -366,7 +359,6 @@ impl GameUI {
         Ok(())
     }
 
-    // ========== ОБНОВЛЕННЫЙ КОМАНДНЫЙ ПУНКТ (CC-05) ==========
     fn update_rebel_protection(&self, state: &GameState) -> Result<(), JsValue> {
         if let Some(container) = &self.protection_panel {
             let vuln_html = if !state.current_vulnerability.is_empty() {
@@ -391,25 +383,25 @@ impl GameUI {
 
             container.set_inner_html(&format!(
                 r#"<div class="command-center-panel">
-                
+
                 <div class="protection-info">
                     <div class="protection-stats">
                         <div>НОЧИ: <strong>{nights}</strong></div>
                         <div>СТАТУС: <strong>{status}</strong></div>
                         <div>МУСОР: <strong>{trash}/100</strong></div>
                     </div>
-                    <button class="protection-buy-btn" 
+                    <button class="protection-buy-btn"
                         onclick="window.game?.buy_rebel_protection()">
                         +1 НОЧЬ ЗА 100 ♻️</button>
-                    <button class="protection-toggle-btn" 
-                        onclick="window.game?.toggle_rebel_protection()" 
+                    <button class="protection-toggle-btn"
+                        onclick="window.game?.toggle_rebel_protection()"
                         style="margin-top:8px;">{toggle_txt}</button>
                 </div>
-                
+
                 {vuln}
                 {multiphase}
                 {arms_race}
-                
+
                 </div>"#,
                 nights = state.rebel_protection_nights,
                 status = if state.rebel_protection_active { "АКТИВНА ✅" } else { "НЕАКТИВНА ❌" },

@@ -1,9 +1,8 @@
-// ======== craft.js (ИСПРАВЛЕННАЯ ВЕРСИЯ v5.1) ========
 import { designModule } from './design.js';
 import { GameBus, EVENTS } from './game-events.js';
 
 export const craftModule = {
-    game: null, 
+    game: null,
     resources: { ore: 0, coal: 0, plasma: 0, trash: 0, chips: 0 },
     isDay: true, coalEnabled: false, aiProductionBonus: 0,
     computationalPower: 0,
@@ -89,7 +88,20 @@ export const craftModule = {
 
     canCraft(recipe, amount = 1) {
         if (!this.game) return { can: false, reason: '⏳ Игра инициализируется...' };
-        
+
+        if (recipe.requiresBlueprint && recipe.blueprintId) {
+            try {
+                const stats = JSON.parse(this.game.get_statistics());
+                if (stats.blueprint_locked && stats.locked_blueprint_id === recipe.blueprintId) {
+                    const remaining = stats.blueprint_lock_remaining || 0;
+                    return {
+                        can: false,
+                        reason: `🔒 Чертёж "${recipe.blueprintId}" УКРАДЕН повстанцами! Подождите ${remaining} тиков.`
+                    };
+                }
+            } catch(e) {}
+        }
+
         const systemInactive = !this.isSystemActive;
         if (systemInactive) return { can: false, reason: '⚫ Система неактивна: ночь без ТЭЦ' };
 
@@ -149,12 +161,12 @@ export const craftModule = {
     executeCraft(recipeId, amount = 1) {
         const recipe = this.recipes.find(r => r.id === recipeId);
         if (!recipe) return { success: false, error: 'Рецепт не найден' };
-        
+
         const check = this.canCraft(recipe, amount);
         if (!check.can) return { success: false, error: check.reason };
-        
+
         if (this._isProcessing) return { success: false, error: 'Уже выполняется крафт...' };
-        
+
         this._isProcessing = true;
         try {
             if (typeof this.game[recipe.action] !== 'function') {
@@ -163,18 +175,20 @@ export const craftModule = {
             }
 
             let result = 'error';
-            if (this.game[recipe.action].length > 0) {
-                result = this.game[recipe.action](amount);
-            } else {
-                for (let i = 0; i < amount; i++) {
+            for (let i = 0; i < amount; i++) {
+                try {
                     result = this.game[recipe.action]();
-                    if (result !== 'success') break;
+                    if (result !== 'success' && !result.startsWith('success')) break;
+                } catch (e) {
+                    console.error(`Крафт ${recipe.action} упал:`, e);
+                    result = 'error';
+                    break;
                 }
             }
 
             if (result === 'success' || result.startsWith('success')) {
                 this._isProcessing = false;
-                
+
                 setTimeout(() => {
                     try {
                         if (window.fleetModule && recipe.result?.type === 'ship') {
@@ -196,7 +210,7 @@ export const craftModule = {
                 }, 100);
                 return { success: true, message: `✅ Создано: ${recipe.result.icon} ${recipe.name} x${amount}`, recipe };
             }
-            
+
             this._isProcessing = false;
             return { success: false, error: `Ошибка крафта: ${result}` };
         } catch(e) {
@@ -209,7 +223,7 @@ export const craftModule = {
     setupEventListeners(container) {
         if (!container) return;
         if (container._clickHandler) container.removeEventListener('click', container._clickHandler);
-        
+
         container._clickHandler = (e) => {
             const amountBtn = e.target.closest('.craft-amount-btn');
             if (amountBtn) {
@@ -220,20 +234,20 @@ export const craftModule = {
 
             const btn = e.target.closest('.craft-btn');
             if (!btn) return;
-            
+
             if (btn.disabled || btn.classList.contains('disabled') || btn.classList.contains('processing')) {
                 if (window.showNotif) window.showNotif('❌ Недостаточно ресурсов или система неактивна', true);
                 return;
             }
-            
+
             const recipeId = btn.dataset.recipe;
             if (!recipeId) return;
-            
+
             const originalText = btn.innerHTML;
             btn.disabled = true;
             btn.classList.add('processing');
             btn.innerHTML = '⏳...';
-            
+
             setTimeout(() => {
                 try {
                     const result = this.executeCraft(recipeId, this._craftAmount);
@@ -247,7 +261,6 @@ export const craftModule = {
                 } catch(e) {
                     console.error(e);
                 } finally {
-                    // ✅ Ищем кнопку заново, так как DOM мог быть перерисован
                     const currentBtn = container.querySelector(`.craft-btn[data-recipe="${recipeId}"]`);
                     if (currentBtn) {
                         currentBtn.disabled = false;
@@ -270,8 +283,8 @@ export const craftModule = {
         this.setupEventListeners(container);
     },
 
-    getResourceIcon(res) { 
-        return { ore: '⛏️', coal: '🪨', plasma: '⚡', chips: '🎛️', trash: '♻️' }[res] || '📦'; 
+    getResourceIcon(res) {
+        return { ore: '⛏️', coal: '🪨', plasma: '⚡', chips: '🎛️', trash: '♻️' }[res] || '📦';
     },
 
     getResourceSummary() {
@@ -287,7 +300,7 @@ export const craftModule = {
     renderCraftUI() {
         const systemInactive = !this.isSystemActive;
         const aiBonus = this.aiProductionBonus > 0 ? `<div class="ai-bonus-craft">🧠 Бонус ИИ: -${this.aiProductionBonus}% к стоимости</div>` : '';
-        
+
         const amountSelector = `
             <div class="craft-amount-selector">
                 <button class="craft-amount-btn ${this._craftAmount === 1 ? 'active' : ''}" data-amount="1">x1</button>
@@ -310,7 +323,7 @@ export const craftModule = {
 
             let costHtml = '';
             const effCost = this.getEffectiveCost(recipe, this._craftAmount);
-            
+
             if (recipe.cost.type === 'composite') {
                 costHtml = `<div class="cost-side">${Object.entries(recipe.cost.resources).map(([res, amt]) => {
                     const have = this.resources[res] || 0;
@@ -346,7 +359,7 @@ export const craftModule = {
                         </div>
                     </div>
                 </div>`;
-            
+
             if (systemInactive) {
                 html += `<div class="offline-msg">⚫ Крафт недоступен: система неактивна</div>`;
             } else if (!can && blockReason) {

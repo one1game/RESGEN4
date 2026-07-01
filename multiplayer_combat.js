@@ -1,16 +1,15 @@
-// ======== multiplayer_combat.js (ИСПРАВЛЕНАЯ ВЕРСИЯ v4.0 - PvP ЗОНЫ) ========
-// ИЗМЕНЕНИЯ:
-// - Добавлена проверка PvP зон перед атакой
-// - Автоматическое применение щита после успешного грабежа
-// - Исправлены все предыдущие баги
-
 import { supabase } from './supabase.js';
 import { fleetModule } from './fleet.js';
 
 let isProcessingMissions = false;
 const _processedMissions = new Set();
+const _processingLock = new Map();
 
-// Периодическая очистка _processedMissions
+let _lastProcessTime = 0;
+let _lastProcessHash = '';
+let _isProcessingQueue = false;
+const _missionProcessQueue = [];
+
 setInterval(() => {
     if (_processedMissions.size > 1000) {
         _processedMissions.clear();
@@ -27,31 +26,18 @@ export async function sendShip(attackerId, targetId, shipType) {
     const cfg = SHIP_CONFIG[shipType];
     if (!cfg) return { success: false, error: 'Неизвестный тип корабля' };
 
-    // Сам себе атака запрещена
     if (attackerId === targetId) {
         return { success: false, error: 'Нельзя атаковать собственную базу' };
     }
 
-    // ========== НОВОЕ: ПРОВЕРКА PVP ЗОНЫ ==========
-    if (shipType !== 'scout') {
-        try {
-            const { data: pvpCheck, error: pvpError } = await supabase.rpc('check_pvp_allowed', {
-                p_attacker: attackerId,
-                p_target: targetId
-            });
-            
-            if (pvpError) {
-                console.warn('Ошибка проверки PvP зоны:', pvpError);
-                return { success: false, error: 'Ошибка проверки зоны' };
-            }
-            
-            if (!pvpCheck?.allowed) {
-                return { success: false, error: pvpCheck?.reason || 'PvP не разрешён в этой зоне' };
-            }
-        } catch(e) {
-            console.warn('Исключение при проверке PvP зоны:', e);
-            return { success: false, error: 'Ошибка проверки зоны' };
-        }
+    const { data: targetExists, error: targetError } = await supabase
+        .from('game_saves')
+        .select('user_id')
+        .eq('user_id', targetId)
+        .maybeSingle();
+
+    if (targetError || !targetExists) {
+        return { success: false, error: 'Цель не найдена или недоступна' };
     }
 
     const ship = fleetModule.getAvailableShip(shipType);
@@ -124,7 +110,7 @@ export async function sendShip(attackerId, targetId, shipType) {
     }
 
     const flightMinutes = cfg.travel_seconds / 60;
-    
+
     const { data: mission, error } = await supabase
         .from('missions')
         .insert({
@@ -146,7 +132,7 @@ export async function sendShip(attackerId, targetId, shipType) {
         return { success: false, error: 'Ошибка сервера. Попробуйте ещё раз' };
     }
 
-    fleetModule.setShipMissionStatus(ship.id, true, mission.id, mission);
+    fleetModule.setShipMissionStatus(ship.id, true, mission.id, mission, targetId, null);
 
     if (window.fleetModule) {
         window.fleetModule._addFleetLog(
@@ -172,50 +158,63 @@ export async function processArrivedMissions(currentUserId) {
         console.log("⏭️ processArrivedMissions уже выполняется, пропускаем");
         return;
     }
+
+    const now = Date.now();
+    if (now - _lastProcessTime < 5000) {
+        console.log("⏭️ Слишком частый вызов processArrivedMissions, пропускаем");
+        return;
+    }
+
     isProcessingMissions = true;
-    
+    const nowDate = new Date();
+
     try {
-        const now = new Date();
-        console.log(`🔄 processArrivedMissions вызван в ${now.toISOString()}`);
-        
+        console.log(`🔄 processArrivedMissions вызван в ${nowDate.toISOString()}`);
+
         const { data: arrived, error: err1 } = await supabase
             .from('missions')
-            .select('*')
+            .update({ status: 'processing' })
             .eq('target_id', currentUserId)
             .eq('status', 'flying')
-            .lte('arrives_at', now.toISOString());
+            .lte('arrives_at', nowDate.toISOString())
+            .select()
+            .limit(10);
 
         if (err1) console.error('Ошибка запроса arrived:', err1);
-        
+
         console.log(`📥 Найдено входящих миссий для обработки: ${arrived?.length || 0}`);
 
         for (const mission of arrived ?? []) {
+            const lockTime = _processingLock.get(mission.id);
+            if (lockTime && Date.now() - lockTime < 60000) {
+                console.log(`⏭️ Миссия ${mission.id} уже обрабатывается, пропускаем`);
+                continue;
+            }
+            _processingLock.set(mission.id, Date.now());
+
             if (_processedMissions.has(mission.id)) {
                 console.log(`⏭️ Миссия ${mission.id} уже обработана, пропускаем`);
                 continue;
             }
-            
+
             _processedMissions.add(mission.id);
-            
+
             console.log(`📦 Обработка входящей миссии ${mission.id}, тип=${mission.ship_type}`);
-            
-            const { error: updateError } = await supabase
-                .from('missions')
-                .update({ status: 'arrived' })
-                .eq('id', mission.id)
-                .eq('status', 'flying');
-            
-            if (updateError) {
-                console.warn(`Ошибка обновления статуса миссии ${mission.id}:`, updateError);
-                _processedMissions.delete(mission.id);
+
+            try {
+                if (mission.ship_type === 'scout')  await _processScout(mission);
+                if (mission.ship_type === 'combat') await _processCombat(mission);
+                if (mission.ship_type === 'cargo')  await _processCargo(mission);
+            } catch (e) {
+                console.error(`Mission ${mission.id} failed:`, e);
+                await supabase.from('missions')
+                    .update({ status: 'flying' })
+                    .eq('id', mission.id);
                 continue;
             }
-            
-            if (mission.ship_type === 'scout')  await _processScout(mission);
-            if (mission.ship_type === 'combat') await _processCombat(mission);
-            if (mission.ship_type === 'cargo')  await _processCargo(mission);
-            
+
             setTimeout(() => _processedMissions.delete(mission.id), 3600000);
+            setTimeout(() => _processingLock.delete(mission.id), 60000);
         }
 
         const { data: returning, error: err2 } = await supabase
@@ -223,10 +222,10 @@ export async function processArrivedMissions(currentUserId) {
             .select('*')
             .eq('attacker_id', currentUserId)
             .in('status', ['returning', 'arrived'])
-            .lte('returns_at', now.toISOString());
+            .lte('returns_at', nowDate.toISOString());
 
         if (err2) console.error('Ошибка запроса returning:', err2);
-        
+
         console.log(`📤 Найдено возвращающихся миссий: ${returning?.length || 0}`);
 
         for (const mission of returning ?? []) {
@@ -234,26 +233,26 @@ export async function processArrivedMissions(currentUserId) {
                 console.log(`⏭️ Миссия ${mission.id} уже обработана, пропускаем`);
                 continue;
             }
-            
+
             _processedMissions.add(mission.id);
-            
+
             console.log(`🏁 Завершение миссии ${mission.id}, статус=${mission.status}`);
-            
+
             const { error: updateError } = await supabase
                 .from('missions')
-                .update({ 
+                .update({
                     status: 'done',
-                    completed_at: now.toISOString()
+                    completed_at: nowDate.toISOString()
                 })
                 .eq('id', mission.id)
                 .in('status', ['returning', 'arrived']);
-            
+
             if (updateError) {
                 console.warn(`Ошибка обновления статуса миссии ${mission.id}:`, updateError);
                 _processedMissions.delete(mission.id);
                 continue;
             }
-            
+
             if (mission.fleet_ship_id && fleetModule) {
                 const ship = fleetModule.ships.find(s => s.id === mission.fleet_ship_id);
                 if (ship && ship.onMission) {
@@ -266,11 +265,22 @@ export async function processArrivedMissions(currentUserId) {
                     ship.missionReturnsAt = null;
                     fleetModule.saveFleet();
                     console.log(`🆓 Корабль ${ship.name} освобождён (миссия ${mission.id} завершена)`);
+
+                    if (window.GameBus && window.GAME_EVENTS) {
+                        window.GameBus.emit(window.GAME_EVENTS.SHIP_MISSION_END, {
+                            ship: ship,
+                            missionId: mission.id
+                        });
+                    }
+
+                    if (window.spaceModule && typeof window.spaceModule._markDirty === 'function') {
+                        window.spaceModule._markDirty();
+                    }
                 } else {
                     fleetModule.setShipMissionStatus(mission.fleet_ship_id, false);
                 }
             }
-            
+
             if (mission.ship_type === 'cargo' && mission.loot_result && Object.keys(mission.loot_result).length > 0) {
                 const loot = mission.loot_result;
                 if (window.game && typeof window.game.add_resource === 'function') {
@@ -278,6 +288,21 @@ export async function processArrivedMissions(currentUserId) {
                     if (loot.chips > 0) window.game.add_resource('chips', loot.chips);
                     if (loot.plasma > 0) window.game.add_resource('plasma', loot.plasma);
                     console.log(`📦 Начислены ресурсы: ore=${loot.ore}, chips=${loot.chips}, plasma=${loot.plasma}`);
+                }
+            }
+
+            if (mission.ship_type === 'combat' && mission.loot && Object.keys(mission.loot).length > 0) {
+                if (window.fleetModule) {
+                    window.fleetModule._lastCombatResult = {
+                        won: true,
+                        targetUserId: mission.target_id,
+                        loot: mission.loot,
+                        timestamp: Date.now()
+                    };
+                    try {
+                        localStorage.setItem('corebox_last_combat_result', JSON.stringify(window.fleetModule._lastCombatResult));
+                    } catch(e) {}
+                    console.log(`⚔️ _lastCombatResult установлен для боевого корабля, target=${mission.target_id}`);
                 }
             }
 
@@ -309,18 +334,19 @@ export async function processArrivedMissions(currentUserId) {
                     payload: { loot: mission.loot, mission_id: mission.id }
                 });
             }
-            
+
             setTimeout(() => _processedMissions.delete(mission.id), 3600000);
         }
-        
+
         if (window.fleetModule && typeof window._refreshFleetWithMissions === 'function') {
             await window._refreshFleetWithMissions();
         }
-        
+
     } catch(e) {
         console.error('Ошибка в processArrivedMissions:', e);
     } finally {
         isProcessingMissions = false;
+        _lastProcessTime = Date.now();
     }
 }
 
@@ -371,106 +397,46 @@ async function _processScout(mission) {
 }
 
 async function _processCombat(mission) {
-    const { data: targetSave } = await supabase
-        .from('game_saves')
-        .select('ore, coal, chips, plasma, trash, full_state')
-        .eq('user_id', mission.target_id)
-        .maybeSingle();
-
-    if (!targetSave) {
-        await supabase
-            .from('missions')
-            .update({ status: 'returning' })
-            .eq('id', mission.id)
-            .eq('status', 'arrived');
-        return;
-    }
-
-    const fs = targetSave.full_state ?? {};
-    const hasDefense = fs.upgrades?.defense ?? false;
-
-    let pct = 0.10 + Math.random() * 0.40;
-    if (hasDefense) pct *= 0.5;
-
-    const inventory = {
-        ore:   targetSave.ore   ?? 0,
-        coal:  targetSave.coal  ?? 0,
-        chips: targetSave.chips ?? 0,
-        plasma: targetSave.plasma ?? 0,
-        trash:  targetSave.trash ?? 0,
-    };
-    const loot = _calcLoot(inventory, pct);
-
-    const newInventory = {};
-    for (const [res, val] of Object.entries(inventory)) {
-        newInventory[res] = Math.max(0, val - (loot[res] ?? 0));
-    }
-
-    let newFullState = null;
-    if (targetSave.full_state) {
-        newFullState = { ...targetSave.full_state };
-        if (newFullState.inventory) {
-            for (const [res, val] of Object.entries(loot)) {
-                if (newFullState.inventory[res] !== undefined) {
-                    newFullState.inventory[res] = Math.max(0, newFullState.inventory[res] - val);
-                }
-            }
-        }
-    }
-
-    const updateData = {
-        ore:   newInventory.ore,
-        coal:  newInventory.coal,
-        chips: newInventory.chips,
-        plasma: newInventory.plasma,
-        trash:  newInventory.trash,
-        updated_at: new Date().toISOString(),
-    };
-    
-    if (newFullState) {
-        updateData.full_state = newFullState;
-    }
-
-    await supabase.from('game_saves').update(updateData).eq('user_id', mission.target_id);
-
-    const { error } = await supabase
-        .from('missions')
-        .update({
-            status: 'returning',
-            loot:   loot,
-        })
-        .eq('id', mission.id)
-        .eq('status', 'arrived');
-
-    if (error) {
-        console.warn(`Ошибка обновления combat миссии ${mission.id}:`, error);
-    }
-
-    await supabase.from('battle_log').insert({
-        attacker_id:      mission.attacker_id,
-        defender_id:      mission.target_id,
-        ship_type:        'combat',
-        outcome:          hasDefense ? 'partial' : 'success',
-        resources_stolen: loot,
-    });
-
-    // ========== НОВОЕ: ПРИМЕНЕНИЕ ЩИТА ПОСЛЕ АТАКИ ==========
     try {
-        await supabase.rpc('apply_pvp_shield', { p_user_id: mission.target_id });
-        console.log(`🛡️ Применён щит для ${mission.target_id}`);
-    } catch(shieldErr) {
-        console.warn('Ошибка применения щита:', shieldErr);
-    }
+        const { data: result, error } = await supabase.rpc('atomic_pvp_steal', {
+            p_attacker_id: mission.attacker_id,
+            p_defender_id: mission.target_id,
+            p_percent: 0.10 + Math.random() * 0.40
+        });
 
-    await pushNotification(mission.target_id, 'under_attack', {
-        message: `💥 Ваша планета атакована! Потери: ${_formatLoot(loot)}`,
-        payload: { stolen: loot, had_defense: hasDefense }
-    });
+        if (error) throw error;
+        if (!result) return;
+
+        const loot = result.loot || {};
+
+        await supabase.from('missions').update({
+            status: 'returning',
+            loot: loot
+        }).eq('id', mission.id).eq('status', 'arrived');
+
+        await pushNotification(mission.target_id, 'under_attack', {
+            message: `💥 Ваша планета атакована! Потери: ${_formatLoot(loot)}`,
+            payload: { stolen: loot }
+        });
+
+        await _invalidateVictimCache(mission.target_id);
+
+    } catch(e) {
+        console.error('Combat error:', e);
+    }
+}
+
+async function _invalidateVictimCache(victimId) {
+    try {
+        await supabase.from('game_saves').update({
+            last_state_change: new Date().toISOString()
+        }).eq('user_id', victimId);
+    } catch(e) {}
 }
 
 async function _processCargo(mission) {
     let loot = {};
-    
+
     if (mission.combat_mission_id) {
         const { data: combatMission } = await supabase
             .from('missions')
@@ -481,15 +447,22 @@ async function _processCargo(mission) {
     } else {
         const { data: combatMission } = await supabase
             .from('missions')
-            .select('loot')
+            .select('loot, returns_at, id')
             .eq('attacker_id', mission.attacker_id)
             .eq('target_id', mission.target_id)
             .eq('ship_type', 'combat')
             .in('status', ['returning', 'done'])
-            .order('created_at', { ascending: false })
+            .order('returns_at', { ascending: false })
             .limit(1)
             .maybeSingle();
-        loot = combatMission?.loot ?? {};
+
+        if (combatMission && combatMission.returns_at) {
+            const combatEnd = new Date(combatMission.returns_at).getTime();
+            const cargoStart = new Date(mission.created_at).getTime();
+            if (cargoStart - combatEnd > -120000 && cargoStart - combatEnd < 300000) {
+                loot = combatMission.loot ?? {};
+            }
+        }
     }
 
     const { error } = await supabase
@@ -526,16 +499,18 @@ function _formatLoot(loot) {
 
 async function pushNotification(playerId, type, { message, payload }) {
     try {
-        await supabase.from('notifications').insert({ 
-            player_id: playerId, 
-            type, 
-            message, 
+        await supabase.from('notifications').insert({
+            player_id: playerId,
+            type,
+            message,
             payload: payload || {},
             created_at: new Date().toISOString(),
             is_read: false
         });
     } catch(e) {
-        console.warn('Ошибка отправки уведомления:', e);
+        if (e.code !== '23505') {
+            console.warn(`Ошибка уведомления [${type}]:`, e.message);
+        }
     }
 }
 
@@ -547,12 +522,13 @@ export async function getLatestScoutData(attackerId, targetId) {
         .eq('target_id', targetId)
         .eq('ship_type', 'scout')
         .in('status', ['returning', 'done'])
+        .not('scout_data', 'is', null)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
-    
-    if (!data) return null;
-    
+
+    if (!data?.scout_data) return null;
+
     return {
         scout_data: data.scout_data,
         created_at: data.created_at,
@@ -562,7 +538,7 @@ export async function getLatestScoutData(attackerId, targetId) {
 
 export async function getTargetPlayers(currentUserId) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    
+
     const { data: saves, error } = await supabase
         .from('game_saves')
         .select('user_id, ore, coal, chips, plasma, total_mined, neuro_evolution, nights_survived, computational_power, last_seen')
@@ -609,14 +585,14 @@ export async function getActiveMissions(playerId) {
         console.warn('getActiveMissions: playerId не указан');
         return [];
     }
-    
+
     const { data } = await supabase
         .from('missions')
         .select('*')
         .or(`attacker_id.eq.${playerId},target_id.eq.${playerId}`)
         .in('status', ['flying', 'returning', 'arrived'])
         .order('arrives_at');
-    
+
     return data ?? [];
 }
 

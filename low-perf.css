@@ -1,4 +1,3 @@
-/* low-perf.css - отключает анимации для слабых устройств */
 .low-perf *,
 .low-perf *::before,
 .low-perf *::after {

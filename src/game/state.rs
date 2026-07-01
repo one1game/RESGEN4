@@ -1,17 +1,7 @@
-// src/game/state.rs - ПОЛНОСТЬЮ ИСПРАВЛЕН
-// БАГ #4: total_mined обновляется при любом добывающем событии
-// БАГ #8: nights_survived инкрементируется при рассвете
-// БАГ #M2: cooling_level влияет на остывание
-// БАГ #S2: total_coal_burned и plasma_from_coal изменены на u64
-// БАГ #REB-02: rebel_protection_nights теперь расходуется всегда при наступлении ночи
-// БАГ #1: add_planet_mission исправлен - убирает старые миссии
-// БАГ #14: defense_debuff корректно обрабатывается
-// BUG-INV-11: квест-награда теперь минимум 1 мусор
-
 use serde::{Serialize, Deserialize};
 use super::config::GameConfig;
 use rand::Rng;
-use std::collections::VecDeque;
+use std::collections::{VecDeque, HashMap};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AttackRecord {
@@ -20,6 +10,7 @@ pub struct AttackRecord {
     pub was_defended: bool,
     pub result: String,
     pub game_time: i32,
+    pub stolen: HashMap<String, u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -42,6 +33,7 @@ pub struct FleetShip {
     pub speed: u32,
 }
 
+#[allow(dead_code)]
 impl FleetShip {
     pub fn new(ship_type: &str, _ship_index: usize) -> Self {
         let (name, max_health, speed) = match ship_type {
@@ -69,7 +61,7 @@ impl FleetShip {
             speed,
         }
     }
-    
+
     pub fn new_with_id(ship_type: &str, id: String) -> Self {
         let (name, max_health, speed) = match ship_type {
             "cargo" => (format!("Грузовой"), 100, 1),
@@ -189,109 +181,108 @@ pub enum QuestType {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct GameState {
+
     pub game_time: i32,
     pub is_day: bool,
     pub time_changed: bool,
     pub coal_enabled: bool,
-    
+
     pub coal_unlocked: bool,
     pub trash_unlocked: bool,
     pub chips_unlocked: bool,
     pub plasma_unlocked: bool,
     pub ore_unlocked: bool,
-    
+
     pub total_mined: u32,
     pub nights_survived: u32,
     pub rebel_activity: u32,
-    
+
     pub turbine_heat: u32,
     pub turbine_upgrade_level: u32,
     pub turbine_cooling: bool,
-    
+
     pub last_click_time: u64,
     pub current_quest: usize,
     pub inventory: Inventory,
     pub upgrades: Upgrades,
     pub quests: Vec<Quest>,
-    
+
     pub total_coal_burned: u64,
     pub plasma_from_coal: u64,
-    
+
     pub auto_clicking: bool,
     pub computational_power: u32,
     pub max_computational_power: u32,
     pub last_auto_click_time: i32,
     pub manual_clicks: u32,
-    
+
     pub rebel_protection_nights: u32,
     pub rebel_protection_active: bool,
-    
+
     pub total_coal_mined: u32,
     pub total_trash_mined: u32,
     pub total_plasma_mined: u32,
     pub total_ore_mined: u32,
     pub total_coal_stolen: u32,
     pub total_ore_stolen: u32,
-    
+
     pub attacks_defended: u32,
     pub rebel_attacks_count: u32,
-    
+
     pub neuro_evolution: u32,
     pub neuro_consciousness: f64,
     pub neuro_score: u32,
     pub neuro_defense_bonus: f64,
     pub neuro_prediction_bonus: f64,
-    
+
     pub last_rebel_attack_time: i32,
     pub last_rebel_attack_type: String,
     pub last_attack_was_defended: bool,
     pub consecutive_successful_defenses: u32,
     pub consecutive_failed_defenses: u32,
     pub total_defense_activations: u32,
-    
+
     pub temporary_mining_bonus: u32,
     pub temporary_defense_bonus: u32,
     pub temporary_bonus_remaining: i32,
-    
+
     pub highest_rebel_activity: u32,
     pub longest_defense_streak: u32,
     pub total_evolution_points_earned: u32,
-    
+
     pub neuro_passive_timer: i32,
     pub neuro_evolution_timer: i32,
-    
+
     pub defense_debuff_remaining: i32,
     pub mining_debuff_remaining: i32,
     pub mining_debuff_percent: f32,
     pub autoclick_debuff_remaining: i32,
     pub autoclick_debuff_percent: f32,
-    
+
     pub attack_history: VecDeque<AttackRecord>,
     pub last_attacking_faction: String,
     pub current_ai_mode: String,
     pub attack_warning: String,
     pub attack_warning_faction: String,
-    
+
     pub blueprint_cargo_unlocked: bool,
     pub blueprint_scout_unlocked: bool,
     pub blueprint_combat_unlocked: bool,
     pub blueprint_research_progress: u32,
-    
+
     pub current_night_type: String,
     pub trade_blocked: bool,
     pub power_tier: u32,
     pub last_ai_coal_threshold: u32,
-    pub prestige_level: u32,
-    
+
     pub fleet_ships: Vec<FleetShip>,
     pub total_ships_built: u32,
-    
+
     pub planets: Vec<Planet>,
     pub active_planet_missions: Vec<PlanetMission>,
-    
+
     pub quests_progress: Vec<QuestProgress>,
-    
-    // ── НОВЫЕ ПОЛЯ ДЛЯ ВОЙНЫ УМОВ ──
+
     pub last_intercept_text: String,
     pub last_warning_issued_at: i32,
     pub arms_race_level: u32,
@@ -301,14 +292,53 @@ pub struct GameState {
     pub faction_personality_hints: Vec<String>,
     pub counter_op_cooldown_remaining: i32,
     pub multiphase_warning: bool,
-    
-    // БАГ #1: флаг для отслеживания атаки в текущую ночь
     pub had_attack_last_night: bool,
-    
-    // BUG-INV-09: максимальный размер стека инвентаря
+
     pub max_inventory_stack: u32,
+
+    pub map_x: Option<f64>,
+    pub map_y: Option<f64>,
+
+    pub background_sabotage_cooldown_remaining: i32,
+    pub last_fleet_attack_time: i32,
+    pub last_blueprint_steal_time: i32,
+    pub last_planet_harass_time: i32,
+    pub last_tec_sabotage_time: i32,
+
+    pub blueprint_locked_until: i64,
+    pub locked_blueprint_id: String,
+
+    pub fleet_under_attack: bool,
+    pub fleet_attack_target_id: String,
+    pub fleet_attack_damage: u32,
+
+    pub planet_under_harass: bool,
+    pub harassed_planet_id: String,
+
+    pub tec_sabotaged: bool,
+    pub tec_sabotage_remaining: i32,
+
+    pub protection_breached_this_night: bool,
+    pub total_breaches: u32,
+
+    pub fear_level: u32,
+    pub last_fear_event_time: i32,
+
+    pub fleet_shield_active: bool,
+    pub fleet_shield_expires_at: i64,
+
+    pub blueprints_encrypted: bool,
+    pub blueprint_encryption_expires_at: i64,
+
+    pub planets_fortified: bool,
+    pub planet_fortification_expires_at: i64,
+
+    pub craft_blocked_until: i64,
+
+    pub tick_count: i64,
 }
 
+#[allow(dead_code)]
 impl GameState {
     pub fn new(config: &GameConfig) -> Self {
         let mut state = Self::default();
@@ -327,8 +357,7 @@ impl GameState {
         state.fleet_ships = Vec::new();
         state.total_ships_built = 0;
         state.load_quests(config);
-        
-        // НОВЫЕ ПОЛЯ
+
         state.last_intercept_text = String::new();
         state.last_warning_issued_at = 0;
         state.arms_race_level = 0;
@@ -339,7 +368,48 @@ impl GameState {
         state.counter_op_cooldown_remaining = 0;
         state.multiphase_warning = false;
         state.had_attack_last_night = false;
-        
+
+        state.map_x = None;
+        state.map_y = None;
+
+        state.background_sabotage_cooldown_remaining = 0;
+        state.last_fleet_attack_time = -999;
+        state.last_blueprint_steal_time = -999;
+        state.last_planet_harass_time = -999;
+        state.last_tec_sabotage_time = -999;
+
+        state.blueprint_locked_until = 0;
+        state.locked_blueprint_id = String::new();
+
+        state.fleet_under_attack = false;
+        state.fleet_attack_target_id = String::new();
+        state.fleet_attack_damage = 0;
+
+        state.planet_under_harass = false;
+        state.harassed_planet_id = String::new();
+
+        state.tec_sabotaged = false;
+        state.tec_sabotage_remaining = 0;
+
+        state.protection_breached_this_night = false;
+        state.total_breaches = 0;
+
+        state.fear_level = 0;
+        state.last_fear_event_time = 0;
+
+        state.fleet_shield_active = false;
+        state.fleet_shield_expires_at = 0;
+
+        state.blueprints_encrypted = false;
+        state.blueprint_encryption_expires_at = 0;
+
+        state.planets_fortified = false;
+        state.planet_fortification_expires_at = 0;
+
+        state.craft_blocked_until = 0;
+
+        state.tick_count = 0;
+
         state
     }
 
@@ -380,8 +450,16 @@ impl GameState {
     pub fn update_time(&mut self, delta: i32, config: &GameConfig) -> Vec<super::events::GameEvent> {
         use super::events::GameEvent;
         let mut events = Vec::new();
-        
-        // БАГ #M2: cooling_level влияет на остывание
+
+        self.tick_count += 1;
+
+        if self.fear_level > 0
+            && (self.tick_count) - self.last_fear_event_time as i64 > 30
+        {
+            self.fear_level = self.fear_level.saturating_sub(1);
+            self.last_fear_event_time = self.tick_count as i32;
+        }
+
         let cooling = 2 + self.turbine_upgrade_level + self.upgrades.cooling_level;
         if self.turbine_heat > 0 {
             self.turbine_heat = self.turbine_heat.saturating_sub(cooling);
@@ -390,7 +468,7 @@ impl GameState {
                 events.push(GameEvent::LogMessage("🌡️ Турбина остыла".to_string()));
             }
         }
-        
+
         let was_day = self.is_day;
         self.time_changed = false;
         self.game_time -= delta;
@@ -402,13 +480,50 @@ impl GameState {
                 events.push(GameEvent::LogMessage("🔧 Саботаж устранён".to_string()));
             }
         }
-        
+
         if self.autoclick_debuff_remaining > 0 {
             self.autoclick_debuff_remaining -= 1;
             if self.autoclick_debuff_remaining == 0 {
                 self.autoclick_debuff_percent = 0.0;
                 events.push(GameEvent::LogMessage("🧠 Воздействие ослабло".to_string()));
             }
+        }
+
+        if self.background_sabotage_cooldown_remaining > 0 {
+            self.background_sabotage_cooldown_remaining -= 1;
+        }
+
+        if self.tec_sabotage_remaining > 0 {
+            self.tec_sabotage_remaining -= 1;
+            if self.tec_sabotage_remaining == 0 {
+                self.tec_sabotaged = false;
+                events.push(GameEvent::LogMessage(
+                    "🔧 Саботаж ТЭЦ устранён — можно снова включить".to_string()
+                ));
+            }
+        }
+
+        if self.blueprint_locked_until > 0 && (self.tick_count) > self.blueprint_locked_until {
+            self.locked_blueprint_id = String::new();
+            self.blueprint_locked_until = 0;
+            events.push(GameEvent::LogMessage(
+                "📐 Чертеж восстановлен — можно снова крафтить".to_string()
+            ));
+        }
+
+        if self.fleet_shield_active && self.tick_count >= self.fleet_shield_expires_at {
+            self.fleet_shield_active = false;
+            events.push(GameEvent::LogMessage("🛡️ Защита флота истекла".to_string()));
+        }
+
+        if self.blueprints_encrypted && self.tick_count >= self.blueprint_encryption_expires_at {
+            self.blueprints_encrypted = false;
+            events.push(GameEvent::LogMessage("🔐 Шифрование чертежей истекло".to_string()));
+        }
+
+        if self.planets_fortified && self.tick_count >= self.planet_fortification_expires_at {
+            self.planets_fortified = false;
+            events.push(GameEvent::LogMessage("🏰 Укрепление планет истекло".to_string()));
         }
 
         if self.game_time <= 0 {
@@ -419,8 +534,7 @@ impl GameState {
                 config.time_config.night_duration
             };
             self.time_changed = true;
-            
-            // БАГ #14: defense_debuff корректно обрабатывается
+
             if self.defense_debuff_remaining > 0 && !self.is_day && was_day {
                 self.defense_debuff_remaining -= 1;
                 if self.defense_debuff_remaining == 0 {
@@ -463,7 +577,7 @@ impl GameState {
 
             if !self.is_day && was_day {
                 events.push(GameEvent::NightStarted);
-                // БАГ #REB-02: защита расходуется ТОЛЬКО если активна
+
                 if self.rebel_protection_active && self.rebel_protection_nights > 0 {
                     self.rebel_protection_nights -= 1;
                     if self.rebel_protection_nights == 0 {
@@ -471,6 +585,8 @@ impl GameState {
                         events.push(GameEvent::LogMessage("🛡️ Защита истекла".to_string()));
                     }
                 }
+
+                self.protection_breached_this_night = false;
             } else if self.is_day && !was_day {
                 self.nights_survived += 1;
                 events.push(GameEvent::DayStarted);
@@ -542,6 +658,14 @@ impl GameState {
 
     pub fn toggle_coal(&mut self) -> Vec<super::events::GameEvent> {
         use super::events::GameEvent;
+
+        if self.tec_sabotaged {
+            return vec![GameEvent::LogMessage(format!(
+                "🔥 ТЭЦ САБОТИРОВАНА! Повторное включение невозможно. Подождите {} тиков.",
+                self.tec_sabotage_remaining
+            ))];
+        }
+
         if self.coal_enabled {
             self.coal_enabled = false;
             vec![GameEvent::LogMessage("ТЭЦ отключена".to_string())]
@@ -567,11 +691,11 @@ impl GameState {
             self.consecutive_failed_defenses += 1;
         }
     }
-    
+
     pub fn add_planet(&mut self, planet: Planet) {
         self.planets.push(planet);
     }
-    
+
     pub fn remove_planet(&mut self, planet_id: &str) -> Option<Planet> {
         let index = self.planets.iter().position(|p| p.id == planet_id);
         if let Some(idx) = index {
@@ -580,15 +704,15 @@ impl GameState {
             None
         }
     }
-    
+
     pub fn get_planet(&self, planet_id: &str) -> Option<&Planet> {
         self.planets.iter().find(|p| p.id == planet_id)
     }
-    
+
     pub fn get_planet_mut(&mut self, planet_id: &str) -> Option<&mut Planet> {
         self.planets.iter_mut().find(|p| p.id == planet_id)
     }
-    
+
     pub fn add_fleet_ship(&mut self, ship_type: &str) -> &FleetShip {
         self.total_ships_built += 1;
         let timestamp = js_sys::Date::now() as u64;
@@ -597,15 +721,15 @@ impl GameState {
         self.fleet_ships.push(new_ship);
         self.fleet_ships.last().unwrap()
     }
-    
+
     pub fn get_fleet_ship(&self, ship_id: &str) -> Option<&FleetShip> {
         self.fleet_ships.iter().find(|s| s.id == ship_id)
     }
-    
+
     pub fn get_fleet_ship_mut(&mut self, ship_id: &str) -> Option<&mut FleetShip> {
         self.fleet_ships.iter_mut().find(|s| s.id == ship_id)
     }
-    
+
     pub fn remove_fleet_ship(&mut self, ship_id: &str) -> Option<FleetShip> {
         let index = self.fleet_ships.iter().position(|s| s.id == ship_id);
         if let Some(idx) = index {
@@ -614,19 +738,17 @@ impl GameState {
             None
         }
     }
-    
+
     pub fn get_available_ship(&self, ship_type: &str) -> Option<&FleetShip> {
         self.fleet_ships.iter()
             .find(|s| s.ship_type == ship_type && !s.on_mission && !s.on_defense && s.health > 20)
     }
-    
-    // БАГ #1: ИСПРАВЛЕН — полная замена старых миссий
+
     pub fn add_planet_mission(&mut self, mission: PlanetMission) {
-        // Убираем все старые миссии этого корабля, независимо от статуса
         self.active_planet_missions.retain(|m| m.ship_id != mission.ship_id);
         self.active_planet_missions.push(mission);
     }
-    
+
     pub fn remove_planet_mission(&mut self, mission_id: &str) -> Option<PlanetMission> {
         let index = self.active_planet_missions.iter().position(|m| m.id == mission_id);
         if let Some(idx) = index {
@@ -635,7 +757,7 @@ impl GameState {
             None
         }
     }
-    
+
     pub fn get_active_planet_missions(&self) -> Vec<&PlanetMission> {
         self.active_planet_missions.iter()
             .filter(|m| m.status == "flying" || m.status == "returning" || m.status == "arrived")
@@ -669,7 +791,6 @@ impl Quest {
     }
 }
 
-// ОДНА реализация Default для GameState (убираем #[derive(Default)] выше)
 impl Default for GameState {
     fn default() -> Self {
         Self {
@@ -747,7 +868,7 @@ impl Default for GameState {
             trade_blocked: false,
             power_tier: 0,
             last_ai_coal_threshold: 0,
-            prestige_level: 0,
+
             fleet_ships: Vec::new(),
             total_ships_built: 0,
             planets: Vec::new(),
@@ -764,6 +885,46 @@ impl Default for GameState {
             multiphase_warning: false,
             had_attack_last_night: false,
             max_inventory_stack: 9999,
+            map_x: None,
+            map_y: None,
+
+            background_sabotage_cooldown_remaining: 0,
+            last_fleet_attack_time: -999,
+            last_blueprint_steal_time: -999,
+            last_planet_harass_time: -999,
+            last_tec_sabotage_time: -999,
+
+            blueprint_locked_until: 0,
+            locked_blueprint_id: String::new(),
+
+            fleet_under_attack: false,
+            fleet_attack_target_id: String::new(),
+            fleet_attack_damage: 0,
+
+            planet_under_harass: false,
+            harassed_planet_id: String::new(),
+
+            tec_sabotaged: false,
+            tec_sabotage_remaining: 0,
+
+            protection_breached_this_night: false,
+            total_breaches: 0,
+
+            fear_level: 0,
+            last_fear_event_time: 0,
+
+            fleet_shield_active: false,
+            fleet_shield_expires_at: 0,
+
+            blueprints_encrypted: false,
+            blueprint_encryption_expires_at: 0,
+
+            planets_fortified: false,
+            planet_fortification_expires_at: 0,
+
+            craft_blocked_until: 0,
+
+            tick_count: 0,
         }
     }
 }

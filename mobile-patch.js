@@ -1,21 +1,3 @@
-// ========== mobile-patch.js (ИСПРАВЛЕННАЯ ВЕРСИЯ) ==========
-// БАГ #31: исправлена проверка lastTouchTarget для двойного тапа
-// БАГ #32: MutationObserver для fixInputZoom теперь отключается
-// БАГ #33: bodyObserver использует subtree: true
-// БАГ #MED-13: добавлен сброс флага патча при удалении кнопки
-
-/**
- * CoreBox 3.2 — МОБИЛЬНЫЙ JS-ПАТЧ
- * 
- * Что делает:
- *  1. Вибрация на все кнопки / игровые события
- *  2. Long-press на плавающей кнопке (исправлен для мобильных)
- *  3. Scroll вкладок навигации к активной
- *  4. Блокировка нативного zoom двойным тапом
- *  5. Pull-to-refresh отключён
- *  6. Haptic-хелпер (безопасный — не падает на десктопе)
- */
-
 (function () {
   'use strict';
 
@@ -32,13 +14,12 @@
 
   function _vib (pattern) {
     if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (e) { /* ignore */ }
+      try { navigator.vibrate(pattern); } catch (e) {  }
     }
   }
 
   window.Haptic = Haptic;
 
-  // Вибрация на кнопки
   document.addEventListener('pointerdown', function (e) {
     const btn = e.target.closest(
       'button, .tab, .status-tab, .craft-btn, .design-btn, ' +
@@ -73,35 +54,34 @@
     }
   }, { passive: true });
 
-  // Плавающая кнопка с long-press
   let _floatingButtonPatched = false;
-  
+
   function patchFloatingButton() {
     const oldBtn = document.getElementById('floatingMineBtn');
     if (!oldBtn) return null;
-    
+
     if (oldBtn.getAttribute('data-patched') === 'true') {
       console.log('✅ Плавающая кнопка уже пропатчена');
       return oldBtn;
     }
-    
+
     const newBtn = document.createElement('div');
     newBtn.id = oldBtn.id;
     newBtn.className = oldBtn.className;
-    
+
     for (let i = 0; i < oldBtn.attributes.length; i++) {
       const attr = oldBtn.attributes[i];
       newBtn.setAttribute(attr.name, attr.value);
     }
-    
+
     newBtn.innerHTML = oldBtn.innerHTML;
     newBtn.setAttribute('data-patched', 'true');
-    
+
     oldBtn.parentNode.replaceChild(newBtn, oldBtn);
-    
+
     const btn = document.getElementById('floatingMineBtn');
     if (!btn) return null;
-    
+
     let pressTimer = null;
     let isLongPress = false;
     let touchStartX = 0;
@@ -110,7 +90,7 @@
     let clickProcessed = false;
     const LONG_PRESS_MS = 600;
     const MOVE_THRESHOLD = 10;
-    
+
     btn.addEventListener('mousedown', (e) => {
       e.preventDefault();
       isLongPress = false;
@@ -122,7 +102,7 @@
         }
       }, LONG_PRESS_MS);
     });
-    
+
     btn.addEventListener('mouseup', () => {
       clearTimeout(pressTimer);
       if (!isLongPress && typeof window.handleClick === 'function') {
@@ -131,13 +111,13 @@
       isLongPress = false;
       btn.style.transform = '';
     });
-    
+
     btn.addEventListener('mouseleave', () => {
       clearTimeout(pressTimer);
       isLongPress = false;
       btn.style.transform = '';
     });
-    
+
     btn.addEventListener('touchstart', (e) => {
       const touch = e.touches[0];
       touchStartX = touch.clientX;
@@ -145,10 +125,10 @@
       touchStartTime = Date.now();
       isLongPress = false;
       clickProcessed = false;
-      
+
       btn.style.transform = 'scale(0.92)';
       Haptic.light();
-      
+
       pressTimer = setTimeout(() => {
         isLongPress = true;
         Haptic.longPress();
@@ -158,25 +138,25 @@
         }
       }, LONG_PRESS_MS);
     }, { passive: true });
-    
+
     btn.addEventListener('touchmove', (e) => {
       const touch = e.touches[0];
       const deltaX = Math.abs(touch.clientX - touchStartX);
       const deltaY = Math.abs(touch.clientY - touchStartY);
-      
+
       if (deltaX > MOVE_THRESHOLD || deltaY > MOVE_THRESHOLD) {
         clearTimeout(pressTimer);
         isLongPress = false;
       }
     }, { passive: true });
-    
+
     btn.addEventListener('touchend', (e) => {
       e.preventDefault();
       clearTimeout(pressTimer);
-      
+
       const elapsed = Date.now() - touchStartTime;
       btn.style.transform = '';
-      
+
       if (!isLongPress && !clickProcessed && elapsed < LONG_PRESS_MS) {
         clickProcessed = true;
         setTimeout(() => { clickProcessed = false; }, 200);
@@ -186,21 +166,21 @@
       }
       isLongPress = false;
     });
-    
+
     btn.addEventListener('touchcancel', () => {
       clearTimeout(pressTimer);
       isLongPress = false;
       btn.style.transform = '';
       clickProcessed = false;
     });
-    
+
     const observer = new MutationObserver(() => {
       if (btn.classList.contains('auto-clicking')) {
         Haptic.longPress();
       }
     });
     observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
-    
+
     console.log('✅ Плавающая кнопка пропатчена для мобильных устройств');
     _floatingButtonPatched = true;
     return btn;
@@ -209,11 +189,11 @@
   let _bodyObserver = null;
   let _warningObserver = null;
   let _floatObserver = null;
-  let _domObserver = null; // БАГ #MED-13: наблюдатель за удалением кнопки
+  let _domObserver = null;
 
   function watchGameNotifications () {
     if (_bodyObserver) _bodyObserver.disconnect();
-    
+
     _bodyObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
         for (const node of m.addedNodes) {
@@ -232,8 +212,7 @@
             Haptic.warning();
           }
         }
-        
-        // БАГ #MED-13: проверка на удаление кнопки
+
         for (const node of m.removedNodes) {
           if (node instanceof HTMLElement && node.id === 'floatingMineBtn') {
             console.log('📱 Плавающая кнопка удалена, сбрасываем флаг патча');
@@ -259,7 +238,7 @@
         characterData: true,
       });
     }
-    
+
     if (_floatObserver) _floatObserver.disconnect();
     _floatObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
@@ -276,8 +255,7 @@
       }
     });
     _floatObserver.observe(document.body, { childList: true, subtree: true });
-    
-    // БАГ #MED-13: наблюдатель за появлением новой кнопки
+
     if (_domObserver) _domObserver.disconnect();
     _domObserver = new MutationObserver((mutations) => {
       for (const m of mutations) {
@@ -316,7 +294,7 @@
       if (!tab) return;
       setTimeout(() => scrollTabIntoView(tab), 50);
     });
-    
+
     setTimeout(() => {
       const activeTab = document.querySelector('.tab.active');
       if (activeTab) scrollTabIntoView(activeTab);
@@ -326,27 +304,27 @@
   function preventDoubleTapZoom () {
     let lastTouch = 0;
     let lastTouchTarget = null;
-    
+
     document.addEventListener('touchend', (e) => {
       if (e.target.closest('#floatingMineBtn')) return;
-      
+
       const now = Date.now();
       const delta = now - lastTouch;
-      
-      const isSameElement = lastTouchTarget === e.target || 
+
+      const isSameElement = lastTouchTarget === e.target ||
                            (lastTouchTarget && lastTouchTarget.contains(e.target)) ||
                            (e.target && e.target.contains(lastTouchTarget));
-      
+
       if (delta < 300 && delta > 0 && isSameElement) {
         if (e.target.closest('button, .tab, .status-tab, .craft-btn, .design-btn, .ship-btn, .upgrade-btn, .stat-btn, .log-btn, .auth-btn, .trade-mode-btn, .toggle-btn, .logout-btn')) {
           e.preventDefault();
         }
       }
-      
+
       lastTouch = now;
       lastTouchTarget = e.target;
     }, { passive: false });
-    
+
     const gameContent = document.getElementById('gameContent');
     if (gameContent) {
       gameContent.addEventListener('touchstart', (e) => {
@@ -359,16 +337,16 @@
 
   function disablePullToRefresh() {
     let touchStartY = 0;
-    
+
     document.addEventListener('touchstart', (e) => {
       touchStartY = e.touches[0].clientY;
     }, { passive: true });
-    
+
     document.addEventListener('touchmove', (e) => {
       const scrollTop = document.documentElement.scrollTop;
       const touchY = e.touches[0].clientY;
       const deltaY = touchY - touchStartY;
-      
+
       if (scrollTop <= 0 && deltaY > 10) {
         e.preventDefault();
       }
@@ -376,18 +354,18 @@
   }
 
   let _inputZoomObserver = null;
-  
+
   function fixInputZoom () {
     document.querySelectorAll('input, select, textarea').forEach(el => {
       if (parseFloat(getComputedStyle(el).fontSize) < 16) {
         el.style.fontSize = '16px';
       }
     });
-    
+
     if (_inputZoomObserver) {
       _inputZoomObserver.disconnect();
     }
-    
+
     _inputZoomObserver = new MutationObserver(() => {
       document.querySelectorAll('input, select, textarea').forEach(el => {
         if (parseFloat(getComputedStyle(el).fontSize) < 16) {
@@ -397,7 +375,7 @@
     });
     _inputZoomObserver.observe(document.body, { childList: true, subtree: true });
   }
-  
+
   window._disconnectInputZoomObserver = function() {
     if (_inputZoomObserver) {
       _inputZoomObserver.disconnect();
@@ -416,7 +394,7 @@
       `;
       document.head.appendChild(style);
     }
-    
+
     const scrollableElements = document.querySelectorAll('.tab-content, #logBox, .fleet-grid, .craft-grid, .design-grid');
     scrollableElements.forEach(el => {
       el.addEventListener('touchstart', () => {}, { passive: true });
@@ -434,7 +412,7 @@
 
     let patchAttempts = 0;
     const maxAttempts = 30;
-    
+
     function tryPatch() {
       const btn = document.getElementById('floatingMineBtn');
       if (btn && btn.parentNode && btn.getAttribute('data-patched') !== 'true') {
@@ -445,7 +423,7 @@
         setTimeout(tryPatch, 300);
       }
     }
-    
+
     tryPatch();
   }
 

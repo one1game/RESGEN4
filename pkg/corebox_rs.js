@@ -201,6 +201,13 @@ export class CoreGame {
         }
     }
     /**
+     * @returns {number}
+     */
+    get_blueprint_lock_remaining() {
+        const ret = wasm.coregame_get_blueprint_lock_remaining(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * @returns {string}
      */
     get_blueprint_status() {
@@ -223,6 +230,13 @@ export class CoreGame {
         return ret >>> 0;
     }
     /**
+     * @returns {number}
+     */
+    get_fleet_attack_damage() {
+        const ret = wasm.coregame_get_fleet_attack_damage(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
      * @returns {string}
      */
     get_intercepted_messages() {
@@ -230,6 +244,21 @@ export class CoreGame {
         let deferred1_1;
         try {
             const ret = wasm.coregame_get_intercepted_messages(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {string}
+     */
+    get_locked_blueprint_id() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.coregame_get_locked_blueprint_id(this.__wbg_ptr);
             deferred1_0 = ret[0];
             deferred1_1 = ret[1];
             return getStringFromWasm0(ret[0], ret[1]);
@@ -260,6 +289,17 @@ export class CoreGame {
         }
     }
     /**
+     * @param {string} op
+     * @param {bigint} current_tick
+     * @returns {number}
+     */
+    get_neuro_cooldown(op, current_tick) {
+        const ptr0 = passStringToWasm0(op, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.coregame_get_neuro_cooldown(this.__wbg_ptr, ptr0, len0, current_tick);
+        return ret;
+    }
+    /**
      * @returns {number}
      */
     get_neuro_evolution() {
@@ -287,6 +327,28 @@ export class CoreGame {
         } finally {
             wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
+    }
+    /**
+     * @returns {string}
+     */
+    get_q_learning_debug() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.coregame_get_q_learning_debug(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    get_rebel_fear_level() {
+        const ret = wasm.coregame_get_rebel_fear_level(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * @returns {string}
@@ -331,6 +393,20 @@ export class CoreGame {
     /**
      * @returns {number}
      */
+    get_tec_sabotage_remaining() {
+        const ret = wasm.coregame_get_tec_sabotage_remaining(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get_total_breaches() {
+        const ret = wasm.coregame_get_total_breaches(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
     get_turbine_heat() {
         const ret = wasm.coregame_get_turbine_heat(this.__wbg_ptr);
         return ret >>> 0;
@@ -370,6 +446,27 @@ export class CoreGame {
     /**
      * @returns {boolean}
      */
+    is_blueprint_locked() {
+        const ret = wasm.coregame_is_blueprint_locked(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_fleet_under_attack() {
+        const ret = wasm.coregame_is_fleet_under_attack(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
+    is_tec_sabotaged() {
+        const ret = wasm.coregame_is_tec_sabotaged(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * @returns {boolean}
+     */
     is_turbine_cooling() {
         const ret = wasm.coregame_is_turbine_cooling(this.__wbg_ptr);
         return ret !== 0;
@@ -388,8 +485,17 @@ export class CoreGame {
     neuro_close_vulnerability() {
         wasm.coregame_neuro_close_vulnerability(this.__wbg_ptr);
     }
+    neuro_deploy_fleet_shield() {
+        wasm.coregame_neuro_deploy_fleet_shield(this.__wbg_ptr);
+    }
+    neuro_encrypt_blueprints() {
+        wasm.coregame_neuro_encrypt_blueprints(this.__wbg_ptr);
+    }
     neuro_fake_depot() {
         wasm.coregame_neuro_fake_depot(this.__wbg_ptr);
+    }
+    neuro_fortify_planets() {
+        wasm.coregame_neuro_fortify_planets(this.__wbg_ptr);
     }
     neuro_propaganda() {
         wasm.coregame_neuro_propaganda(this.__wbg_ptr);
@@ -436,15 +542,15 @@ export class CoreGame {
         wasm.coregame_sell_resource(this.__wbg_ptr, ptr0, len0);
     }
     /**
-     * @param {string} ship_id
+     * @param {string} ship_json
      * @param {string} planet_id
      * @returns {string}
      */
-    send_ship_to_planet(ship_id, planet_id) {
+    send_ship_to_planet(ship_json, planet_id) {
         let deferred3_0;
         let deferred3_1;
         try {
-            const ptr0 = passStringToWasm0(ship_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const ptr0 = passStringToWasm0(ship_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len0 = WASM_VECTOR_LEN;
             const ptr1 = passStringToWasm0(planet_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len1 = WASM_VECTOR_LEN;
@@ -479,6 +585,18 @@ export class CoreGame {
      */
     set_neuro_consciousness(consciousness) {
         wasm.coregame_set_neuro_consciousness(this.__wbg_ptr, consciousness);
+    }
+    /**
+     * @param {number} bonus_percent
+     */
+    set_temporary_defense_bonus(bonus_percent) {
+        wasm.coregame_set_temporary_defense_bonus(this.__wbg_ptr, bonus_percent);
+    }
+    /**
+     * @param {number} bonus_percent
+     */
+    set_temporary_mining_bonus(bonus_percent) {
+        wasm.coregame_set_temporary_mining_bonus(this.__wbg_ptr, bonus_percent);
     }
     start_auto_clicking() {
         wasm.coregame_start_auto_clicking(this.__wbg_ptr);
@@ -588,17 +706,8 @@ export function start_game() {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg___wbindgen_boolean_get_2304fb8c853028c8: function(arg0) {
-            const v = arg0;
-            const ret = typeof(v) === 'boolean' ? v : undefined;
-            return isLikeNone(ret) ? 0xFFFFFF : ret ? 1 : 0;
-        },
         __wbg___wbindgen_is_function_5cd60d5cf78b4eef: function(arg0) {
             const ret = typeof(arg0) === 'function';
-            return ret;
-        },
-        __wbg___wbindgen_is_null_2042690d351e14f0: function(arg0) {
-            const ret = arg0 === null;
             return ret;
         },
         __wbg___wbindgen_is_object_b4593df85baada48: function(arg0) {
@@ -614,13 +723,11 @@ function __wbg_get_imports() {
             const ret = arg0 === undefined;
             return ret;
         },
-        __wbg___wbindgen_string_get_d109740c0d18f4d7: function(arg0, arg1) {
+        __wbg___wbindgen_number_get_f73a1244370fcc2c: function(arg0, arg1) {
             const obj = arg1;
-            const ret = typeof(obj) === 'string' ? obj : undefined;
-            var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            var len1 = WASM_VECTOR_LEN;
-            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
-            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+            const ret = typeof(obj) === 'number' ? obj : undefined;
+            getDataViewMemory0().setFloat64(arg0 + 8 * 1, isLikeNone(ret) ? 0 : ret, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
         },
         __wbg___wbindgen_throw_9c31b086c2b26051: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
@@ -639,6 +746,10 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbg_call_dfde26266607c996: function() { return handleError(function (arg0, arg1, arg2) {
             const ret = arg0.call(arg1, arg2);
+            return ret;
+        }, arguments); },
+        __wbg_call_faa0a261f288f846: function() { return handleError(function (arg0, arg1, arg2, arg3) {
+            const ret = arg0.call(arg1, arg2, arg3);
             return ret;
         }, arguments); },
         __wbg_createElement_d10771800cfb6e7e: function() { return handleError(function (arg0, arg1, arg2) {
@@ -741,6 +852,10 @@ function __wbg_get_imports() {
         __wbg_new_with_length_99887c91eae4abab: function(arg0) {
             const ret = new Uint8Array(arg0 >>> 0);
             return ret;
+        },
+        __wbg_nextElementSibling_869e2fb957cc81d7: function(arg0) {
+            const ret = arg0.nextElementSibling;
+            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
         __wbg_nextSibling_d0304086a31dfcad: function(arg0) {
             const ret = arg0.nextSibling;

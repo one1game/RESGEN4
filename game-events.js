@@ -1,41 +1,33 @@
-// ======== game-events.js (ИСПРАВЛЕНАЯ ВЕРСИЯ v3.4) ========
-// ИСПРАВЛЕНИЯ:
-// БАГ #33: добавлена возможность отписки всех обработчиков по событию
-// БАГ GE-01: добавлено событие LOGOUT
-// БАГ A-02: добавлена поддержка события LOGOUT
-
 export const GameBus = {
     _listeners: {},
-    
+
     on(event, callback) {
         if (!this._listeners[event]) this._listeners[event] = [];
         this._listeners[event].push(callback);
-        // Возвращаем функцию для отписки
+
         return () => this.off(event, callback);
     },
-    
+
     off(event, callback) {
         if (!this._listeners[event]) return;
         if (callback) {
             this._listeners[event] = this._listeners[event].filter(cb => cb !== callback);
         } else {
-            // Если callback не указан — удаляем всех подписчиков на событие
+
             delete this._listeners[event];
         }
     },
-    
+
     emit(event, data) {
         (this._listeners[event] || []).forEach(cb => {
             try { cb(data); } catch(e) { console.error(`GameBus error [${event}]:`, e); }
         });
     },
-    
-    // БАГ #33: метод для полной очистки
+
     clear() {
         this._listeners = {};
     },
-    
-    // Новый метод: удалить всех подписчиков на событие
+
     clearEvent(event) {
         delete this._listeners[event];
     }
@@ -60,7 +52,7 @@ export const EVENTS = {
     QUEST_UNLOCKED:      'quest:unlocked',
     CRAFT_DONE:          'craft:done',
     TRADE_DONE:          'trade:done',
-    LOGOUT:              'auth:logout',  // БАГ A-02
+    LOGOUT:              'auth:logout',
 };
 
 window.GameBus = GameBus;

@@ -1,5 +1,3 @@
-// game/src/game/events.rs
-
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -33,8 +31,7 @@ pub enum GameEvent {
     CoalDepleted,
     DayStarted,
     NightStarted,
-    
-    // НОВЫЕ СОБЫТИЯ ДЛЯ СИСТЕМЫ КЛИКОВ
+
     ComputationalPowerAdded {
         amount: u32,
         total: u32,
@@ -43,7 +40,6 @@ pub enum GameEvent {
     AutoClickingStarted,
     AutoClickingStopped,
 
-    // НОВЫЕ СОБЫТИЯ ДЛЯ УМНЫХ ПОВСТАНЦЕВ
     RebelStrategyChanged {
         new_strategy: String,
         reason: String,
@@ -57,7 +53,6 @@ pub enum GameEvent {
         power_loss: u32,
     },
 
-    // НОВЫЕ СОБЫТИЯ ДЛЯ НЕЙРО-ЭКОСИСТЕМЫ
     NeuroDefenseActivated {
         system: String,
         strategy: String,
@@ -93,8 +88,7 @@ pub enum GameEvent {
         relevance: f64,
     },
     SystemEvent(String),
-    
-    // ЭВОЛЮЦИОННЫЕ СОБЫТИЯ
+
     EvolutionaryLeap {
         old_level: u32,
         new_level: u32,
@@ -105,8 +99,7 @@ pub enum GameEvent {
         new_consciousness: f64,
         insights: Vec<String>,
     },
-    
-    // КВАНТОВЫЕ СОБЫТИЯ
+
     QuantumSuperposition {
         possible_futures: u32,
         collapse_trigger: String,
@@ -116,8 +109,7 @@ pub enum GameEvent {
         system_b: String,
         correlation: f64,
     },
-    
-    // БИОЛОГИЧЕСКИЕ СОБЫТИЯ (иммунная система)
+
     ImmuneCellActivation {
         cell_type: String,
         target: String,
@@ -133,8 +125,7 @@ pub enum GameEvent {
         new_balance: f64,
         reason: String,
     },
-    
-    // ЭМЕРДЖЕНТНЫЕ ПОВЕДЕНИЯ
+
     SymbioticCoexistenceProposed {
         to_faction: String,
         terms: String,
@@ -148,8 +139,7 @@ pub enum GameEvent {
         target_rules: Vec<String>,
         success_chance: f64,
     },
-    
-    // ГОЛОГРАФИЧЕСКАЯ ПАМЯТЬ
+
     MemoryFragmentStored {
         significance: f64,
         emotional_context: String,
@@ -159,8 +149,7 @@ pub enum GameEvent {
         confidence: f64,
         source_memories: Vec<u32>,
     },
-    
-    // НЕЙРОННЫЕ СОБЫТИЯ
+
     NeuralPathwayFormed {
         from_neuron: u32,
         to_neuron: u32,

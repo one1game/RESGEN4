@@ -1,6 +1,3 @@
-// src/game/config.rs - ИСПРАВЛЕН
-// БАГ #13: синхронизация AutoClickConfig и CoalConsumptionConfig с config.json
-
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -87,16 +84,15 @@ pub struct TradePrices {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct UpgradeConfig {
     pub mining_base_cost: u32,
-    pub mining_cost_multiplier: u32,
+    pub mining_cost_multiplier: f64,
     pub mining_max_level: u32,
     pub defense_activation_cost: u32,
-    pub defense_base_power: u32,
-    pub defense_level_bonus: u32,
     pub defense_max_level: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RebelConfig {
+
     pub base_attack_chance: f64,
     pub activity_increase: u32,
     pub activity_decrease: u32,
@@ -116,6 +112,44 @@ pub struct RebelConfig {
     pub psychological_warfare_chance: f64,
     pub strategy_adaptation_speed: f64,
     pub enable_activity_messages: bool,
+    pub enable_night_types: bool,
+
+    pub fear_scaling_enabled: bool,
+    pub attack_chance_per_neuro_level: f64,
+    pub max_attack_chance_scaled: f64,
+    pub mining_level_scaling: f64,
+    pub fleet_scaling_per_ship: f64,
+
+    pub breach_protection_chance_base: f64,
+    pub breach_protection_per_activity: f64,
+    pub breach_protection_max: f64,
+    pub elite_attack_threshold: u32,
+
+    pub coal_steal_percent: f64,
+    pub ore_steal_percent: f64,
+    pub chips_steal_percent: f64,
+    pub plasma_steal_percent: f64,
+    pub trash_steal_percent: f64,
+
+    pub coal_steal_cap_percent: f64,
+    pub ore_steal_cap_percent: f64,
+    pub chips_steal_cap_percent: f64,
+    pub plasma_steal_cap_percent: f64,
+    pub trash_steal_cap_percent: f64,
+
+    pub coalition_real_attack_chance: f64,
+    pub coalition_combo_types: u32,
+
+    pub background_sabotage_chance: f64,
+    pub background_sabotage_cooldown: i32,
+
+    pub fleet_attack_chance: f64,
+    pub blueprint_steal_chance: f64,
+    pub planet_harass_chance: f64,
+    pub tec_sabotage_chance: f64,
+
+    pub fear_events_enabled: bool,
+    pub fear_message_intensity: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -132,7 +166,6 @@ pub struct DisableChances {
     pub power_reset: f64,
 }
 
-// БАГ #13: исправлен AutoClickConfig в соответствии с config.json
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AutoClickConfig {
     pub enabled: bool,
@@ -147,7 +180,6 @@ pub struct AutoClickConfig {
     pub visual_feedback: bool,
 }
 
-// БАГ #13: исправлен CoalConsumptionConfig в соответствии с config.json
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CoalConsumptionConfig {
     pub day_coal_min: u32,
@@ -178,6 +210,7 @@ pub struct GameBalanceConfig {
     pub base_mining_bonus: u32,
     pub coal_mining_bonus: u32,
     pub ore_mining_bonus: u32,
+
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -191,13 +224,13 @@ pub struct DebugConfig {
 impl Default for GameConfig {
     fn default() -> Self {
         Self {
-            version: "3.2".to_string(),
+            version: "5.0-no-prestige".to_string(),
             cycle_duration: 32,
             max_slots: 18,
             time_config: TimeConfig {
-                day_duration: 24,
-                night_duration: 16,
-                initial_time: 12,
+                day_duration: 180,
+                night_duration: 300,
+                initial_time: 180,
                 start_at_day: true,
             },
             mining_config: MiningConfig {
@@ -206,14 +239,14 @@ impl Default for GameConfig {
                     trash: 0.25,
                     ore: 0.18,
                 },
-                upgrade_bonus: 0.015,
-                coal_bonus: 0.025,
-                critical_chance: 0.09,
+                upgrade_bonus: 0.018,
+                coal_bonus: 0.030,
+                critical_chance: 0.11,
                 critical_multiplier: 2,
                 passive_chances: PassiveChances {
-                    coal: 0.008,
-                    trash: 0.006,
-                    ore: 0.005,
+                    coal: 0.010,
+                    trash: 0.008,
+                    ore: 0.006,
                 },
             },
             economy_config: EconomyConfig {
@@ -231,14 +264,13 @@ impl Default for GameConfig {
             },
             upgrade_config: UpgradeConfig {
                 mining_base_cost: 8,
-                mining_cost_multiplier: 3,
-                mining_max_level: 10,
+                mining_cost_multiplier: 2.5,
+                mining_max_level: 15,
                 defense_activation_cost: 1,
-                defense_base_power: 45,
-                defense_level_bonus: 14,
-                defense_max_level: 5,
+                defense_max_level: 8,
             },
             rebels: RebelConfig {
+
                 base_attack_chance: 0.03,
                 activity_increase: 2,
                 activity_decrease: 1,
@@ -266,14 +298,52 @@ impl Default for GameConfig {
                 psychological_warfare_chance: 0.08,
                 strategy_adaptation_speed: 0.4,
                 enable_activity_messages: false,
+                enable_night_types: true,
+
+                fear_scaling_enabled: true,
+                attack_chance_per_neuro_level: 0.025,
+                max_attack_chance_scaled: 0.45,
+                mining_level_scaling: 0.008,
+                fleet_scaling_per_ship: 0.012,
+
+                breach_protection_chance_base: 0.08,
+                breach_protection_per_activity: 0.02,
+                breach_protection_max: 0.35,
+                elite_attack_threshold: 10,
+
+                coal_steal_percent: 0.25,
+                ore_steal_percent: 0.20,
+                chips_steal_percent: 0.22,
+                plasma_steal_percent: 0.18,
+                trash_steal_percent: 0.15,
+
+                coal_steal_cap_percent: 0.35,
+                ore_steal_cap_percent: 0.30,
+                chips_steal_cap_percent: 0.35,
+                plasma_steal_cap_percent: 0.40,
+                trash_steal_cap_percent: 0.25,
+
+                coalition_real_attack_chance: 0.65,
+                coalition_combo_types: 2,
+
+                background_sabotage_chance: 0.18,
+                background_sabotage_cooldown: 25,
+
+                fleet_attack_chance: 0.22,
+                blueprint_steal_chance: 0.08,
+                planet_harass_chance: 0.12,
+                tec_sabotage_chance: 0.15,
+
+                fear_events_enabled: true,
+                fear_message_intensity: 1.5,
             },
             quests: vec![],
             auto_click_config: AutoClickConfig {
                 enabled: true,
                 max_computational_power: 1000,
-                clicks_per_power: 8,           // было 15
-                power_per_manual_click: 4,     // было 2
-                auto_click_interval: 8,        // было 5
+                clicks_per_power: 8,
+                power_per_manual_click: 4,
+                auto_click_interval: 8,
                 power_per_auto_click: 3,
                 use_same_chances_as_manual: true,
                 auto_click_chance_multiplier: 1.0,
@@ -284,8 +354,8 @@ impl Default for GameConfig {
                 day_coal_min: 1,
                 day_coal_max: 1,
                 night_coal_min: 1,
-                night_coal_max: 3,              // было 5
-                plasma_conversion_rate: 40,     // было 50
+                night_coal_max: 3,
+                plasma_conversion_rate: 40,
             },
             ui_config: UiConfig {
                 max_log_entries: 50,
@@ -305,6 +375,7 @@ impl Default for GameConfig {
                 base_mining_bonus: 3,
                 coal_mining_bonus: 2,
                 ore_mining_bonus: 2,
+
             },
             debug_config: DebugConfig {
                 enable_debug_commands: true,

@@ -1,14 +1,3 @@
-// ======== auth.js (ИСПРАВЛЕНАЯ ВЕРСИЯ v3.5) ========
-// ИСПРАВЛЕНИЯ:
-// БАГ A-01: initAuth — хранение cleanup-функции и предотвращение дублирования подписок
-// БАГ A-02: logout — использование событийной шины вместо хардкода
-// БАГ A-03: resetPassword — добавлена валидация email
-// БАГ #A1: race condition при двойном вызове onLogin
-// БАГ #A2: утечка _onLogoutCallback
-// БАГ #A3: валидация email
-// БАГ #MIN-01: валидация пароля
-// БАГ #MIN-05: закрытие BroadcastChannel
-
 import { supabase } from './supabase.js';
 import { GameBus, EVENTS } from './game-events.js';
 
@@ -45,11 +34,11 @@ export async function register(email, password, username) {
         if (!isValidEmail(email)) {
             return { success: false, error: 'Неверный формат email' };
         }
-        
+
         if (!isValidPassword(password)) {
             return { success: false, error: 'Пароль должен быть минимум 6 символов' };
         }
-        
+
         const cleanUsername = (username || email.split('@')[0]).trim();
         if (cleanUsername.length < 3) {
             return { success: false, error: 'Имя должно быть минимум 3 символа' };
@@ -60,7 +49,7 @@ export async function register(email, password, username) {
         if (!/^[a-zA-ZА-Яа-я0-9_\-\.]+$/.test(cleanUsername)) {
             return { success: false, error: 'Имя содержит недопустимые символы' };
         }
-        
+
         const { data, error } = await supabase.auth.signUp({
             email: email,
             password: password,
@@ -77,7 +66,7 @@ export async function register(email, password, username) {
         }
 
         return { success: true, user: data.user };
-        
+
     } catch (error) {
         console.error("Ошибка регистрации:", error.message);
         return { success: false, error: error.message };
@@ -101,14 +90,13 @@ export async function login(email, password) {
         }
 
         return { success: true, user: data.user };
-        
+
     } catch (error) {
         console.error("Ошибка входа:", error.message);
         return { success: false, error: error.message };
     }
 }
 
-// БАГ A-02: logout — использование событийной шины
 export async function logout() {
     try {
         const channel = getAuthChannel();
@@ -117,17 +105,16 @@ export async function logout() {
                 channel.postMessage({ type: 'logout', sessionId: _sessionId, timestamp: Date.now() });
             } catch(e) {}
         }
-        
+
         const { error } = await supabase.auth.signOut();
         if (error) throw error;
-        
+
         localStorage.removeItem('corebox_current_user');
-        
-        // БАГ A-02: Используем событийную шину вместо хардкода
+
         GameBus.emit(EVENTS.LOGOUT);
-        
+
         return { success: true };
-        
+
     } catch (error) {
         console.error("Ошибка выхода:", error.message);
         return { success: false, error: error.message };
@@ -145,24 +132,23 @@ export async function getCurrentUser() {
     }
 }
 
-// БАГ A-01: initAuth — хранение cleanup-функции и предотвращение дублирования
 export function initAuth(onLogin, onLogout) {
-    // БАГ A-01: очищаем предыдущую подписку перед созданием новой
+
     if (_currentAuthCleanup) {
         _currentAuthCleanup();
         _currentAuthCleanup = null;
     }
-    
+
     let loginHandled = false;
     let isInitialized = false;
-    
+
     _onLogoutCallback = onLogout;
-    
+
     getAuthChannel();
-    
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
         console.log(`🔐 Auth state change: ${event}, session: ${!!session}`);
-        
+
         if (event === 'INITIAL_SESSION') {
             if (session?.user) {
                 loginHandled = true;
@@ -173,7 +159,7 @@ export function initAuth(onLogin, onLogout) {
             isInitialized = true;
             return;
         }
-        
+
         if (event === 'SIGNED_IN') {
             if (loginHandled && isInitialized) {
                 return;
@@ -189,8 +175,7 @@ export function initAuth(onLogin, onLogout) {
             console.log('🔄 Токен обновлён');
         }
     });
-    
-    // БАГ A-01: создаём и сохраняем cleanup-функцию
+
     const cleanup = () => {
         subscription?.unsubscribe();
         _onLogoutCallback = null;
@@ -199,35 +184,33 @@ export function initAuth(onLogin, onLogout) {
             _authChannel = null;
         }
     };
-    
+
     _currentAuthCleanup = cleanup;
-    
+
     return cleanup;
 }
 
-// БАГ A-03: resetPassword — добавлена валидация email
 export async function resetPassword(email) {
     try {
         if (!isValidEmail(email)) {
             return { success: false, error: 'Неверный формат email' };
         }
-        
+
         const origin = window.location.origin || 'https://corebox-game.com';
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
             redirectTo: origin + '/reset-password.html'
         });
-        
+
         if (error) throw error;
-        
+
         return { success: true };
-        
+
     } catch (error) {
         console.error("Ошибка сброса пароля:", error.message);
         return { success: false, error: error.message };
     }
 }
 
-// Добавляем событие LOGOUT в EVENTS если его нет
 if (typeof EVENTS !== 'undefined' && EVENTS && !EVENTS.LOGOUT) {
     EVENTS.LOGOUT = 'auth:logout';
 }

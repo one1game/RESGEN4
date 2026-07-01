@@ -1,14 +1,12 @@
-
-
 {
-  "version": "3.3-night-types-balanced",
-  "cycle_duration": 40,
+  "version": "5.0-no-prestige",
+  "cycle_duration": 480,
   "max_slots": 18,
 
   "time_config": {
-    "day_duration": 24,
-    "night_duration": 16,
-    "initial_time": 12,
+    "day_duration": 180,
+    "night_duration": 300,
+    "initial_time": 180,
     "start_at_day": true
   },
 
@@ -18,14 +16,14 @@
       "trash": 0.25,
       "ore": 0.18
     },
-    "upgrade_bonus": 0.015,
-    "coal_bonus": 0.025,
-    "critical_chance": 0.09,
+    "upgrade_bonus": 0.018,
+    "coal_bonus": 0.030,
+    "critical_chance": 0.11,
     "critical_multiplier": 2,
     "passive_chances": {
-      "coal": 0.008,
-      "trash": 0.006,
-      "ore": 0.005
+      "coal": 0.010,
+      "trash": 0.008,
+      "ore": 0.006
     }
   },
 
@@ -45,10 +43,10 @@
 
   "upgrade_config": {
     "mining_base_cost": 8,
-    "mining_cost_multiplier": 3,
-    "mining_max_level": 10,
+    "mining_cost_multiplier": 2.5,
+    "mining_max_level": 15,
     "defense_activation_cost": 1,
-    "defense_max_level": 5
+    "defense_max_level": 8
   },
 
   "rebels": {
@@ -79,7 +77,43 @@
     "psychological_warfare_chance": 0.08,
     "strategy_adaptation_speed": 0.4,
     "enable_activity_messages": false,
-    "enable_night_types": true
+    "enable_night_types": true,
+
+    "fear_scaling_enabled": true,
+    "attack_chance_per_neuro_level": 0.025,
+    "max_attack_chance_scaled": 0.45,
+    "mining_level_scaling": 0.008,
+    "fleet_scaling_per_ship": 0.012,
+
+    "breach_protection_chance_base": 0.08,
+    "breach_protection_per_activity": 0.02,
+    "breach_protection_max": 0.35,
+    "elite_attack_threshold": 10,
+
+    "coal_steal_percent": 0.25,
+    "ore_steal_percent": 0.20,
+    "chips_steal_percent": 0.22,
+    "plasma_steal_percent": 0.18,
+    "trash_steal_percent": 0.15,
+
+    "coal_steal_cap_percent": 0.35,
+    "ore_steal_cap_percent": 0.30,
+    "chips_steal_cap_percent": 0.35,
+    "plasma_steal_cap_percent": 0.40,
+
+    "coalition_real_attack_chance": 0.65,
+    "coalition_combo_types": 2,
+
+    "background_sabotage_chance": 0.18,
+    "background_sabotage_cooldown": 25,
+
+    "fleet_attack_chance": 0.22,
+    "blueprint_steal_chance": 0.08,
+    "planet_harass_chance": 0.12,
+    "tec_sabotage_chance": 0.15,
+
+    "fear_events_enabled": true,
+    "fear_message_intensity": 1.5
   },
 
   "quests": [
