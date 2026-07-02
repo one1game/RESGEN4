@@ -1,3 +1,7 @@
+/* ============================================================
+   MOBILE-PATCH.CSS — Полная мобильная адаптация CoreBox 5.0
+   ============================================================ */
+
 :root {
   --tap-min: 48px;
   --btn-radius: 12px;
@@ -14,15 +18,17 @@
   --transition: 0.15s ease;
 }
 
+/* ── Базовые сбросы ── */
 * {
   -webkit-tap-highlight-color: transparent;
   box-sizing: border-box;
-
 }
 
 button, .tab, .status-tab, .craft-btn, .design-btn,
 .ship-btn, .upgrade-btn, .stat-btn, .log-btn,
-.auth-btn, .trade-mode-btn, .toggle-btn, .logout-btn {
+.auth-btn, .trade-mode-btn, .toggle-btn, .logout-btn,
+.cc-op-btn, .cc-panel-hdr, .op-btn, .protection-buy-btn,
+.protection-toggle-btn, .craft-amount-btn, .tec-btn {
   touch-action: manipulation;
 }
 
@@ -31,10 +37,14 @@ html, body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ============================================================
+   ТЕЛЕФОНЫ (портрет, до 768px)
+   ============================================================ */
 @media (max-width: 768px) {
 
+  /* ── Header ── */
   .header {
-    padding: 8px 10px 6px;
+    padding: 8px 10px 6px !important;
     position: sticky;
     top: 0;
     z-index: 100;
@@ -48,6 +58,10 @@ html, body {
     line-height: 1.2;
   }
 
+  .header h1 span {
+    font-size: 11px !important;
+  }
+
   .user-info {
     display: flex;
     align-items: center;
@@ -56,65 +70,45 @@ html, body {
     margin-bottom: 4px;
   }
 
-  .tabs {
-    display: flex;
-    position: fixed !important;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 200;
-    background: #080808;
-    border-top: 2px solid var(--clr-green-dim);
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    padding: 0;
-    margin: 0;
-    gap: 0;
+  .stats-container {
+    width: 100%;
   }
 
-  .tabs::-webkit-scrollbar { display: none; }
-
-  .tab {
-    flex: 0 0 auto;
-    min-width: 64px;
-    padding: 8px 6px 10px;
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
-    font-size: 9px;
-    line-height: 1.3;
-    text-align: center;
-    cursor: pointer;
-    border-right: 1px solid rgba(0,255,65,0.1);
-    transition: background var(--transition);
-    white-space: nowrap;
-    user-select: none;
+  .stat-card {
+    flex: 1;
+    min-width: 0;
   }
 
-  .tab:last-child { border-right: none; }
-
-  .tab.active {
-    background: rgba(0,255,65,0.12);
-    color: var(--clr-green) !important;
-    border-bottom: 3px solid var(--clr-green);
+  .stat-card .stat-value {
+    font-size: 13px !important;
   }
 
-  .tab:active {
-    background: rgba(0,255,65,0.2);
-    transform: scale(0.97);
+  .mute-btn {
+    padding: 6px 12px !important;
+    font-size: 18px !important;
   }
 
+  /* ── Game content ── */
+  #gameContent {
+    max-width: 100% !important;
+    padding: 0 0 120px !important;
+  }
+
+  /* ── Main ── */
   .main {
-    padding-bottom: calc(60px + env(safe-area-inset-bottom));
+    padding-bottom: calc(90px + env(safe-area-inset-bottom));
     padding-left: 6px;
     padding-right: 6px;
   }
 
+  /* ── Status tabs (Системный статус / Статистика / Лидеры) ── */
   .status-tabs {
     display: flex;
     gap: 4px;
     margin-bottom: 8px;
     overflow-x: auto;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
 
   .status-tabs::-webkit-scrollbar { display: none; }
@@ -137,6 +131,67 @@ html, body {
 
   .status-tab:active { transform: scale(0.96); }
 
+  /* ── Основные вкладки (нижняя панель, 2 ряда: 5+4) ── */
+  .tabs {
+    display: grid !important;
+    grid-template-columns: repeat(5, 1fr) !important;
+    position: fixed !important;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 200;
+    background: #080808;
+    border-top: 2px solid var(--clr-green-dim);
+    overflow: hidden;
+    padding: 0;
+    margin: 0 !important;
+    gap: 0;
+    top: auto !important;
+    border-radius: 0 !important;
+  }
+
+  .tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 2px 7px;
+    font-size: 8px;
+    line-height: 1.2;
+    text-align: center;
+    cursor: pointer;
+    border-right: 1px solid rgba(0,255,65,0.1);
+    border-bottom: 1px solid rgba(0,255,65,0.07);
+    transition: background var(--transition);
+    white-space: nowrap;
+    user-select: none;
+    border-radius: 0 !important;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tab:nth-child(5n) { border-right: none; }
+
+  .tab.active {
+    background: rgba(0,255,65,0.12);
+    color: var(--clr-green) !important;
+    box-shadow: inset 0 -3px 0 var(--clr-green);
+  }
+
+  .tab:active {
+    background: rgba(0,255,65,0.2);
+    transform: scale(0.97);
+  }
+
+  /* ── Содержимое вкладок ── */
+  .tab-content {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+  }
+
+  /* ── Панели ── */
   .panel {
     margin-bottom: 8px;
     border-radius: 10px;
@@ -152,10 +207,20 @@ html, body {
     cursor: pointer;
   }
 
+  .panel-title-value {
+    font-size: 11px;
+  }
+
   .panel-content {
     padding: var(--panel-pad);
   }
 
+  .collapse-icon {
+    font-size: 12px;
+    padding: 4px;
+  }
+
+  /* ── Системный статус ── */
   .status-line {
     display: grid;
     grid-template-columns: 1fr auto auto;
@@ -176,6 +241,103 @@ html, body {
     font-size: 11px;
     font-weight: bold;
     text-align: right;
+  }
+
+  .sys-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 4px 8px !important;
+  }
+
+  .sys-row {
+    padding: 4px 0 !important;
+  }
+
+  .sys-compact-row {
+    padding: 4px 0 !important;
+    font-size: 11px !important;
+  }
+
+  /* ── ТЭЦ ── */
+  .tec-compact {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .tec-info {
+    width: 100%;
+    margin-left: 0 !important;
+    font-size: 10px !important;
+  }
+
+  .tec-btn {
+    min-height: 36px;
+    min-width: 44px;
+    font-size: 14px !important;
+  }
+
+  .tec-warning {
+    font-size: 11px;
+  }
+
+  /* ── Лог ── */
+  #logBox {
+    height: 140px !important;
+    font-size: 11px !important;
+    padding: 8px !important;
+  }
+
+  .log-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .log-btn {
+    flex: 1;
+    font-size: 11px !important;
+    padding: 10px 8px !important;
+  }
+
+  /* ── Инвентарь ── */
+  #resourcesContainer {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6px !important;
+    padding: 6px !important;
+  }
+
+  #resourcesContainer .resource-slot,
+  #resourcesContainer > div {
+    padding: 10px 4px !important;
+    min-height: 70px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  #resourcesContainer .resource-icon,
+  #resourcesContainer > div .resource-icon,
+  #resourcesContainer > div .slot-icon {
+    font-size: 24px !important;
+  }
+
+  #resourcesContainer .resource-icon img {
+    width: 24px !important;
+    height: 24px !important;
+  }
+
+  #resourcesContainer .resource-name,
+  #resourcesContainer > div .resource-name,
+  #resourcesContainer > div .item-name {
+    font-size: 8px !important;
+  }
+
+  #resourcesContainer .resource-count,
+  #resourcesContainer > div .resource-count,
+  #resourcesContainer > div .item-count {
+    font-size: 11px !important;
   }
 
   .inventory-grid {
@@ -199,6 +361,7 @@ html, body {
 
   .resource-icon { font-size: 22px; }
 
+  /* ── Кнопки ── */
   button,
   .upgrade-btn,
   .craft-btn,
@@ -223,7 +386,6 @@ html, body {
     position: relative;
     overflow: hidden;
     touch-action: manipulation;
-
   }
 
   .upgrade-btn,
@@ -280,6 +442,7 @@ html, body {
     pointer-events: none;
   }
 
+  /* ── Улучшения ── */
   .upgrade-container {
     display: flex !important;
     flex-direction: column;
@@ -295,6 +458,7 @@ html, body {
     margin-top: 8px;
   }
 
+  /* ── Крафт ── */
   .craft-grid {
     display: flex !important;
     flex-direction: column;
@@ -310,6 +474,31 @@ html, body {
     margin-top: 8px;
   }
 
+  .recipe-main {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 6px;
+  }
+
+  .craft-arrow {
+    text-align: center;
+    transform: rotate(90deg);
+  }
+
+  .result-side {
+    align-self: center;
+  }
+
+  .craft-amount-selector {
+    flex-wrap: wrap;
+  }
+
+  .craft-amount-btn {
+    min-height: 36px;
+    min-width: 36px;
+  }
+
+  /* ── Разработка ── */
   .design-grid {
     display: flex !important;
     flex-direction: column;
@@ -325,6 +514,7 @@ html, body {
     margin-top: 8px;
   }
 
+  /* ── Флот ── */
   .fleet-grid {
     display: flex !important;
     flex-direction: column;
@@ -336,14 +526,50 @@ html, body {
     border-radius: 10px;
   }
 
+  .ship-body {
+    gap: 8px;
+  }
+
+  .ship-attrs {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ship-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
   .ship-btn {
-    margin-bottom: 6px;
+    margin-bottom: 4px;
+    flex: 1;
+    min-width: 70px;
+    text-align: center;
+    min-height: 40px !important;
+    padding: 8px 6px !important;
   }
 
   .repair-btn { background: #003300 !important; color: #0f0 !important; }
   .upgrade-btn-ship { background: #001133 !important; color: #4af !important; }
   .delete-btn { background: #330000 !important; color: #f44 !important; }
 
+  .fleet-header {
+    flex-direction: column;
+    align-items: flex-start !important;
+  }
+
+  .fleet-summary {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .summary-item {
+    flex: 1;
+    min-width: 80px;
+  }
+
+  /* ── Торговля ── */
   .trade-items-grid {
     display: grid !important;
     grid-template-columns: repeat(2, 1fr);
@@ -372,6 +598,7 @@ html, body {
     font-size: 13px !important;
   }
 
+  /* ── Квесты ── */
   .quest-container {
     display: flex;
     flex-direction: column;
@@ -384,18 +611,130 @@ html, body {
     font-size: 12px;
   }
 
-  .command-grid, .faction-grid {
+  /* ── Командный пункт ── */
+  .cc-wrap {
+    font-size: 11px !important;
+  }
+
+  .cc-header {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .cc-clock {
+    font-size: 12px !important;
+    margin-left: 0 !important;
+    width: 100%;
+    text-align: right;
+  }
+
+  .cc-dashboard {
+    padding: 8px 10px;
+  }
+
+  .cc-dash-row {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .cc-dash-item {
+    flex: 1 1 auto;
+    min-width: 80px;
+  }
+
+  .cc-dash-val {
+    font-size: 13px !important;
+  }
+
+  .cc-grid2 {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px;
+  }
+
+  .cc-grid3 {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px;
+  }
+
+  .cc-stat {
+    padding: 8px;
+  }
+
+  .cc-stat-val {
+    font-size: 16px !important;
+  }
+
+  .cc-stat-sub {
+    font-size: 9px !important;
+  }
+
+  .cc-sec-label {
+    font-size: 10px !important;
+    margin-bottom: 6px;
+  }
+
+  .cc-ops-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .cc-op-btn {
+    padding: 10px 4px !important;
+    font-size: 10px !important;
+    min-height: 60px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    align-items: center;
+    justify-content: center;
   }
 
-  .faction-card, .command-card {
-    padding: 12px;
-    border-radius: 10px;
-    font-size: 12px;
+  .cc-op-icon {
+    font-size: 20px !important;
   }
 
+  .cc-op-cost {
+    font-size: 9px !important;
+  }
+
+  .cc-panel-hdr {
+    padding: 10px 10px !important;
+    font-size: 11px !important;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  .cc-panel-arrow {
+    font-size: 10px !important;
+  }
+
+  .cc-panel-body {
+    padding: 8px 10px !important;
+  }
+
+  .cc-threat-row {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  .cc-threat-label {
+    font-size: 11px !important;
+    min-width: 100px;
+  }
+
+  .attack-history {
+    font-size: 10px;
+  }
+
+  .pvp-log-container, #commandCenterLog {
+    max-height: 200px !important;
+    font-size: 10px !important;
+  }
+
+  /* ── Статистика ── */
   .statistics-grid {
     display: flex !important;
     flex-direction: column;
@@ -406,6 +745,26 @@ html, body {
     min-width: auto !important;
     padding: 12px;
     border-radius: 10px;
+  }
+
+  .stat-title {
+    font-size: 11px !important;
+  }
+
+  .stat-line {
+    padding: 6px 0 !important;
+  }
+
+  .stat-label {
+    font-size: 11px !important;
+  }
+
+  .stat-value {
+    font-size: 13px !important;
+  }
+
+  .stat-delta {
+    font-size: 10px;
   }
 
   .statistics-controls {
@@ -419,24 +778,215 @@ html, body {
     font-size: 12px !important;
   }
 
-  #logBox {
-    height: 140px !important;
-    font-size: 11px !important;
+  /* ── Космическая карта ── */
+  #space-star-map {
+    height: 300px !important;
+    min-height: 260px !important;
+    max-height: 350px !important;
+    touch-action: none; /* Отключаем стандартные жесты */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .star-map {
+    height: 300px !important;
+    touch-action: none;
+  }
+
+  .map-viewport {
+    touch-action: none;
+  }
+
+  #space-main-canvas {
+    touch-action: none;
+  }
+
+  /* Увеличенные зоны клика для мобильных */
+  .other-player-marker,
+  .space-planet,
+  .space-station {
+    min-width: 44px; /* Минимальный размер для пальца */
+    min-height: 44px;
+  }
+
+  #space-status-bar {
+    flex-direction: column;
+    gap: 6px !important;
+    padding: 8px 10px !important;
+  }
+
+  #space-status-bar > div {
+    width: 100%;
+  }
+
+  #space-status-bar > div:last-child {
+    margin-left: 0 !important;
+  }
+
+  /* Адаптация панели действий */
+  #space-action-panel {
+    bottom: 80px !important;
+    left: 8px !important;
+    right: 8px !important;
+    max-width: none !important;
     padding: 8px !important;
   }
 
-  .log-controls {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
+  .space-attack-btn {
+    padding: 12px 16px !important;
+    font-size: 14px !important;
+    min-height: 44px;
   }
 
-  .log-btn {
-    flex: 1;
+  #space-research-btn {
+    padding: 12px !important;
+    font-size: 13px !important;
+    min-height: 48px;
+  }
+
+  #space-players-list {
+    max-height: 180px !important;
+  }
+
+  .space-player-row {
+    padding: 8px 10px !important;
     font-size: 11px !important;
-    padding: 10px 8px !important;
   }
 
+  /* Координаты меньше на мобильных */
+  #space-coordinates {
+    font-size: 9px !important;
+    padding: 2px 4px !important;
+    bottom: 2px !important;
+    left: 2px !important;
+  }
+
+  /* Кнопки зума больше */
+  #map-zoom-in,
+  #map-zoom-out,
+  #map-zoom-reset {
+    min-width: 44px;
+    min-height: 44px;
+    font-size: 18px;
+  }
+
+  #space-minimap {
+    bottom: 6px !important;
+    right: 6px !important;
+    width: 80px !important;
+    height: 80px !important;
+  }
+
+  .player-popup, .station-popup {
+    min-width: 200px !important;
+    padding: 14px !important;
+    font-size: 11px !important;
+  }
+
+  /* ── Плавающая кнопка добычи ── */
+  #floatingMineBtn,
+  .floating-mine-btn {
+    width: 76px !important;
+    height: 76px !important;
+    bottom: calc(100px + env(safe-area-inset-bottom)) !important;
+    right: 14px !important;
+    border-radius: 50% !important;
+    font-size: 30px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    z-index: 1100 !important;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform 0.1s, box-shadow 0.15s;
+    pointer-events: auto !important;
+    left: auto !important;
+  }
+
+  .floating-mine-btn:active {
+    transform: scale(0.90) !important;
+  }
+
+  .floating-mine-btn .btn-text { display: none !important; }
+  .floating-mine-btn .btn-icon { font-size: 30px !important; margin: 0 !important; }
+
+  .floating-mine-btn.auto-clicking {
+    box-shadow: 0 0 32px var(--clr-green), 0 0 60px rgba(102,255,170,0.3) !important;
+  }
+
+  #miningBonusFloat {
+    font-size: 9px !important;
+    position: absolute;
+    bottom: 2px;
+  }
+
+  /* ── Progress bars ── */
+  .power-section,
+  .click-progress-section,
+  .auto-click-section {
+    margin-bottom: 10px;
+    font-size: 11px;
+  }
+
+  .power-label,
+  .click-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+
+  .progress-container {
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .power-tier-info {
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: 11px;
+  }
+
+  .auto-click-settings {
+    font-size: 10px;
+    line-height: 1.8;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .auto-click-info {
+    font-size: 10px;
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  .turbine-container {
+    margin: 8px 0;
+  }
+
+  .turbine-bar {
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 4px 0;
+  }
+
+  .neuro-level {
+    width: 60px;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.1);
+  }
+
+  .neuro-progress {
+    height: 100%;
+    border-radius: 4px;
+    background: var(--clr-green);
+    transition: width 0.3s;
+  }
+
+  /* ── Auth overlay ── */
   .auth-overlay {
     padding: 20px 12px;
     align-items: flex-start;
@@ -447,11 +997,16 @@ html, body {
     margin: 0 !important;
     padding: 20px 16px !important;
     border-radius: 14px !important;
+    max-width: 100% !important;
   }
 
   .auth-header h2 {
     font-size: 20px;
     margin-bottom: 4px;
+  }
+
+  .auth-header p {
+    font-size: 11px;
   }
 
   .input-group {
@@ -493,76 +1048,7 @@ html, body {
     margin-top: 8px;
   }
 
-  #floatingMineBtn,
-  .floating-mine-btn {
-    width: 76px !important;
-    height: 76px !important;
-    bottom: calc(72px + env(safe-area-inset-bottom)) !important;
-    right: 14px !important;
-    border-radius: 50% !important;
-    font-size: 30px !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    z-index: 1100 !important;
-    cursor: pointer;
-
-    -webkit-tap-highlight-color: transparent;
-    transition: transform 0.1s, box-shadow 0.15s;
-
-    pointer-events: auto !important;
-  }
-
-  .floating-mine-btn:active {
-    transform: scale(0.90) !important;
-  }
-
-  .floating-mine-btn .btn-text { display: none !important; }
-  .floating-mine-btn .btn-icon { font-size: 30px !important; margin: 0 !important; }
-
-  .power-section,
-  .click-progress-section,
-  .auto-click-section {
-    margin-bottom: 10px;
-    font-size: 11px;
-  }
-
-  .power-label,
-  .click-label {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    margin-bottom: 4px;
-  }
-
-  .progress-container {
-    height: 8px;
-    border-radius: 4px;
-    overflow: hidden;
-  }
-
-  .auto-click-settings {
-    font-size: 10px;
-    line-height: 1.8;
-  }
-
-  .auto-click-info {
-    font-size: 10px;
-    margin-top: 6px;
-    line-height: 1.4;
-  }
-
-  .turbine-container {
-    margin: 8px 0;
-  }
-
-  .turbine-bar {
-    height: 8px;
-    border-radius: 4px;
-    overflow: hidden;
-    margin: 4px 0;
-  }
-
+  /* ── Оффлайн-попап ── */
   .offline-popup {
     width: 90% !important;
     max-width: 340px;
@@ -579,31 +1065,31 @@ html, body {
   .offline-resources {
     display: flex;
     justify-content: space-around;
+    flex-wrap: wrap;
     margin: 12px 0;
     font-size: 14px;
+    gap: 8px;
   }
 
+  /* ── Лидерборд ── */
   #leaderboardContainer {
     font-size: 11px;
   }
 
-  .neuro-level {
-    width: 60px;
-    height: 6px;
-    border-radius: 3px;
-    overflow: hidden;
-    background: rgba(255,255,255,0.1);
+  .leaderboard-row {
+    grid-template-columns: 24px 1fr auto auto !important;
+    gap: 6px !important;
+    padding: 8px 10px !important;
+    font-size: 11px !important;
   }
 
-  .neuro-progress {
-    height: 100%;
-    border-radius: 3px;
-    background: var(--clr-green);
-    transition: width 0.3s;
+  .lb-score {
+    font-size: 12px !important;
   }
 
+  /* ── Нотификации ── */
   .notification {
-    bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+    bottom: calc(110px + env(safe-area-inset-bottom)) !important;
     font-size: 12px !important;
     padding: 10px 18px !important;
     max-width: 90vw;
@@ -611,11 +1097,7 @@ html, body {
     text-align: center;
   }
 
-  .tab-content {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
+  /* ── Дебаффы ── */
   .debuff-indicator {
     font-size: 11px;
     padding: 6px 10px;
@@ -623,24 +1105,61 @@ html, body {
     margin-top: 4px;
   }
 
-  .star-map {
-    height: 300px !important;
-    touch-action: pan-x pan-y;
+  .attack-warning {
+    font-size: 12px !important;
+    padding: 10px 12px !important;
   }
 
-  .stat-card .stat-unit { display: none; }
+  /* ── Диалоги подтверждения ── */
+  .custom-confirm-dialog > div {
+    max-width: 280px !important;
+    padding: 20px 16px !important;
+  }
 
-  .leaderboard-entry {
-    padding: 8px 10px;
-    font-size: 11px;
+  .custom-confirm-dialog button {
+    min-height: 44px !important;
+    margin: 4px !important;
+  }
+
+  /* ── Скрывать неважное на мобиле ── */
+  .stat-card .stat-unit { display: none; }
+}
+
+/* ============================================================
+   ОЧЕНЬ МАЛЕНЬКИЕ ЭКРАНЫ (до 480px)
+   ============================================================ */
+@media (max-width: 480px) {
+  #space-star-map {
+    height: 60vh !important;
+    min-height: 300px;
+  }
+
+  #space-players-list {
+    max-height: 150px !important;
+  }
+
+  .player-popup,
+  .station-popup,
+  .planet-popup {
+    max-width: 95vw !important;
+    font-size: 12px !important;
   }
 }
 
+/* ============================================================
+   ПЛАНШЕТЫ (769px - 900px)
+   ============================================================ */
 @media (min-width: 769px) and (max-width: 900px) {
+  #gameContent {
+    max-width: 100% !important;
+  }
+
   .tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+    position: sticky !important;
+    top: 55px !important;
   }
 
   .tab {
@@ -662,16 +1181,118 @@ html, body {
   .trade-items-grid {
     grid-template-columns: repeat(3, 1fr) !important;
   }
+
+  #floatingMineBtn {
+    width: 72px !important;
+    height: 72px !important;
+    bottom: 20px !important;
+    right: 20px !important;
+  }
 }
 
-@supports (padding: max(0px)) {
-  @media (max-width: 768px) {
-    .tabs {
-      padding-bottom: env(safe-area-inset-bottom);
-    }
-    body {
-      padding-left: env(safe-area-inset-left);
-      padding-right: env(safe-area-inset-right);
-    }
+/* ============================================================
+   ЛАНДШАФТНАЯ ОРИЕНТАЦИЯ (телефоны)
+   ============================================================ */
+@media (max-width: 900px) and (orientation: landscape) {
+  .header {
+    padding: 4px 10px !important;
+  }
+
+  .header h1 {
+    font-size: 13px !important;
+  }
+
+  .tabs {
+    padding-bottom: 4px !important;
+    grid-template-columns: repeat(5, 1fr) !important;
+  }
+
+  .tab {
+    padding: 4px 2px 5px !important;
+    font-size: 7px !important;
+    min-width: 0;
+  }
+
+  .main {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom));
+  }
+
+  #floatingMineBtn {
+    width: 60px !important;
+    height: 60px !important;
+    bottom: calc(90px + env(safe-area-inset-bottom)) !important;
+    right: 10px !important;
+  }
+
+  #floatingMineBtn .btn-icon {
+    font-size: 24px !important;
+  }
+
+  .star-map, #space-star-map {
+    height: 200px !important;
+    min-height: 180px !important;
+    max-height: 220px !important;
+  }
+
+  #space-action-panel {
+    bottom: 90px !important;
+  }
+
+  .notification {
+    bottom: calc(95px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* ============================================================
+   МАЛЕНЬКИЕ ТЕЛЕФОНЫ (до 380px)
+   ============================================================ */
+@media (max-width: 380px) {
+  .header h1 {
+    font-size: 13px !important;
+  }
+
+  .tab {
+    padding: 5px 2px 6px;
+    font-size: 7px;
+  }
+
+  #resourcesContainer {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 4px !important;
+    padding: 4px !important;
+  }
+
+  .trade-items-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  #floatingMineBtn {
+    width: 64px !important;
+    height: 64px !important;
+    bottom: calc(94px + env(safe-area-inset-bottom)) !important;
+    right: 10px !important;
+  }
+
+  #floatingMineBtn .btn-icon {
+    font-size: 26px !important;
+  }
+
+  .cc-ops-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* ============================================================
+   SAFE AREA (iPhone X и новее)
+   ============================================================ */
+@media (max-width: 768px) {
+  .tabs {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  body {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
   }
 }

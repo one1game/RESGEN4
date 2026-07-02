@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="background.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="low-perf.css">
+    <link rel="stylesheet" href="mobile-patch.css">
     <style>
 
     /* ============================================
@@ -275,7 +276,7 @@
     /* ── Мобильные фиксы ── */
     @media (max-width: 768px) {
         #space-action-panel {
-            bottom: 70px !important;
+            bottom: 100px !important;
             left: 8px !important;
             right: 8px !important;
             transform: none !important;
@@ -1079,6 +1080,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./mobile-patch.js"></script>
     <script type="module" src="./game.js"></script>
 
     <audio id="bgMusic" autoplay loop preload="none" style="display: none;">

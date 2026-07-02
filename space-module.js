@@ -392,9 +392,10 @@ export const spaceModule = {
 
     _getClickRadius() {
         const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-        const baseRadius = isMobile ? 25 : 15;
-        const zoomBonus = (3 - this._zoom) * 5;
-        return baseRadius + Math.max(0, zoomBonus);
+        // ✅ Уменьшили базу, увеличили бонус за зум
+        const baseRadius = isMobile ? 22 : 16;
+        const zoomBonus = this._zoom * 6;
+        return baseRadius + zoomBonus;
     },
 
     _hitTestPoint(cx, cy, px, py, radius) {
@@ -854,30 +855,30 @@ export const spaceModule = {
 
     this._visiblePlayers = visibleCandidates;
 
-    const baseRadius = 2 + (this._zoom - 1) * 1.0;
+    const baseRadius = 1.2 * this._zoom;
 
     for (const player of visibleCandidates) {
         const screen = this._worldToScreen(player.pos.x, player.pos.y);
         const color = this._getPlayerColor(player.user_id);
         const isOnline = this.isOnline(player);
 
-        if (baseRadius < 2) {
+        if (baseRadius < 2.5) {
+            // Мелкие точки — рисуем просто кружком со свечением
             ctx.save();
+            // Свечение для видимости
+            ctx.shadowBlur = 6;
+            ctx.shadowColor = isOnline
+                ? `hsl(${color.hue}, ${color.sat}%, 60%)`
+                : `hsl(${color.hue}, ${color.sat - 15}%, 40%)`;
+
             ctx.beginPath();
             ctx.arc(screen.x, screen.y, baseRadius, 0, Math.PI * 2);
             ctx.fillStyle = isOnline
                 ? `hsl(${color.hue}, ${color.sat}%, ${color.light + 10}%)`
                 : `hsl(${color.hue}, ${color.sat - 15}%, ${color.light - 10}%)`;
             ctx.fill();
-
-            ctx.strokeStyle = isOnline
-                ? `hsl(${color.hue}, ${color.sat}%, ${color.light + 20}%)`
-                : `hsl(${color.hue}, ${color.sat}%, ${color.light}%)`;
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
             ctx.restore();
         } else {
-
             const isImportant = player.neuro_evolution >= 5;
             this._drawTechSphere(ctx, screen.x, screen.y, baseRadius, color, time, {
                 isActive: isOnline || isImportant,
@@ -885,7 +886,6 @@ export const spaceModule = {
                 scannerY
             });
         }
-
     }
 },
 
@@ -1143,7 +1143,9 @@ export const spaceModule = {
             const isExhausted = this._isPlanetExhausted(planet);
             const activeMission = activeMissions.find(m => m.planet_id === planet.id && m.status === 'flying');
             const color = this._getEntityColor(planet.id);
-            const size = isExhausted ? 2 : 3;
+            // ✅ Линейный масштаб: zoom=1.0 → 1x, zoom=3.0 → 3x
+            const size = (isExhausted ? 1.2 : 1.8) * this._zoom;
+
             const screen = this._worldToScreen(planet.x, planet.y);
             if (screen.x < -50 || screen.x > this._canvasW + 50 || screen.y < -50 || screen.y > this._canvasH + 50) return;
 
@@ -1546,15 +1548,21 @@ export const spaceModule = {
         const rect = starMap.getBoundingClientRect();
         const cx = e.clientX - rect.left;
         const cy = e.clientY - rect.top;
+
+        // Уменьшенный радиус для более точного клика
         const CLICK_RADIUS = this._getClickRadius();
 
         const myPos = this._getMyPlanetPosition();
         const myScreen = this._worldToScreen(myPos.x, myPos.y);
-        if (this._hitTestPoint(cx, cy, myScreen.x, myScreen.y, CLICK_RADIUS)) {
-            this.showBaseInfo();
+
+        // Сначала проверяем игроков (приоритет игрокам, а не базе)
+        const clickedPlayer = this._hitTestPlayer(cx, cy);
+        if (clickedPlayer) {
+            this.showPlayerInfo(clickedPlayer.user_id);
             return;
         }
 
+        // Затем планеты
         for (const planet of this.planets) {
             const isExhausted = this._isPlanetExhausted(planet);
             const screen = this._worldToScreen(planet.x, planet.y);
@@ -1568,6 +1576,7 @@ export const spaceModule = {
             }
         }
 
+        // Затем станции
         for (const station of this.neutralStations) {
             const screen = this._worldToScreen(station.x, station.y);
             if (this._hitTestPoint(cx, cy, screen.x, screen.y, CLICK_RADIUS)) {
@@ -1576,9 +1585,10 @@ export const spaceModule = {
             }
         }
 
-        const player = this._hitTestPlayer(cx, cy);
-        if (player) {
-            this.showPlayerInfo(player.user_id);
+        // И только потом базу
+        if (this._hitTestPoint(cx, cy, myScreen.x, myScreen.y, CLICK_RADIUS)) {
+            this.showBaseInfo();
+            return;
         }
     },
 
@@ -1638,16 +1648,28 @@ export const spaceModule = {
     },
 
     _hitTestPlayer(cx, cy) {
-        if (!this._visiblePlayers) return null;
+        if (!this._visiblePlayers || this._visiblePlayers.length === 0) return null;
+
+        // ✅ Используем тот же радиус, что и для остальных объектов
         const HIT_RADIUS = this._getClickRadius();
 
+        // Собираем всех в радиусе + считаем дистанцию
+        const candidates = [];
         for (const player of this._visiblePlayers) {
             const screen = this._worldToScreen(player.pos.x, player.pos.y);
-            if (this._hitTestPoint(cx, cy, screen.x, screen.y, HIT_RADIUS)) {
-                return player;
+            const dx = cx - screen.x;
+            const dy = cy - screen.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= HIT_RADIUS) {
+                candidates.push({ player, dist });
             }
         }
-        return null;
+
+        if (candidates.length === 0) return null;
+
+        // ✅ Возвращаем БЛИЖАЙШЕГО к курсору/пальцу
+        candidates.sort((a, b) => a.dist - b.dist);
+        return candidates[0].player;
     },
 
     async _fetchAllPlayersFallback() {
@@ -1861,6 +1883,113 @@ export const spaceModule = {
             this.updateStatusBar(this._lastStats);
         });
 
+        // Touch события для мобильных
+        const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+        if (isMobile) {
+            let touchStartX = 0, touchStartY = 0;
+            let touchStartTime = 0;
+            let touchMoved = false;
+            let initialPinchDistance = 0;
+            let initialPinchZoom = 1.0;
+            let pinchCenterX = 0, pinchCenterY = 0;
+
+            const getTouchDistance = (t1, t2) => {
+                const dx = t1.clientX - t2.clientX;
+                const dy = t1.clientY - t2.clientY;
+                return Math.sqrt(dx * dx + dy * dy);
+            };
+
+            starMap.addEventListener('touchstart', (e) => {
+                if (e.target.closest('button')) return;
+
+                if (e.touches.length === 1) {
+                    const touch = e.touches[0];
+                    touchStartX = touch.clientX;
+                    touchStartY = touch.clientY;
+                    touchStartTime = Date.now();
+                    touchMoved = false;
+
+                    // ✅ КРИТИЧНО: инициализируем drag-переменные
+                    this._isDragging = true;
+                    this._dragStartX = touchStartX;
+                    this._dragStartY = touchStartY;
+                    this._dragStartCameraX = this._cameraX;
+                    this._dragStartCameraY = this._cameraY;
+                } else if (e.touches.length === 2) {
+                    // ✅ Pinch-to-zoom
+                    e.preventDefault();
+                    this._isDragging = false;
+                    initialPinchDistance = getTouchDistance(e.touches[0], e.touches[1]);
+                    initialPinchZoom = this._zoom;
+                    const rect = starMap.getBoundingClientRect();
+                    pinchCenterX = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
+                    pinchCenterY = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
+                }
+            }, { passive: false });
+
+            starMap.addEventListener('touchmove', (e) => {
+                if (e.target.closest('button')) return;
+
+                if (e.touches.length === 1 && this._isDragging) {
+                    const touch = e.touches[0];
+                    const dx = touch.clientX - this._dragStartX;
+                    const dy = touch.clientY - this._dragStartY;
+
+                    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) touchMoved = true;
+
+                    this._cameraX = this._dragStartCameraX + dx;
+                    this._cameraY = this._dragStartCameraY + dy;
+                    this._clampCamera();
+                    this._markDirty();
+                    e.preventDefault();
+                } else if (e.touches.length === 2) {
+                    // ✅ Pinch-to-zoom обработка
+                    e.preventDefault();
+                    const currentDistance = getTouchDistance(e.touches[0], e.touches[1]);
+                    const scale = currentDistance / initialPinchDistance;
+                    const newZoom = Math.max(1.0, Math.min(3.0, initialPinchZoom * scale));
+
+                    if (newZoom !== this._zoom) {
+                        const worldBeforeX = (pinchCenterX - this._cameraX) / (this._canvasW * this._zoom) * this._mapSize;
+                        const worldBeforeY = (pinchCenterY - this._cameraY) / (this._canvasH * this._zoom) * this._mapSize;
+                        this._zoom = newZoom;
+                        const worldAfterX = (pinchCenterX - this._cameraX) / (this._canvasW * this._zoom) * this._mapSize;
+                        const worldAfterY = (pinchCenterY - this._cameraY) / (this._canvasH * this._zoom) * this._mapSize;
+                        this._cameraX += (worldAfterX - worldBeforeX) / this._mapSize * this._canvasW * this._zoom;
+                        this._cameraY += (worldAfterY - worldBeforeY) / this._mapSize * this._canvasH * this._zoom;
+                        this._clampCamera();
+                        this._markDirty();
+                        this.updateStatusBar(this._lastStats);
+                    }
+                }
+            }, { passive: false });
+
+            starMap.addEventListener('touchend', (e) => {
+                if (e.touches.length === 0) {
+                    // ✅ Tap только если палец не двигался
+                    if (!touchMoved && e.changedTouches.length === 1) {
+                        const elapsed = Date.now() - touchStartTime;
+                        if (elapsed < 300) {
+                            const touch = e.changedTouches[0];
+                            const fakeEvent = {
+                                clientX: touch.clientX,
+                                clientY: touch.clientY
+                            };
+                            this._handleCanvasClick(fakeEvent);
+                        }
+                    }
+                    this._isDragging = false;
+                    touchMoved = false;
+                }
+            }, { passive: true });
+
+            starMap.addEventListener('touchcancel', () => {
+                this._isDragging = false;
+                touchMoved = false;
+            }, { passive: true });
+        }
+
         this._clampCamera();
         setTimeout(() => {
             if (!this._mapCenteredOnce) {
@@ -1991,7 +2120,7 @@ export const spaceModule = {
         const myPos = this._getMyPlanetPosition();
         const screen = this._worldToScreen(myPos.x, myPos.y);
         const color = this._getEntityColor(this.currentUser?.id || 'player_base');
-        const size = 3;
+        const size = 2.0 * this._zoom;  // ✅ База чуть крупнее
         const time = Date.now();
         this._drawTechSphere(ctx, screen.x, screen.y, size, color, time, { isActive: true, scannerY });
     },
@@ -1999,10 +2128,11 @@ export const spaceModule = {
     _drawStations(ctx, scannerY) {
         const time = Date.now();
         const now = Date.now();
+
         this.neutralStations.forEach(station => {
             const isOnCooldown = station.cooldown_until > now;
             const color = this._getEntityColor(station.id);
-            const size = isOnCooldown ? 1 : 2;
+            const size = (isOnCooldown ? 1.0 : 1.6) * this._zoom;
             const screen = this._worldToScreen(station.x, station.y);
             if (screen.x < -50 || screen.x > this._canvasW + 50 || screen.y < -50 || screen.y > this._canvasH + 50) return;
 
@@ -2272,7 +2402,8 @@ export const spaceModule = {
         const coordEl = document.getElementById('space-coordinates');
         if (coordEl) {
             const zoomPercent = Math.round(this._zoom * 100);
-            coordEl.innerHTML = `🗺️ 5000×5000 📍 ${Math.round(myPos.x)} ${Math.round(myPos.y)} 🔍 ${zoomPercent}%`;
+            const hint = this._zoom < 1.3 ? ' • используйте зум для выбора' : '';
+            coordEl.innerHTML = `🗺️ 5000×5000 📍 ${Math.round(myPos.x)} ${Math.round(myPos.y)} 🔍 ${zoomPercent}%${hint}`;
         }
     },
 

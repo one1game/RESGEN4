@@ -3459,6 +3459,7 @@ async function initializeGame(existingSave = null) {
                         active_planet_missions: existingSave.active_planet_missions || [],
                         chips_unlocked: existingSave.chips_unlocked ?? (existingSave.inventory?.chips > 0),
                         plasma_unlocked: existingSave.plasma_unlocked ?? (existingSave.inventory?.plasma > 0),
+                        ore_unlocked: existingSave.ore_unlocked ?? (existingSave.neuro?.evolution >= 3),
                         map_x: existingSave.map_x ?? null,
                         map_y: existingSave.map_y ?? null,
 
@@ -4017,6 +4018,7 @@ async function loadFromCloudAndMerge() {
                             active_planet_missions: cloudSave.active_planet_missions || [],
                             chips_unlocked: cloudSave.chips_unlocked ?? (cloudSave.inventory?.chips > 0),
                             plasma_unlocked: cloudSave.plasma_unlocked ?? (cloudSave.inventory?.plasma > 0),
+                            ore_unlocked: cloudSave.ore_unlocked ?? (cloudSave.neuro?.evolution >= 3),
                             map_x: cloudSave.map_x ?? null,
                             map_y: cloudSave.map_y ?? null,
 

@@ -1,6 +1,9 @@
 (function () {
   'use strict';
 
+  /* ============================================================
+     HAPTIC FEEDBACK
+     ============================================================ */
   const Haptic = {
     light () { _vib([10]); },
     medium () { _vib([20]); },
@@ -14,17 +17,21 @@
 
   function _vib (pattern) {
     if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (e) {  }
+      try { navigator.vibrate(pattern); } catch (e) { /* noop */ }
     }
   }
 
   window.Haptic = Haptic;
 
+  /* ============================================================
+     TOUCH FEEDBACK ON BUTTONS
+     ============================================================ */
   document.addEventListener('pointerdown', function (e) {
     const btn = e.target.closest(
       'button, .tab, .status-tab, .craft-btn, .design-btn, ' +
       '.ship-btn, .upgrade-btn, .stat-btn, .log-btn, ' +
-      '.auth-btn, .trade-mode-btn, .toggle-btn, .logout-btn'
+      '.auth-btn, .trade-mode-btn, .toggle-btn, .logout-btn, ' +
+      '.cc-op-btn, .cc-panel-hdr, .op-btn'
     );
     if (!btn) return;
 
@@ -34,17 +41,10 @@
     }
 
     if (btn.classList.contains('upgrade-btn') ||
-        btn.id === 'upgradeMiningBtn' ||
-        btn.id === 'upgradeDefenseBtn' ||
-        btn.id === 'upgradeDefenseLevelBtn' ||
-        btn.id === 'upgradeTurbineBtn' ||
-        btn.id === 'upgradeCritBtn' ||
-        btn.id === 'upgradeCoolingBtn') {
+        btn.classList.contains('craft-btn') ||
+        btn.classList.contains('design-btn')) {
       Haptic.success();
-    } else if (btn.classList.contains('craft-btn') ||
-               btn.classList.contains('design-btn')) {
-      Haptic.medium();
-    } else if (btn.id === 'prestigeBtn' || btn.id === 'resetStatsBtn') {
+    } else if (btn.id === 'resetStatsBtn') {
       Haptic.heavy();
     } else if (btn.classList.contains('tab') ||
                btn.classList.contains('status-tab')) {
@@ -54,6 +54,9 @@
     }
   }, { passive: true });
 
+  /* ============================================================
+     FLOATING BUTTON PATCH (long-press auto-mining)
+     ============================================================ */
   let _floatingButtonPatched = false;
 
   function patchFloatingButton() {
@@ -61,7 +64,6 @@
     if (!oldBtn) return null;
 
     if (oldBtn.getAttribute('data-patched') === 'true') {
-      console.log('✅ Плавающая кнопка уже пропатчена');
       return oldBtn;
     }
 
@@ -181,11 +183,13 @@
     });
     observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
 
-    console.log('✅ Плавающая кнопка пропатчена для мобильных устройств');
     _floatingButtonPatched = true;
     return btn;
   }
 
+  /* ============================================================
+     OBSERVERS: уведомления, атаки, floating text
+     ============================================================ */
   let _bodyObserver = null;
   let _warningObserver = null;
   let _floatObserver = null;
@@ -215,7 +219,6 @@
 
         for (const node of m.removedNodes) {
           if (node instanceof HTMLElement && node.id === 'floatingMineBtn') {
-            console.log('📱 Плавающая кнопка удалена, сбрасываем флаг патча');
             _floatingButtonPatched = false;
           }
         }
@@ -277,9 +280,11 @@
     if (_floatObserver) { _floatObserver.disconnect(); _floatObserver = null; }
     if (_domObserver) { _domObserver.disconnect(); _domObserver = null; }
     if (_inputZoomObserver) { _inputZoomObserver.disconnect(); _inputZoomObserver = null; }
-    console.log('📱 Мобильные observer\'ы отключены');
   };
 
+  /* ============================================================
+     TAB SCROLL (авто-скролл активной вкладки в видимую область)
+     ============================================================ */
   function scrollTabIntoView (tabEl) {
     if (!tabEl) return;
     tabEl.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
@@ -301,6 +306,84 @@
     }, 100);
   }
 
+  /* ============================================================
+     SWIPE GESTURES: свайп влево/вправо по контенту = переключение вкладок
+     ============================================================ */
+  function setupSwipeNavigation() {
+    const tabContentArea = document.querySelector('.main');
+    if (!tabContentArea) return;
+
+    let swipeStartX = 0;
+    let swipeStartY = 0;
+    let swipeActive = false;
+
+    const TABS_ORDER = [
+      'inventory', 'upgrades', 'trade', 'quests',
+      'command', 'craft', 'design', 'fleet', 'space'
+    ];
+
+    tabContentArea.addEventListener('touchstart', (e) => {
+      // Не свайпаем если тач на кнопке, input, или карте
+      if (e.target.closest('button, input, textarea, select, #space-star-map, .star-map, #floatingMineBtn, canvas')) {
+        swipeActive = false;
+        return;
+      }
+
+      const touch = e.touches[0];
+      swipeStartX = touch.clientX;
+      swipeStartY = touch.clientY;
+      swipeActive = true;
+    }, { passive: true });
+
+    tabContentArea.addEventListener('touchmove', (e) => {
+      if (!swipeActive) return;
+
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - swipeStartX;
+      const deltaY = touch.clientY - swipeStartY;
+
+      // Только горизонтальный свайп (угол < 30 градусов)
+      if (Math.abs(deltaX) > Math.abs(deltaY) * 2 && Math.abs(deltaX) > 60) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    tabContentArea.addEventListener('touchend', (e) => {
+      if (!swipeActive) return;
+
+      const touch = e.changedTouches[0];
+      const deltaX = touch.clientX - swipeStartX;
+      const deltaY = touch.clientY - swipeStartY;
+
+      // Минимальная дистанция свайпа: 80px
+      if (Math.abs(deltaX) > 80 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+        const activeTab = document.querySelector('.tab.active');
+        if (!activeTab) return;
+
+        const currentTabId = activeTab.dataset.tab;
+        const currentIndex = TABS_ORDER.indexOf(currentTabId);
+
+        if (currentIndex === -1) return;
+
+        const direction = deltaX > 0 ? -1 : 1; // свайп вправо = предыдущая, влево = следующая
+        const newIndex = currentIndex + direction;
+
+        if (newIndex >= 0 && newIndex < TABS_ORDER.length) {
+          const newTab = document.querySelector(`.tab[data-tab="${TABS_ORDER[newIndex]}"]`);
+          if (newTab) {
+            newTab.click();
+            Haptic.light();
+          }
+        }
+      }
+
+      swipeActive = false;
+    });
+  }
+
+  /* ============================================================
+     DOUBLE-TAP ZOOM PREVENTION
+     ============================================================ */
   function preventDoubleTapZoom () {
     let lastTouch = 0;
     let lastTouchTarget = null;
@@ -335,6 +418,9 @@
     }
   }
 
+  /* ============================================================
+     PULL-TO-REFRESH DISABLE
+     ============================================================ */
   function disablePullToRefresh() {
     let touchStartY = 0;
 
@@ -353,6 +439,9 @@
     }, { passive: false });
   }
 
+  /* ============================================================
+     INPUT ZOOM FIX (iOS)
+     ============================================================ */
   let _inputZoomObserver = null;
 
   function fixInputZoom () {
@@ -383,6 +472,20 @@
     }
   };
 
+  /* ============================================================
+     ORIENTATION CHANGE HANDLER
+     ============================================================ */
+  function handleOrientationChange() {
+    // Ре-скроллим активную вкладку при повороте
+    setTimeout(() => {
+      const activeTab = document.querySelector('.tab.active');
+      if (activeTab) scrollTabIntoView(activeTab);
+    }, 300);
+  }
+
+  /* ============================================================
+     PERFORMANCE OPTIMIZATION
+     ============================================================ */
   function optimizePerformance() {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       const style = document.createElement('style');
@@ -402,14 +505,21 @@
     });
   }
 
+  /* ============================================================
+     INIT
+     ============================================================ */
   function init () {
     watchGameNotifications();
     setupTabScroll();
+    setupSwipeNavigation();
     preventDoubleTapZoom();
     disablePullToRefresh();
     fixInputZoom();
     optimizePerformance();
 
+    window.addEventListener('orientationchange', handleOrientationChange);
+
+    // Retry patching floating button
     let patchAttempts = 0;
     const maxAttempts = 30;
 
@@ -417,7 +527,6 @@
       const btn = document.getElementById('floatingMineBtn');
       if (btn && btn.parentNode && btn.getAttribute('data-patched') !== 'true') {
         patchFloatingButton();
-        console.log('✅ Mobile patch: плавающая кнопка исправлена');
       } else if (!btn && patchAttempts < maxAttempts) {
         patchAttempts++;
         setTimeout(tryPatch, 300);

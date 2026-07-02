@@ -259,6 +259,7 @@ function migrateSave(oldSave, userId) {
             active_planet_missions: oldSave.active_planet_missions || [],
             chips_unlocked: oldSave.chips_unlocked ?? false,
             plasma_unlocked: oldSave.plasma_unlocked ?? false,
+            ore_unlocked: oldSave.ore_unlocked ?? (oldSave.neuro?.evolution >= 3),
             map_x: oldSave.map_x ?? null,
             map_y: oldSave.map_y ?? null,
         };
@@ -355,6 +356,7 @@ function migrateSave(oldSave, userId) {
             active_planet_missions: [],
             chips_unlocked: false,
             plasma_unlocked: false,
+            ore_unlocked: oldSave.ore_unlocked ?? (oldSave.neuro?.evolution >= 3),
             map_x: null,
             map_y: null,
         };
@@ -524,6 +526,7 @@ export async function saveGameToCloud(gameInstance, force = false) {
 
             chips_unlocked: rustState?.chips_unlocked ?? false,
             plasma_unlocked: rustState?.plasma_unlocked ?? false,
+            ore_unlocked: rustState?.ore_unlocked ?? (rustState?.neuro_evolution >= 3),
 
             map_x: rustState?.map_x ?? window.spaceModule?._myMapPos?.x ?? null,
             map_y: rustState?.map_y ?? window.spaceModule?._myMapPos?.y ?? null,

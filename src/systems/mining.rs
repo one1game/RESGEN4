@@ -162,7 +162,8 @@ impl MiningSystem {
             }
         }
 
-        if rng.gen::<f64>() < ore_chance && state.ore_unlocked {
+        let ore_is_unlocked = state.ore_unlocked || state.neuro_evolution >= 3;
+        if rng.gen::<f64>() < ore_chance && ore_is_unlocked {
             let amount = multiplier;
             state.inventory.ore = (state.inventory.ore + amount).min(state.max_inventory_stack);
             state.total_mined      += amount;
@@ -227,7 +228,8 @@ impl MiningSystem {
             state.trash_unlocked     = true;
         }
 
-        if state.ore_unlocked && rng.gen::<f64>() < self.config.passive_chances.ore * debuff * passive_multiplier * day_no_coal_penalty * fear_penalty {
+        let ore_is_unlocked = state.ore_unlocked || state.neuro_evolution >= 3;
+        if ore_is_unlocked && rng.gen::<f64>() < self.config.passive_chances.ore * debuff * passive_multiplier * day_no_coal_penalty * fear_penalty {
             state.inventory.ore = (state.inventory.ore + 1).min(state.max_inventory_stack);
             state.total_mined      += 1;
             state.total_ore_mined  += 1;
