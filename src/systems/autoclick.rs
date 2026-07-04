@@ -44,11 +44,13 @@ impl AutoClickSystem {
     pub fn start_auto_clicking(&self, state: &mut GameState) -> Vec<GameEvent> {
         let mut events = Vec::new();
 
-        if !state.auto_clicking && state.computational_power > 0 {
+        if !state.auto_clicking && state.computational_power > 0 && state.turbine_heat < 100 {
             state.auto_clicking = true;
             state.last_auto_click_time = 0;
             events.push(GameEvent::AutoClickingStarted);
             events.push(GameEvent::LogMessage("🤖 Автоклики активированы!".to_string()));
+        } else if state.turbine_heat >= 100 {
+            events.push(GameEvent::LogMessage("🌡️ Перегрев! Охладите турбину перед запуском автокликов".to_string()));
         } else if state.computational_power == 0 {
             events.push(GameEvent::LogMessage("❌ Недостаточно мощности для автокликов".to_string()));
         }
@@ -71,7 +73,7 @@ impl AutoClickSystem {
     pub fn process_auto_click(&self, state: &mut GameState, neuro: &NeuroEcosystem) -> Vec<GameEvent> {
         let mut events = Vec::new();
 
-        if !state.auto_clicking || !state.can_auto_click() {
+        if !state.auto_clicking || !state.can_auto_click() || state.turbine_heat >= 100 {
             return events;
         }
 

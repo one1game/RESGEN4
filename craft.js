@@ -75,7 +75,12 @@ export const craftModule = {
     },
 
     getEffectiveCost(recipe, amount = 1) {
-        const discount = 1 - (this.aiProductionBonus / 100);
+        // ✅ Скидка применяется ТОЛЬКО в Rust через craft_ship_internal
+        // JS показывает базовую цену, а Rust применит свою скидку
+        // Поэтому здесь discount = 0 для кораблей
+        const isShip = recipe.result?.type === 'ship';
+        const discount = isShip ? 0 : (1 - (this.aiProductionBonus / 100));
+        
         if (recipe.cost.type === 'composite') {
             const result = {};
             for (const [res, amt] of Object.entries(recipe.cost.resources)) {
@@ -192,13 +197,7 @@ export const craftModule = {
                 setTimeout(() => {
                     try {
                         if (window.fleetModule && recipe.result?.type === 'ship') {
-                            const statsJson = this.game.get_statistics();
-                            if (statsJson) {
-                                const stats = JSON.parse(statsJson);
-                                if (stats.fleet && Array.isArray(stats.fleet)) {
-                                    window.fleetModule.ships = stats.fleet;
-                                }
-                            }
+                            // ✅ Флот уже добавлен через addShip() из Rust
                             window.fleetModule.saveFleet();
                             if (window.cloudSaveNow) window.cloudSaveNow(true);
                             GameBus.emit(EVENTS.FLEET_UPDATED, { ships: window.fleetModule.ships });
@@ -338,6 +337,11 @@ export const craftModule = {
                 const baseNeed = recipe.cost.amount * this._craftAmount;
                 const discountText = this.aiProductionBonus > 0 && need !== baseNeed ? ` (было ${baseNeed})` : '';
                 costHtml = `<div class="cost-side"><div class="cost-item ${have < need ? 'insufficient' : ''}"><span class="cost-icon">${recipe.cost.icon}</span><span class="cost-count">${have}/${need}${discountText}</span></div></div>`;
+            }
+            if (recipe.result?.type === 'ship' && this.aiProductionBonus > 0) {
+                costHtml += `<div style="font-size:9px;color:#4aff9d;margin-top:2px;">
+                    🧠 ИИ применит скидку -${this.aiProductionBonus}% при создании
+                </div>`;
             }
 
             const ghostClass = isGhost ? 'ghost-preview' : '';

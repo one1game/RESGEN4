@@ -124,9 +124,14 @@ export const designModule = {
             const stats = JSON.parse(statsJson);
 
             this.blueprints.forEach(bp => {
-                if (bp.id === 'cargo') bp.unlocked = stats.blueprint_cargo_unlocked === true;
-                else if (bp.id === 'scout') bp.unlocked = stats.blueprint_scout_unlocked === true;
-                else if (bp.id === 'combat') bp.unlocked = stats.blueprint_combat_unlocked === true;
+                // ✅ Учитываем блокировку чертежа повстанцами
+                if (stats.blueprint_locked && stats.locked_blueprint_id === bp.id) {
+                    bp.unlocked = false;
+                } else {
+                    if (bp.id === 'cargo') bp.unlocked = stats.blueprint_cargo_unlocked === true;
+                    else if (bp.id === 'scout') bp.unlocked = stats.blueprint_scout_unlocked === true;
+                    else if (bp.id === 'combat') bp.unlocked = stats.blueprint_combat_unlocked === true;
+                }
             });
 
             const neuroConsc = stats.neuro_consciousness || 0;

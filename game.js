@@ -20,6 +20,7 @@ import {
     markAllNotificationsRead,
     subscribeToNotifications,
 } from './multiplayer_combat.js';
+import { tradeModule } from './trade.js';
 import { escapeHtml, normalizeNeuroConsciousness } from './utils.js';
 
 window.sendShipAction = sendShip;
@@ -65,24 +66,11 @@ function updateDayNightVisuals(stats) {
     `;
 }
 
-const BASE_TRADES = [
-    { id: 'ore_to_chips', from: 'ore', fromAmt: 125, to: 'chips', toAmt: 1 },
-    { id: 'chips_to_ore', from: 'chips', fromAmt: 1, to: 'ore', toAmt: 75 },
-    { id: 'coal_to_plasma', from: 'coal', fromAmt: 70, to: 'plasma', toAmt: 1 },
-    { id: 'plasma_to_coal', from: 'plasma', fromAmt: 1, to: 'coal', toAmt: 35 },
-    { id: 'coal_to_ore', from: 'coal', fromAmt: 3, to: 'ore', toAmt: 1 },
-    { id: 'ore_to_coal', from: 'ore', fromAmt: 1, to: 'coal', toAmt: 2 },
-    { id: 'chips_to_plasma', from: 'chips', fromAmt: 5, to: 'plasma', toAmt: 1 },
-    { id: 'plasma_to_chips', from: 'plasma', fromAmt: 1, to: 'chips', toAmt: 3 },
-];
-
 const RES_ICON = { coal: '🪨', ore: '⛏️', chips: '🎛️', plasma: '⚡', trash: '🗑️' };
 const RES_NAME = { coal: 'уголь', ore: 'руда', chips: 'чип', plasma: 'плазма', trash: 'мусор' };
 
 const SAVE_KEY = (userId) => `corebox_v2_${userId || 'local'}`;
 
-let _holdInterval = null;
-let _isHolding = false;
 let game;
 let currentUser = null;
 let lastRustStats = null;
@@ -94,6 +82,19 @@ let lastClickTime = 0;
 let _saveTimer = null;
 let _cloudSaveTimer = null;
 let _lastSeenTimer = null;
+let _tradeListenerAttached = false;
+function attachTradeListener() {
+    if (_tradeListenerAttached) return;
+    _tradeListenerAttached = true;
+    GameBus.on(EVENTS.TRADE_DONE, async (data) => {
+        if (data.type === 'created') {
+            addToLog('📝 Вы выставили предложение на рынок');
+        } else if (data.type === 'accepted') {
+            addToLog('✅ P2P-обмен завершён');
+        }
+        await reloadInventoryFromCloud();
+    });
+}
 let lastProcessedAttackHash = null;
 let _gameLoopRAF = null;
 let _lastFrameTime = 0;
@@ -111,7 +112,6 @@ let _lastCloudSave = 0;
 let _ccClockInterval = null;
 let _lastInterceptCount = 0;
 let _attackHistoryCollapsed = true;
-let isProcessingTrade = false;
 let _accumulatedDelta = 0;
 const GAME_TICK_MS = 1000;
 let _ticksThisFrame = 0;
@@ -144,7 +144,6 @@ let lastDiscountNight = (() => {
     }
     return null;
 })();
-let activeDiscount = null;
 
 let _fleetAttackTimeout = null;
 
@@ -184,22 +183,10 @@ function rollNightDiscount(nightIndex, isNightStart) {
         }
         lastDiscountNight = nightIndex;
         localStorage.setItem(storageKey, '1');
-        activeDiscount = null;
 
         let stats = null;
         try { stats = JSON.parse(game.get_statistics()); } catch(e) {}
         if (stats?.trade_blocked) return;
-
-        if (Math.random() < 0.30) {
-            const idx = Math.floor(Math.random() * BASE_TRADES.length);
-            activeDiscount = { tradeId: BASE_TRADES[idx].id, nightIndex };
-            addToLog(`🏷️ Ночная скидка 50%: ${RES_ICON[BASE_TRADES[idx].from]}→${RES_ICON[BASE_TRADES[idx].to]}`);
-
-            const tradeTab = document.getElementById('trade-tab');
-            if (tradeTab && tradeTab.style.display === 'block') {
-                if (typeof renderTradeTab === 'function') renderTradeTab();
-            }
-        }
     } catch(e) {
         console.warn('rollNightDiscount localStorage error:', e);
     }
@@ -211,7 +198,6 @@ function onDayStarted() {
         localStorage.removeItem(prevKey);
     }
     lastDiscountNight = null;
-    activeDiscount = null;
     _nightWarnShown = false;
 }
 
@@ -435,11 +421,7 @@ function addToLog(msg, type = 'info') {
     const ts = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
     entry.textContent = `[${ts}] ${msg}`;
 
-    if (msg.includes('НЕЙРО-ЭВОЛЮЦИЯ')) entry.dataset.sound = 'evolution';
-    if (msg.includes('Атака') && msg.includes('повстанцев') && !msg.includes('отражена')) entry.dataset.sound = 'rebelAttack';
-    if (msg.includes('Предупреждение')) entry.dataset.sound = 'warning';
     if (msg.includes('Квест') && msg.includes('выполнен')) {
-        entry.dataset.sound = 'questDone';
         const match = msg.match(/Квест "([^"]+)" выполнен/);
         if (match && game) {
             const questTitle = match[1];
@@ -452,35 +434,12 @@ function addToLog(msg, type = 'info') {
             }
         }
     }
-    if (msg.includes('ТЭЦ активирована')) entry.dataset.sound = 'coalOn';
-    if (msg.includes('ТЭЦ деактивирована')) entry.dataset.sound = 'coalOff';
-    if (msg.includes('Обмен')) entry.dataset.sound = 'trade';
-    if (msg.includes('Улучшена')) entry.dataset.sound = 'upgrade';
-    if (msg.includes('ПЕРЕХВАТ')) entry.dataset.sound = 'intercept';
-
-    if (msg.includes('ФЛОТ АТАКОВАН')) entry.dataset.sound = 'rebelAttack';
-    if (msg.includes('ЧЕРТЁЖ УКРАДЕН')) entry.dataset.sound = 'warning';
-    if (msg.includes('САБОТИРОВАНА')) entry.dataset.sound = 'rebelAttack';
-    if (msg.includes('ПРОБИЛИ ЗАЩИТУ')) entry.dataset.sound = 'warning';
 
     log.appendChild(entry);
 
     const maxEntries = window.gameConfig?.ui_config?.max_log_entries ?? 50;
     while (log.children.length > maxEntries) log.removeChild(log.firstChild);
     log.scrollTop = log.scrollHeight;
-
-    const channel = getUniversalChannel();
-    if (channel) {
-        try {
-            channel.postMessage({
-                type: 'log',
-                message: msg,
-                logType: type,
-                timestamp: Date.now(),
-                sessionId: _sessionId
-            });
-        } catch(e) {}
-    }
 }
 
 function getUniversalChannel() {
@@ -542,41 +501,39 @@ function stopLastSeenUpdater() {
     }
 }
 
-async function cloudSaveNow(force = false) {
-    if (!currentUser || !game) return;
+let _saveQueue = Promise.resolve();
 
+function cloudSaveNow(force = false) {
+    if (!currentUser || !game) return Promise.resolve();
+    _saveQueue = _saveQueue.then(() => _doSave(force));
+    return _saveQueue;
+}
+
+async function _doSave(force = false) {
     if (!force && shouldSkipAutoSave()) {
         console.log('⏳ Пропуск автосохранения (недавно загружено облако)');
-        scheduleCloudSave();
+        if (!_cloudSaveTimer) {
+            _cloudSaveTimer = setTimeout(() => {
+                _cloudSaveTimer = null;
+                cloudSaveNow(false);
+            }, 5000);
+        }
         return;
     }
 
-    if (_isSaving && !force) return;
-
-    if (_isSaving && force) {
-        console.log('⏳ Ожидание завершения предыдущего сохранения...');
-        await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                clearInterval(check);
-                reject(new Error('Save timeout'));
-            }, 10000);
-            const check = setInterval(() => {
-                if (!_isSaving) {
-                    clearTimeout(timeout);
-                    clearInterval(check);
-                    resolve();
-                }
-            }, 100);
-        });
-    }
-
     const now = Date.now();
-    if (!force && now - _lastCloudSave < 30000 && _cloudSaveTimer) return;
+    if (!force && now - _lastCloudSave < 30000) {
+        if (!_cloudSaveTimer) {
+            _cloudSaveTimer = setTimeout(() => {
+                _cloudSaveTimer = null;
+                cloudSaveNow(false);
+            }, 5000);
+        }
+        return;
+    }
 
     _isSaving = true;
     _lastCloudSave = now;
-
-    const currentFleetBackup = window.fleetModule?.ships ? JSON.parse(JSON.stringify(window.fleetModule.ships)) : null;
 
     try {
         const result = await saveGameToCloud(game, force);
@@ -751,6 +708,8 @@ function _initMultiplayer(user) {
 
 async function reloadInventoryFromCloud() {
     if (!currentUser || !game) return;
+    if (window._isReloadingInventory) return;
+    window._isReloadingInventory = true;
 
     try {
         const { data, error } = await supabase
@@ -776,10 +735,11 @@ async function reloadInventoryFromCloud() {
                     const diff = cloudAmt - currentAmt;
                     if (diff > 0) {
                         game.add_resource(res, diff);
+                        changed = true;
                     } else if (diff < 0) {
                         game.subtract_resource(res, -diff);
+                        changed = true;
                     }
-                    changed = true;
                 }
             }
 
@@ -792,8 +752,11 @@ async function reloadInventoryFromCloud() {
         }
     } catch(e) {
         console.warn('Ошибка синхронизации инвентаря:', e);
+    } finally {
+        window._isReloadingInventory = false;
     }
 }
+window.reloadInventoryFromCloud = reloadInventoryFromCloud;
 
 function _cleanupMultiplayer() {
     if (_notifChannel) { supabase.removeChannel(_notifChannel); _notifChannel = null; }
@@ -846,14 +809,7 @@ async function _refreshFleetWithMissions() {
         const missions = await getActiveMissions(currentUser.id);
 
         if (container && _currentTab === 'fleet') {
-            container.innerHTML = fleetModule.renderFleetUI();
-            const newContainer = fleetModule.setupEventListeners(container);
-            if (newContainer && newContainer !== container) {
-                const parent = container.parentNode;
-                if (parent && parent.contains(container)) {
-                    parent.replaceChild(newContainer, container);
-                }
-            }
+            fleetModule._renderFleetTab?.();
         }
 
         let missionsPanel = document.getElementById('activeMissionsPanel');
@@ -870,7 +826,7 @@ async function _refreshFleetWithMissions() {
 
         if (!missionsPanel) return;
 
-        if (missions.length > 0) {
+        if (missions && missions.length > 0) {
             missionsPanel.style.display = 'block';
 
             const now = Date.now();
@@ -1140,14 +1096,13 @@ async function loadUserStatsFromCloud(user) {
 }
 
 function setupAuthFormHandlers() {
-    let isRegisterMode = false;
+    let isRegisterMode = false; // false = режим входа, true = режим регистрации
     const loginBtn = document.getElementById('btn-login');
     const registerBtn = document.getElementById('btn-register');
     const toggleModeBtn = document.getElementById('btn-toggle-mode');
     const usernameGroup = document.getElementById('username-group');
     const authTitle = document.querySelector('#authOverlay .auth-header h2');
     const authMessage = document.getElementById('auth-message');
-
     if (!loginBtn) return;
 
     function showMessage(text, isError = true) {
@@ -1161,14 +1116,16 @@ function setupAuthFormHandlers() {
     function toggleMode() {
         isRegisterMode = !isRegisterMode;
         if (isRegisterMode) {
+            // РЕЖИМ РЕГИСТРАЦИИ
             if (authTitle) authTitle.textContent = '📝 Регистрация';
             if (usernameGroup) usernameGroup.style.display = 'block';
             if (loginBtn) loginBtn.textContent = '📝 Зарегистрироваться';
             if (registerBtn) registerBtn.style.display = 'none';
             if (toggleModeBtn) toggleModeBtn.textContent = '🔑 Уже есть аккаунт? Войти';
         } else {
+            // РЕЖИМ ВХОДА (ПО УМОЛЧАНИЮ)
             if (authTitle) authTitle.textContent = '🔑 Вход в CoreBox';
-            if (usernameGroup) usernameGroup.style.display = 'none';
+            if (usernameGroup) usernameGroup.style.display = 'none'; // Скрываем поле имени
             if (loginBtn) loginBtn.textContent = '🔑 Войти';
             if (registerBtn) registerBtn.style.display = 'block';
             if (toggleModeBtn) toggleModeBtn.textContent = '✨ Нет аккаунта? Зарегистрироваться';
@@ -1178,24 +1135,19 @@ function setupAuthFormHandlers() {
     async function handleLogin() {
         const email = document.getElementById('auth-email').value.trim();
         const password = document.getElementById('auth-password').value;
-
         if (!email || !password) {
-            showMessage('Заполните поля!');
+            showMessage('Заполните email и пароль!');
             return;
         }
-
         if (loginBtn) {
             loginBtn.disabled = true;
             loginBtn.textContent = '⏳ Вход...';
         }
-
         const result = await login(email, password);
-
         if (loginBtn) {
             loginBtn.disabled = false;
             loginBtn.textContent = isRegisterMode ? '📝 Зарегистрироваться' : '🔑 Войти';
         }
-
         showMessage(result.success ? 'Вход выполнен!' : (result.error || 'Ошибка'), result.success);
     }
 
@@ -1203,60 +1155,65 @@ function setupAuthFormHandlers() {
         const email = document.getElementById('auth-email').value.trim();
         const password = document.getElementById('auth-password').value;
         const username = document.getElementById('auth-username').value.trim();
-
         if (!email || !password) {
-            showMessage('Заполните поля!');
+            showMessage('Заполните все поля!');
             return;
         }
-
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
             showMessage('Введите корректный email!');
             return;
         }
-
         if (password.length < 6) {
             showMessage('Пароль должен быть минимум 6 символов');
             return;
         }
-
         if (registerBtn) {
             registerBtn.disabled = true;
             registerBtn.textContent = '⏳ Регистрация...';
         }
-
         const result = await register(email, password, username || email.split('@')[0]);
-
         if (registerBtn) {
             registerBtn.disabled = false;
             registerBtn.textContent = '📝 Регистрация';
         }
-
         if (result.success) {
-            showMessage('Регистрация успешна!', false);
-            toggleMode();
+            showMessage('Регистрация успешна! Теперь войдите.', false);
+            toggleMode(); // Переключаем на вход
         } else {
             showMessage(result.error || 'Ошибка');
         }
     }
 
+    // ✅ Кнопка loginBtn работает в обоих режимах
     if (loginBtn) loginBtn.onclick = () => isRegisterMode ? handleRegister() : handleLogin();
-    if (registerBtn) registerBtn.onclick = handleRegister();
-    if (toggleModeBtn) toggleModeBtn.onclick = toggleMode();
 
+    // ✅ Кнопка registerBtn переключает в режим регистрации
+    if (registerBtn) {
+        registerBtn.onclick = () => {
+            if (!isRegisterMode) toggleMode();
+        };
+    }
+
+    // ✅ Переключение режимов
+    if (toggleModeBtn) toggleModeBtn.onclick = toggleMode;
+
+    // Обработка Enter
     const onEnter = (e) => {
         if (e.key === 'Enter') {
             isRegisterMode ? handleRegister() : handleLogin();
         }
     };
-
     const emailInput = document.getElementById('auth-email');
     const passwordInput = document.getElementById('auth-password');
     const usernameInput = document.getElementById('auth-username');
-
     if (emailInput) emailInput.addEventListener('keypress', onEnter);
     if (passwordInput) passwordInput.addEventListener('keypress', onEnter);
     if (usernameInput) usernameInput.addEventListener('keypress', onEnter);
+
+    // ✅ ИНИЦИАЛИЗАЦИЯ: показываем режим ВХОДА по умолчанию
+    toggleMode(); // переключит в isRegisterMode=true
+    toggleMode(); // и обратно в false (режим входа)
 }
 
 async function handleLogout() {
@@ -1328,6 +1285,7 @@ async function handleLogout() {
 
     const result = await logout();
     if (result.success) {
+        tradeModule.cleanup();
         isGameInitialized = false;
         localStorage.removeItem('corebox_autoclicking');
 
@@ -1393,6 +1351,30 @@ function updatePowerGlow() {
     else if (percent > 0) btn.classList.add('power-low');
 }
 
+function updatePowerTierLabel() {
+    if (!game) return;
+    const tierEl = document.getElementById('powerTier');
+    if (!tierEl) return;
+    const stats = JSON.parse(game.get_statistics() || '{}');
+    const tier = stats.power_tier ?? 0;
+    const perClick = 1 + tier;
+    tierEl.textContent = `Тир ${tier} | +${perClick} мощности/клик`;
+}
+
+function updateAutoClickSettingsUI() {
+    const cfg = window.gameConfig?.auto_click_config;
+    if (!cfg) return;
+
+    const powerEl = document.getElementById('powerPerClick');
+    if (powerEl) powerEl.textContent = cfg.power_per_manual_click ?? 1;
+
+    const intervalEl = document.getElementById('autoClickInterval');
+    if (intervalEl) intervalEl.textContent = cfg.auto_click_interval ?? 2;
+
+    const costEl = document.getElementById('autoClickCost');
+    if (costEl) costEl.textContent = cfg.power_per_auto_click ?? 3;
+}
+
 function updateTurbineVisuals(heat) {
     const heatRatio = Math.min(heat / 100, 1);
     const hue = 200 - heatRatio * 200;
@@ -1427,12 +1409,13 @@ function updatePowerRing(manualClicks, clicksPerPower) {
     const ringFill = document.querySelector('.ring-fill');
     if (!ringFill) return;
 
-    const progress = (manualClicks / clicksPerPower) % 1;
+    // ✅ ИСПРАВЛЕНО: manualClicks теперь уже является остатком (0-7)
+    const progress = clicksPerPower > 0 ? manualClicks / clicksPerPower : 0;
     const circumference = 283;
     const offset = circumference * (1 - progress);
     ringFill.style.strokeDashoffset = offset;
-
-    if (progress < 0.05 && manualClicks > 0) {
+    // Флеш при заполнении
+    if (progress >= 0.95 && manualClicks > 0) {
         ringFill.classList.add('ring-flash');
         setTimeout(() => ringFill.classList.remove('ring-flash'), 300);
     }
@@ -1463,7 +1446,9 @@ function updateTurbineStatus(stats) {
 
     updateTurbineVisuals(heat);
 
-    const coolingRate = 2 + (stats?.turbine_upgrade_level || 0) + (stats?.cooling_level || 0);
+    const coolingRate = Math.ceil(1.5
+        + ((stats?.turbine_upgrade_level || 0) * 0.25)
+        + ((stats?.cooling_level || 0) * 0.30));
 
     if (heat >= 100) {
         bar.classList.add('turbine-critical');
@@ -1796,11 +1781,13 @@ function updateCommandCenter(s) {
                 <span class="cc-threat-label" style="color:#ff6644">🚀 ФЛОТ АТАКОВАН! (-${s.fleet_attack_damage} HP)</span>
                 <span class="cc-badge cc-badge-danger">⚠️</span>
             `;
-            if (_fleetAttackTimeout) clearTimeout(_fleetAttackTimeout);
-            _fleetAttackTimeout = setTimeout(() => {
-                if (fleetAttackEl) fleetAttackEl.style.display = 'none';
-                _fleetAttackTimeout = null;
-            }, 10000);
+            // ✅ НЕ сбрасываем таймер, если он уже идёт
+            if (!_fleetAttackTimeout) {
+                _fleetAttackTimeout = setTimeout(() => {
+                    if (fleetAttackEl) fleetAttackEl.style.display = 'none';
+                    _fleetAttackTimeout = null;
+                }, 10000);
+            }
         } else if (!s.fleet_under_attack) {
             fleetAttackEl.style.display = 'none';
             if (_fleetAttackTimeout) {
@@ -2116,7 +2103,6 @@ function updateNeuroStatus(rustStats = null) {
             }
 
             updateAttackHistory(rustStats.attack_history || []);
-            updateUpgradeDisplay(rustStats);
 
             updateRebelPulse(rustStats.rebel_activity || 0);
 
@@ -2148,20 +2134,6 @@ function updateNeuroStatus(rustStats = null) {
             _updateSysDots(cachedRustStats);
         }
     } catch(e) {}
-}
-
-function updateUpgradeDisplay(stats) {
-    if (!stats) return;
-    const critEl = document.getElementById('critLevel');
-    if (critEl) critEl.textContent = `Ур. ${stats.crit_level || 0}/15 (+${(stats.crit_level || 0) * 2.5}% крит)`;
-    const coolingEl = document.getElementById('coolingLevel');
-    if (coolingEl) coolingEl.textContent = `Ур. ${stats.cooling_level || 0}/15 (-${(stats.cooling_level || 0) * 15}% нагрев)`;
-    const powerEl = document.getElementById('powerTier');
-    if (powerEl) powerEl.textContent = `Тир ${stats.power_tier || 0} | +${(stats.power_tier || 0) + 1} мощности/клик`;
-    const critCostEl = document.getElementById('critCost');
-    if (critCostEl) critCostEl.textContent = `Стоимость: по ${((stats.crit_level || 0) + 1) * 2} каждого ресурса`;
-    const coolingCostEl = document.getElementById('coolingCost');
-    if (coolingCostEl) coolingCostEl.textContent = `Стоимость: ${500 * ((stats.cooling_level || 0) + 1)} угля`;
 }
 
 function updateAttackHistory(history) {
@@ -2322,7 +2294,9 @@ function handleClick() {
     if (isOverheated) {
         comboCount = 0;
         lastClickTime = 0;
-        const coolingRate = 2 + (stats.turbine_upgrade_level || 0) + (stats.cooling_level || 0);
+        const coolingRate = Math.ceil(1.5
+            + ((stats.turbine_upgrade_level || 0) * 0.25)
+            + ((stats.cooling_level || 0) * 0.30));
         const ticksLeft = Math.ceil(stats.turbine_heat / coolingRate);
         addToLog(`🔥 Турбина перегрета (${stats.turbine_heat}%)! Подождите остывания (~${ticksLeft} сек).`);
         Sounds.error();
@@ -2351,17 +2325,37 @@ function handleClick() {
     const comboMult = getComboMultiplier();
     const comboBonus = Math.min(Math.floor(comboCount / 5) * comboMult, 2);
     let actualClicks = 1 + Math.floor(comboBonus);
+    // ✅ Отображаем реальную мощность за клик
+    const powerPerClickEl = document.getElementById('clickComboIndicator');
+    if (powerPerClickEl && actualClicks > 1) {
+        powerPerClickEl.textContent = `x${actualClicks}`;
+        powerPerClickEl.style.display = 'block';
+        setTimeout(() => { powerPerClickEl.style.display = 'none'; }, 800);
+    }
     const isCrit = Math.random() < critChance;
     Sounds.mine();
     if (isCrit) {
         Sounds.critical();
         showFloatingText('💥 CRIT!', window.innerWidth / 2, window.innerHeight / 2 - 50);
         actualClicks = Math.min(actualClicks * 2, 5);
-        for (let i = 0; i < actualClicks; i++) game.add_manual_click();
+        if (typeof game.add_manual_click_with_multiplier === 'function') {
+            game.add_manual_click_with_multiplier(actualClicks);
+        } else {
+            for (let i = 0; i < actualClicks; i++) game.add_manual_click();
+        }
     } else {
-        for (let i = 0; i < actualClicks; i++) game.add_manual_click();
+        // ✅ Передаём комбо-бонус мощности в Rust
+        if (typeof game.add_manual_click_with_combo === 'function') {
+            const comboPowerBonus = Math.floor(comboCount / 5) * comboMult;
+            for (let i = 0; i < actualClicks; i++) {
+                game.add_manual_click_with_combo(comboPowerBonus);
+            }
+        } else {
+            for (let i = 0; i < actualClicks; i++) game.add_manual_click();
+        }
     }
     updatePowerGlow();
+    updatePowerTierLabel();
     scheduleCloudSave();
 
     if (_comboResetTimer) clearTimeout(_comboResetTimer);
@@ -2379,11 +2373,30 @@ function handleClick() {
                 updateStatsFromGame(newStats);
                 updateTurbineStatus(newStats);
                 updatePowerGlow();
+                updatePowerTierLabel();
                 updateInventoryDisplay(newStats);
 
                 const cfg = window.gameConfig?.auto_click_config;
                 const clicksPerPower = cfg?.clicks_per_power || 8;
-                updatePowerRing(newStats.manual_clicks || 0, clicksPerPower);
+                // ✅ ИСПРАВЛЕНО: читаем правильные переменные
+                const rawClicks = newStats.total_clicks || 0;           // Глобальный счетчик
+                const remainder = newStats.manual_clicks_remainder || 0; // Остаток (0-7)
+
+                // Обновляем кольцо мощности (передаем именно остаток)
+                updatePowerRing(remainder, clicksPerPower);
+
+                // Обновляем текст прогресса
+                const clickProgressText = document.getElementById('clickProgressText');
+                if (clickProgressText) {
+                    clickProgressText.textContent = `${remainder}/${clicksPerPower}`;
+                }
+
+                // Обновляем полосу прогресса
+                const clickProgressBar = document.getElementById('clickProgress');
+                if (clickProgressBar) {
+                    const pct = clicksPerPower > 0 ? (remainder / clicksPerPower) * 100 : 0;
+                    clickProgressBar.style.width = `${pct}%`;
+                }
 
                 if (window._prevMineStats) {
                     const coalD  = (newStats.coal_inventory  || 0) - (window._prevMineStats.coal_inventory  || 0);
@@ -2407,55 +2420,19 @@ function handleClick() {
     } catch(e) {}
 }
 
-function startHoldMining() {
-    if (!isGameInitialized || !game) return;
-    if (_holdInterval) clearInterval(_holdInterval);
-    if (_isHolding) return;
-
+function toggleAutoClicking() {
+    if (!game) return;
     let stats = null;
     try {
-        const j = game?.get_statistics();
+        const j = game.get_statistics();
         if (j) stats = JSON.parse(j);
     } catch(e) {}
 
-    if (stats?.turbine_heat >= 100) {
-        addToLog(`🔥 Турбина перегрета (${stats.turbine_heat}%)! Подождите остывания.`);
-        Sounds.error();
+    const isActive = stats && (stats.is_day || (stats.coal_enabled && stats.coal_inventory > 0));
+    if (!isActive) {
+        if (window.showNotif) window.showNotif('❌ Система неактивна! Включите ТЭЦ или дождитесь дня', true);
         return;
     }
-
-    _isHolding = true;
-
-    if (typeof handleClick === 'function') {
-        handleClick();
-    }
-
-    _holdInterval = setInterval(() => {
-        let statsCheck = null;
-        try {
-            const j = game?.get_statistics();
-            if (j) statsCheck = JSON.parse(j);
-        } catch(e) {}
-
-        if (statsCheck?.turbine_heat >= 100) {
-            return;
-        }
-        if (_isHolding && typeof handleClick === 'function') {
-            handleClick();
-        }
-    }, 150);
-}
-
-function stopHoldMining() {
-    if (_holdInterval) {
-        clearInterval(_holdInterval);
-        _holdInterval = null;
-    }
-    _isHolding = false;
-}
-
-function toggleAutoClicking() {
-    if (!game) return;
 
     if (isAutoClicking) {
         game.stop_auto_clicking();
@@ -2467,7 +2444,8 @@ function toggleAutoClicking() {
         localStorage.setItem('corebox_autoclicking', 'false');
         Sounds.autoStop && Sounds.autoStop();
     } else {
-        const minCost = 3;
+        const cfg = window.gameConfig?.auto_click_config;
+        const minCost = cfg?.power_per_auto_click ?? 3;
         if (game.get_computational_power() >= minCost) {
             game.start_auto_clicking();
             isAutoClicking = true;
@@ -2508,6 +2486,7 @@ function toggleAutoClicking() {
         }
     }
     updatePowerGlow();
+    updatePowerTierLabel();
     scheduleCloudSave();
 }
 
@@ -2545,7 +2524,7 @@ function renderUpgradesTab() {
     const turbineOreCost = 30 + turbineLevel * 20;
     const turbineChipsCost = 5 + turbineLevel * 3;
     const critCost = (critLevel + 1) * 2;
-    const coolingCost = 500 * (coolingLevel + 1);
+    const coolingCost = Math.round(200 * Math.pow(1.3, coolingLevel));
 
     const critButtonDisabled = (() => {
         if (critLevel >= 15) return 'disabled';
@@ -2564,6 +2543,7 @@ function renderUpgradesTab() {
                 <div class="upgrade-title">⛏️ ЭФФЕКТИВНОСТЬ ДОБЫЧИ</div>
                 <div class="upgrade-level">УР. ${miningLevel}/15</div>
             </div>
+            <div class="upgrade-desc" style="font-size:10px;color:#888;margin:4px 0;">+1.8% к шансу добычи за уровень | +3% угля при активной ТЭЦ</div>
             <div class="progress-container">
                 <div class="progress-fill" style="width: ${(miningLevel / 15) * 100}%"></div>
             </div>
@@ -2574,7 +2554,7 @@ function renderUpgradesTab() {
                 </div>
             </div>
             <div class="upgrade-cost">
-                <button id="upgradeMiningBtn" class="upgrade-btn" ${inv.chips >= miningChipsCost && miningLevel < 15 ? '' : 'disabled'}>АКТИВИРОВАТЬ</button>
+                <button id="upgradeMiningBtn" class="upgrade-btn" ${inv.chips >= miningChipsCost && miningLevel < 15 ? '' : 'disabled'}>УЛУЧШИТЬ ДОБЫЧУ</button>
             </div>
         </div>
 
@@ -2583,6 +2563,7 @@ function renderUpgradesTab() {
                 <div class="upgrade-title">🛡️ СИСТЕМА ЗАЩИТЫ</div>
                 <div class="upgrade-level" id="defenseStatusText">${defenseActive ? 'АКТИВНА' : 'НЕАКТИВНА'}</div>
             </div>
+            <div class="upgrade-desc" style="font-size:10px;color:#888;margin:4px 0;">Блокирует атаки повстанцев | Уровень защиты снижает урон</div>
             <div class="progress-container">
                 <div class="progress-fill" style="width: ${defenseActive ? 100 : 0}%"></div>
             </div>
@@ -2593,7 +2574,7 @@ function renderUpgradesTab() {
                 </div>
             </div>
             <div class="upgrade-cost">
-                <button id="upgradeDefenseBtn" class="upgrade-btn" ${!defenseActive && inv.plasma >= defensePlasmaCost ? '' : 'disabled'}>АКТИВИРОВАТЬ</button>
+                <button id="upgradeDefenseBtn" class="upgrade-btn" ${!defenseActive && inv.plasma >= defensePlasmaCost ? '' : 'disabled'}>АКТИВИРОВАТЬ ЗАЩИТУ</button>
             </div>
         </div>
 
@@ -2602,6 +2583,7 @@ function renderUpgradesTab() {
                 <div class="upgrade-title">💪 УСИЛЕНИЕ ЗАЩИТЫ</div>
                 <div class="upgrade-level">УР. ${defenseLevel}/8</div>
             </div>
+            <div class="upgrade-desc" style="font-size:10px;color:#888;margin:4px 0;">Увеличивает мощность защиты | +12.5% блокирования за уровень</div>
             <div class="progress-container">
                 <div class="progress-fill" style="width: ${(defenseLevel / 8) * 100}%"></div>
             </div>
@@ -2616,7 +2598,7 @@ function renderUpgradesTab() {
                 </div>
             </div>
             <div class="upgrade-cost">
-                <button id="upgradeDefenseLevelBtn" class="upgrade-btn" ${defenseActive && defenseLevel < 8 && inv.chips >= defenseChipsCost && inv.plasma >= defensePlasmaLevelCost ? '' : 'disabled'}>УСИЛИТЬ</button>
+                <button id="upgradeDefenseLevelBtn" class="upgrade-btn" ${defenseActive && defenseLevel < 8 && inv.chips >= defenseChipsCost && inv.plasma >= defensePlasmaLevelCost ? '' : 'disabled'}>УСИЛИТЬ ЗАЩИТУ</button>
             </div>
         </div>
 
@@ -2625,6 +2607,7 @@ function renderUpgradesTab() {
                 <div class="upgrade-title">⚙️ ТУРБИНА</div>
                 <div class="upgrade-level">УР. ${turbineLevel}/8</div>
             </div>
+            <div class="upgrade-desc" style="font-size:10px;color:#888;margin:4px 0;">+10% к скорости охлаждения за уровень | -10% к нагреву турбины</div>
             <div class="progress-container">
                 <div class="progress-fill" style="width: ${(turbineLevel / 8) * 100}%"></div>
             </div>
@@ -2639,7 +2622,7 @@ function renderUpgradesTab() {
                 </div>
             </div>
             <div class="upgrade-cost">
-                <button id="upgradeTurbineBtn" class="upgrade-btn" ${turbineLevel < 8 && inv.ore >= turbineOreCost && inv.chips >= turbineChipsCost ? '' : 'disabled'}>УЛУЧШИТЬ</button>
+                <button id="upgradeTurbineBtn" class="upgrade-btn" ${turbineLevel < 8 && inv.ore >= turbineOreCost && inv.chips >= turbineChipsCost ? '' : 'disabled'}>УЛУЧШИТЬ ТУРБИНУ</button>
             </div>
         </div>
 
@@ -2648,17 +2631,22 @@ function renderUpgradesTab() {
                 <div class="upgrade-title">💥 КРИТ-МОДУЛЬ</div>
                 <div class="upgrade-level">Ур. ${critLevel}/15</div>
             </div>
+            <div class="upgrade-desc" style="font-size:10px;color:#888;margin:4px 0;">+2.5% к шансу крит. удара за уровень | Удваивает добычу при срабатывании</div>
             <div class="progress-container">
                 <div class="progress-fill" style="width: ${(critLevel / 15) * 100}%"></div>
             </div>
             <div class="upgrade-requirements">
                 <div class="requirement">
-                    <div class="requirement-name"><span class="requirement-icon">💰</span><span>СТОИМОСТЬ:</span></div>
+                    <div class="requirement-name"><span class="requirement-icon">🎛️</span><span>ЧИПЫ:</span></div>
+                    <div class="requirement-value">${inv.chips}/${(critLevel + 1) * 8}</div>
+                </div>
+                <div class="requirement">
+                    <div class="requirement-name"><span class="requirement-icon">📦</span><span>ОСТАЛЬНЫЕ:</span></div>
                     <div class="requirement-value">по ${critCost} каждого</div>
                 </div>
             </div>
             <div class="upgrade-cost">
-                <button id="upgradeCritBtn" class="upgrade-btn" ${critButtonDisabled}>ПРОКАЧАТЬ КРИТ</button>
+                <button id="upgradeCritBtn" class="upgrade-btn" ${critButtonDisabled}>УЛУЧШИТЬ КРИТ</button>
             </div>
         </div>
 
@@ -2667,6 +2655,7 @@ function renderUpgradesTab() {
                 <div class="upgrade-title">❄️ ОХЛАЖДЕНИЕ</div>
                 <div class="upgrade-level">Ур. ${coolingLevel}/15</div>
             </div>
+            <div class="upgrade-desc" style="font-size:10px;color:#888;margin:4px 0;">-15% к нагреву за уровень | Предотвращает перегрев ТЭЦ</div>
             <div class="progress-container">
                 <div class="progress-fill" style="width: ${(coolingLevel / 15) * 100}%"></div>
             </div>
@@ -2677,7 +2666,7 @@ function renderUpgradesTab() {
                 </div>
             </div>
             <div class="upgrade-cost">
-                <button id="upgradeCoolingBtn" class="upgrade-btn" ${coolingLevel < 15 && inv.coal >= coolingCost ? '' : 'disabled'}>ПРОКАЧАТЬ ОХЛАЖДЕНИЕ</button>
+                <button id="upgradeCoolingBtn" class="upgrade-btn" ${coolingLevel < 15 && inv.coal >= coolingCost ? '' : 'disabled'}>УЛУЧШИТЬ ОХЛАЖДЕНИЕ</button>
             </div>
         </div>
     `;
@@ -2689,204 +2678,10 @@ function renderUpgradesTab() {
         if (btn.id === 'upgradeMiningBtn') btn.onclick = () => { Sounds.upgrade(); game.upgrade_mining(); scheduleCloudSave(); renderUpgradesTab(); };
         else if (btn.id === 'upgradeDefenseBtn') btn.onclick = () => { Sounds.upgrade(); game.activate_defense(); scheduleCloudSave(); renderUpgradesTab(); };
         else if (btn.id === 'upgradeDefenseLevelBtn') btn.onclick = () => { Sounds.upgrade(); game.upgrade_defense(); scheduleCloudSave(); renderUpgradesTab(); };
-        else if (btn.id === 'upgradeTurbineBtn') btn.onclick = () => { Sounds.upgrade(); if(game.upgrade_turbine()) scheduleCloudSave(); renderUpgradesTab(); };
-        else if (btn.id === 'upgradeCritBtn') btn.onclick = () => { Sounds.upgrade(); if(game.upgrade_crit_module) game.upgrade_crit_module(); scheduleCloudSave(); renderUpgradesTab(); };
-        else if (btn.id === 'upgradeCoolingBtn') btn.onclick = () => { Sounds.upgrade(); if(game.upgrade_cooling_module) game.upgrade_cooling_module(); scheduleCloudSave(); renderUpgradesTab(); };
+        else if (btn.id === 'upgradeTurbineBtn') btn.onclick = () => { Sounds.upgrade(); game.upgrade_turbine(); scheduleCloudSave(); renderUpgradesTab(); };
+        else if (btn.id === 'upgradeCritBtn') btn.onclick = () => { Sounds.upgrade(); game.upgrade_crit_module(); scheduleCloudSave(); renderUpgradesTab(); };
+        else if (btn.id === 'upgradeCoolingBtn') btn.onclick = () => { Sounds.upgrade(); game.upgrade_cooling_module(); scheduleCloudSave(); renderUpgradesTab(); };
     });
-}
-
-function renderTradeTab() {
-    const container = document.getElementById('buyItemsContainer');
-    if (!container || !game) return;
-    let stats = null;
-    try { const j = game.get_statistics(); if (j) stats = JSON.parse(j); } catch(e) {}
-
-    const inv = {
-        coal:   stats?.coal_inventory   ?? 0,
-        ore:    stats?.ore_inventory    ?? 0,
-        chips:  stats?.chips_inventory  ?? 0,
-        plasma: stats?.plasma_inventory ?? 0,
-        trash:  stats?.trash_inventory  ?? 0,
-    };
-    const maxStack = stats?.max_inventory_stack ?? 9999;
-    const tradeBlocked = stats?.trade_blocked || false;
-
-    if (tradeBlocked) {
-        container.innerHTML = `<div class="trade-blocked-banner">🔴 ТОРГОВЛЯ ЗАБЛОКИРОВАНА (НОЧЬ ОСАДЫ) 🔴</div>`;
-        return;
-    }
-
-    container.innerHTML = BASE_TRADES.map(t => {
-        const hasDisc = activeDiscount?.tradeId === t.id;
-        const isNightPenalty = stats && !stats.is_day && !hasDisc;
-        let cost = hasDisc ? Math.max(1, Math.ceil(t.fromAmt * 0.5)) : t.fromAmt;
-        if (isNightPenalty) cost = Math.ceil(cost * 1.2);
-
-        const canAfford = inv[t.from] >= cost;
-        const spaceLeft = maxStack - (inv[t.to] || 0);
-        const willOverflow = spaceLeft < t.toAmt;
-        const isBlocked = !canAfford || willOverflow || isProcessingTrade;
-
-        const discBadge = hasDisc ? `<span class='disc-badge'>-50% 🏷️</span>` : '';
-        const nightBadge = isNightPenalty ? `<span class='night-badge'>🌙 НОЧЬ +20%</span>` : '';
-        const overflowWarning = willOverflow ? `<div style="color:#ff4444;font-size:10px;text-align:center;margin-top:4px;">⚠️ Переполнение инвентаря!</div>` : '';
-
-        return `<div class='trade-card ${isBlocked ? 'trade-disabled' : ''}'>
-            ${discBadge}${nightBadge}
-            <div class='trade-from'>${RES_ICON[t.from]} ${cost} <small>${RES_NAME[t.from]}</small></div>
-            <div class='trade-arr'>→</div>
-            <div class='trade-to'>${RES_ICON[t.to]} ${t.toAmt} <small>${RES_NAME[t.to]}</small></div>
-            <div class='trade-have'>Есть: ${inv[t.from]} | Место: ${spaceLeft}</div>
-            ${overflowWarning}
-            <button onclick='window.executeTrade && window.executeTrade("${t.id}")' ${isBlocked ? 'disabled' : ''}>
-                ${isBlocked ? '❌ НЕДОСТУПНО' : 'ОБМЕНЯТЬ'}
-            </button>
-        </div>`;
-    }).join('');
-}
-
-window.executeTrade = function(tradeId) {
-    if (isProcessingTrade || !game) return;
-    isProcessingTrade = true;
-
-    let stats = null;
-    try { const j = game.get_statistics(); if (j) stats = JSON.parse(j); } catch(e) {}
-
-    if (!stats) { isProcessingTrade = false; return; }
-    if (stats.trade_blocked) {
-        addToLog('🔴 Торговля заблокирована (ночь осады)');
-        Sounds.error();
-        renderTradeTab();
-        isProcessingTrade = false;
-        return;
-    }
-
-    const t = BASE_TRADES.find(x => x.id === tradeId);
-    if (!t) { isProcessingTrade = false; return; }
-
-    const hasDisc = activeDiscount?.tradeId === tradeId;
-    const isNightPenalty = !stats.is_day && !hasDisc;
-    let cost = hasDisc ? Math.max(1, Math.ceil(t.fromAmt * 0.5)) : t.fromAmt;
-    if (isNightPenalty) cost = Math.ceil(cost * 1.2);
-
-    const currentFrom = stats[`${t.from}_inventory`] || 0;
-    const currentTo = stats[`${t.to}_inventory`] || 0;
-    const maxStack = stats.max_inventory_stack || 9999;
-
-    if (currentTo + t.toAmt > maxStack) {
-        addToLog(`❌ Недостаточно места в инвентаре для ${RES_NAME[t.to]}! (Нужно: ${t.toAmt}, Свободно: ${maxStack - currentTo})`);
-        Sounds.error();
-        renderTradeTab();
-        isProcessingTrade = false;
-        return;
-    }
-
-    if (currentFrom < cost) {
-        addToLog('❌ Недостаточно ресурсов для обмена');
-        Sounds.error();
-        renderTradeTab();
-        isProcessingTrade = false;
-        return;
-    }
-
-    try {
-        game.subtract_resource(t.from, cost);
-        game.add_resource(t.to, t.toAmt);
-
-        addToLog(`🔄 Обмен: -${cost} ${RES_ICON[t.from]} → +${t.toAmt} ${RES_ICON[t.to]}${isNightPenalty ? ' (ночной тариф)' : ''}`);
-        Sounds.trade && Sounds.trade();
-
-        const freshStats = JSON.parse(game.get_statistics());
-        updateInventoryDisplay(freshStats);
-        cachedRustStats = freshStats;
-        renderTradeTab();
-        scheduleCloudSave();
-        GameBus.emit(EVENTS.TRADE_DONE, { trade: t, amount: t.toAmt });
-    } catch(e) {
-        addToLog('❌ Ошибка системы при обмене');
-        Sounds.error();
-    } finally {
-        isProcessingTrade = false;
-    }
-};
-
-function setupTradeModeBtns() {
-    const buyBtn  = document.getElementById('buyModeBtn');
-    const sellBtn = document.getElementById('sellModeBtn');
-    const buyC    = document.getElementById('buyItemsContainer');
-    const sellC   = document.getElementById('sellItemsContainer');
-    if (!buyBtn || !sellBtn) return;
-
-    buyBtn.addEventListener('click', () => {
-        buyBtn.classList.add('active'); sellBtn.classList.remove('active');
-        buyC.style.display  = '';
-        sellC.style.display = 'none';
-        renderTradeTab();
-    });
-    sellBtn.addEventListener('click', () => {
-        sellBtn.classList.add('active'); buyBtn.classList.remove('active');
-        buyC.style.display  = 'none';
-        sellC.style.display = '';
-        renderSellTab();
-    });
-}
-
-function renderSellTab() {
-    const container = document.getElementById('sellItemsContainer');
-    if (!container || !game) return;
-    let stats = null;
-    try { stats = JSON.parse(game.get_statistics()); } catch(e) {}
-    if (!stats) return;
-    if (stats.trade_blocked) {
-        container.innerHTML = `<div class="trade-blocked-banner">🔴 ТОРГОВЛЯ ЗАБЛОКИРОВАНА</div>`;
-        return;
-    }
-    const SELL_ITEMS = [
-        { res: 'coal',   icon: '🪨', name: 'Уголь',  inv: stats.coal_inventory   ?? 0 },
-        { res: 'ore',    icon: '⛏️', name: 'Руда',   inv: stats.ore_inventory    ?? 0 },
-        { res: 'chips',  icon: '🎛️', name: 'Чипы',   inv: stats.chips_inventory  ?? 0 },
-        { res: 'plasma', icon: '⚡', name: 'Плазма', inv: stats.plasma_inventory ?? 0 },
-    ];
-    container.innerHTML = SELL_ITEMS.map(s => {
-        const canSell = s.inv > 0;
-        return `<div class="trade-card ${canSell ? '' : 'trade-disabled'}">
-            <div class="trade-from">${s.icon} 1 <small>${s.name}</small></div>
-            <div class="trade-arr">→</div>
-            <div class="trade-to">♻️ <small>Мусор</small></div>
-            <div class="trade-have">Есть: ${s.inv}</div>
-            <button onclick="window.executeSell && window.executeSell('${s.res}')" ${canSell ? '' : 'disabled'}>ПРОДАТЬ</button>
-        </div>`;
-    }).join('');
-}
-
-window.executeSell = function(resource) {
-    if (!game) return;
-    try {
-        game.sell_resource(resource);
-        scheduleCloudSave();
-        renderSellTab();
-
-        const freshStats = JSON.parse(game.get_statistics());
-        updateInventoryDisplay(freshStats);
-        cachedRustStats = freshStats;
-
-        GameBus.emit(EVENTS.TRADE_DONE, { trade: { from: resource, to: 'trash' }, amount: 1 });
-    } catch(e) { addToLog('❌ Ошибка продажи'); Sounds.error?.(); }
-};
-
-function setupEventHoldMining() {
-    const mineBtn = document.getElementById('floatingMineBtn');
-    if (!mineBtn) return;
-
-    mineBtn.removeEventListener('pointerdown', startHoldMining);
-    mineBtn.removeEventListener('pointerup', stopHoldMining);
-    mineBtn.removeEventListener('pointercancel', stopHoldMining);
-    mineBtn.removeEventListener('touchcancel', stopHoldMining);
-
-    mineBtn.addEventListener('pointerdown', startHoldMining);
-    mineBtn.addEventListener('pointerup', stopHoldMining);
-    mineBtn.addEventListener('pointercancel', stopHoldMining);
-    mineBtn.addEventListener('touchcancel', stopHoldMining);
 }
 
 function setupEventListeners() {
@@ -3049,9 +2844,26 @@ function setupEventListeners() {
         }
     });
     document.addEventListener('fleetAction', (e) => { if (e.detail?.success) scheduleCloudSave(); });
+}
 
-    setupEventHoldMining();
-    setupTradeModeBtns();
+async function handleRebelAttackStolen(attackResult) {
+    if (!attackResult?.stolen || !currentUser?.id) return;
+    for (const [resource, amount] of Object.entries(attackResult.stolen)) {
+        if (amount > 0) {
+            try {
+                const { data } = await supabase.rpc('steal_from_trades', {
+                    p_victim_id: currentUser.id,
+                    p_resource: resource,
+                    p_amount: amount,
+                });
+                if (data?.trades_cancelled > 0) {
+                    addToLog(`💀 Повстанцы украли ресурсы из ваших торговых предложений! (${data.trades_cancelled} сделок закрыто)`, 'warning');
+                }
+            } catch (e) {
+                console.warn('steal_from_trades error:', e);
+            }
+        }
+    }
 }
 
 function saveCurrentUserStatistics() {
@@ -3095,11 +2907,9 @@ function cleanupGameTimers() {
     if (_universalChannel) { _universalChannel.close(); _universalChannel = null; }
     if (_keepAliveChannel) { _keepAliveChannel.close(); _keepAliveChannel = null; }
     if (_fleetUITimer) { clearInterval(_fleetUITimer); _fleetUITimer = null; }
-    if (_holdInterval) { clearInterval(_holdInterval); _holdInterval = null; }
     if (_saveInterval) { clearInterval(_saveInterval); _saveInterval = null; }
     if (_ccClockInterval) { clearInterval(_ccClockInterval); _ccClockInterval = null; }
     if (_tabHiddenInterval) { clearInterval(_tabHiddenInterval); _tabHiddenInterval = null; }
-    _isHolding = false;
 }
 
 let lastConfigHash = null;
@@ -3168,6 +2978,7 @@ function gameLoopFrame(timestamp) {
                 cachedRustStats = rustStats;
                 cachedRustStatsTime = Date.now();
                 updatePowerGlow();
+                updatePowerTierLabel();
                 updateTurbineStatus(rustStats);
                 updateInventoryDisplay(rustStats);
                 updateTecUI();
@@ -3186,8 +2997,20 @@ function gameLoopFrame(timestamp) {
                     _lowPowerWarned = false;
                 }
 
+                if (isAutoClicking && rustStats.turbine_heat >= 100) {
+                    game.stop_auto_clicking();
+                    isAutoClicking = false;
+                    _lowPowerWarned = false;
+                    localStorage.setItem('corebox_autoclicking', 'false');
+                    document.getElementById('floatingMineBtn')?.classList.remove('auto-clicking');
+                    const status = document.getElementById('autoClickStatus');
+                    if (status) { status.textContent = 'ОТКЛЮЧЕНА'; status.classList.remove('auto-clicking-status'); }
+                    addToLog('⏹️ Автодобыча остановлена: турбина перегрета', 'warning');
+                }
+
                 if (rustStats.auto_clicking === false && isAutoClicking) {
                     isAutoClicking = false;
+                    _lowPowerWarned = false;
                     localStorage.setItem('corebox_autoclicking', 'false');
                     document.getElementById('floatingMineBtn')?.classList.remove('auto-clicking');
                     const status = document.getElementById('autoClickStatus');
@@ -3206,7 +3029,9 @@ function gameLoopFrame(timestamp) {
                     } else if (overheated) {
                         mineBtn.classList.add('turbine-critical');
                         mineBtn.title = 'Турбина перегрета — ожидайте остывания';
-                        const coolingRate = 2 + (rustStats.turbine_upgrade_level || 0) + (rustStats.cooling_level || 0);
+                        const coolingRate = Math.ceil(1.5
+            + ((rustStats.turbine_upgrade_level || 0) * 0.25)
+            + ((rustStats.cooling_level || 0) * 0.30));
                         const ticksLeft = Math.ceil(rustStats.turbine_heat / coolingRate);
                         const btnText = mineBtn.querySelector('.btn-text');
                         if (btnText) btnText.textContent = `${ticksLeft}с`;
@@ -3271,7 +3096,10 @@ function gameLoopFrame(timestamp) {
                     const fleetCargo = fleetModule.getCargoMiningBonus();
                     try {
                         if (typeof game.set_fleet_cargo_bonus === 'function') {
-                            game.set_fleet_cargo_bonus(Math.max(fleetCargo, 20));
+                            game.set_fleet_cargo_bonus(fleetCargo);
+                        }
+                        if (typeof game.set_fleet_power_bonus === 'function') {
+                            game.set_fleet_power_bonus(Math.floor(fleetCargo / 10));
                         }
                     } catch(e) {}
                 }
@@ -3299,7 +3127,10 @@ function gameLoopFrame(timestamp) {
         updateDayNightVisuals(cachedRustStats);
 
         updateNeuroStatus(cachedRustStats);
-        updateUpgradeDisplay(cachedRustStats);
+
+        if (_currentTab === 'upgrades') {
+            renderUpgradesTab();
+        }
 
         const statsSection = document.getElementById('statistics-section');
         if (statsSection && statsSection.style.display !== 'none') {
@@ -3342,9 +3173,17 @@ function gameLoopFrame(timestamp) {
 
         const fleetCombat = fleetModule.getFleetDefenseContribution(cachedRustStats.defense_debuff_remaining || 0);
         const fleetCargo = fleetModule.getCargoMiningBonus();
+        const fleetRecon = fleetModule.getScoutReconBonus();
         try {
-            if (typeof game.set_fleet_defense_bonus === 'function' && fleetCombat > 0) game.set_fleet_defense_bonus(Math.floor(fleetCombat / 50));
-            if (typeof game.set_fleet_cargo_bonus === 'function' && fleetCargo > 0) game.set_fleet_cargo_bonus(fleetCargo);
+            if (typeof game.set_fleet_defense_bonus === 'function' && fleetCombat > 0) {
+                game.set_fleet_defense_bonus(fleetCombat);
+            }
+            if (typeof game.set_fleet_cargo_bonus === 'function' && fleetCargo > 0) {
+                game.set_fleet_cargo_bonus(fleetCargo);
+            }
+            if (typeof game.set_fleet_power_bonus === 'function') {
+                game.set_fleet_power_bonus(Math.floor(fleetCargo / 10));
+            }
         } catch(e) {}
 
         if (cachedRustStats.current_ai_mode) {
@@ -3391,11 +3230,24 @@ async function initializeGame(existingSave = null) {
     try {
         await init();
         await loadConfig();
+        updateAutoClickSettingsUI();
         game = start_game();
         window.game = game;
         window.fleetModule = fleetModule;
 
         await applyPendingLoot();
+
+        // 🧹 Очистка fleet-кэша при первом запуске после патча
+        if (localStorage.getItem('corebox_fleet_cleanup_v2') !== 'done') {
+            const userId = window.currentUser?.id;
+            if (userId) {
+                localStorage.removeItem(`corebox_fleet_${userId}`);
+                localStorage.removeItem('corebox_last_combat_result');
+                localStorage.removeItem('corebox_last_scout_result');
+                localStorage.setItem('corebox_fleet_cleanup_v2', 'done');
+                console.log('🧹 Fleet cache cleaned');
+            }
+        }
 
         let loadedFromCloud = false;
 
@@ -3422,8 +3274,8 @@ async function initializeGame(existingSave = null) {
                         computational_power: existingSave.computational_power || 0,
                         max_computational_power: existingSave.max_computational_power || 1000,
                         nights_survived: existingSave.nights_survived || 0,
-                        manual_clicks: existingSave.total_mined || 0,
-                        total_mined: existingSave.total_mined || existingSave.manual_clicks || 0,
+                        manual_clicks: existingSave.manual_clicks || 0,
+                        total_mined: existingSave.total_mined || 0,
                         neuro_evolution: existingSave.neuro?.evolution || 0,
                         neuro_consciousness: (() => {
                             let c = existingSave.neuro?.consciousness || 0;
@@ -3483,13 +3335,34 @@ async function initializeGame(existingSave = null) {
                 syncUIAfterCloudLoad(existingSave);
 
                 if (existingSave?.fleet && Array.isArray(existingSave.fleet) && window.fleetModule) {
+                    // ✅ Валидация флота перед восстановлением
+                    const validFleet = existingSave.fleet.filter(s =>
+                        s && typeof s.id === 'string' && typeof s.type === 'string'
+                    );
                     const storageKey = window.fleetModule._getStorageKey();
-                    localStorage.setItem(storageKey, JSON.stringify(existingSave.fleet));
-                    window.fleetModule.ships = existingSave.fleet;
+                    localStorage.setItem(storageKey, JSON.stringify(validFleet));
+                    window.fleetModule.ships = validFleet;
+
+                    // ✅ Восстанавливаем защитника
+                    if (window.fleetModule._loadDefenseShip) {
+                        window.fleetModule._loadDefenseShip();
+                    } else if (existingSave.defense_ship_id) {
+                        const ship = validFleet.find(s => s.id === existingSave.defense_ship_id);
+                        if (ship && !ship.onMission && ship.type === 'combat') {
+                            window.fleetModule.defenseShipId = existingSave.defense_ship_id;
+                            ship.onDefense = true;
+                        }
+                    }
+
+                    // ✅ Синхронизируем статус в БД
+                    if (window.fleetModule._syncFleetStatus) {
+                        window.fleetModule._syncFleetStatus();
+                    }
+
                     if (window.fleetModule._renderFleetTab) {
                         window.fleetModule._renderFleetTab();
                     }
-                    console.log(`✅ Флот восстановлен из existingSave: ${existingSave.fleet.length} кораблей`);
+                    console.log(`✅ Флот восстановлен из existingSave: ${validFleet.length} кораблей`);
                 }
 
                 loadedFromCloud = true;
@@ -3509,15 +3382,13 @@ async function initializeGame(existingSave = null) {
                     if (saveData.max_computational_power && typeof game.set_max_power === 'function') {
                         game.set_max_power(saveData.max_computational_power);
                     }
-                    if (saveData.computational_power !== undefined && game) {
-                        if (typeof game.add_power === 'function') {
-                            const currentPower = game.get_computational_power() || 0;
-                            const savedPower = saveData.computational_power;
-                            if (savedPower > currentPower) {
-                                game.add_power(savedPower - currentPower);
-                            }
+                    if (saveData.computational_power !== undefined && game && typeof game.add_power === 'function') {
+                        const currentPower = game.get_computational_power() || 0;
+                        const savedPower = saveData.computational_power;
+                        if (savedPower > currentPower) {
+                            game.add_power(savedPower - currentPower);
+                            addToLog(`⚡ Восстановлена мощность: ${savedPower}`);
                         }
-                        addToLog(`⚡ Восстановлена мощность: ${saveData.computational_power}`);
                     }
                 } catch(e) {}
             }
@@ -3552,29 +3423,29 @@ async function initializeGame(existingSave = null) {
             const stats = cachedRustStats;
             const isActive = stats && (stats.is_day || (stats.coal_enabled && stats.coal_inventory > 0));
 
-            if (savedAutoClick && game && power >= 3 && isActive) {
+            const cfg = window.gameConfig?.auto_click_config;
+            const minCost = cfg?.power_per_auto_click ?? 3;
+
+            const canResume = savedAutoClick && game && power >= minCost && isActive;
+
+            if (canResume) {
                 game.start_auto_clicking();
                 isAutoClicking = true;
                 document.getElementById('floatingMineBtn')?.classList.add('auto-clicking');
                 const status = document.getElementById('autoClickStatus');
                 if (status) { status.textContent = 'АКТИВНА'; status.classList.add('auto-clicking-status'); }
                 addToLog(`🤖 Автокликер восстановлен (мощность: ${power})`);
-            } else if (savedAutoClick && power < 3) {
-                isAutoClicking = false;
-                localStorage.setItem('corebox_autoclicking', 'false');
-                addToLog('⚠️ Автокликер не включён: мощность исчерпана за время оффлайна');
-            } else if (savedAutoClick && !isActive) {
-                isAutoClicking = false;
-                localStorage.setItem('corebox_autoclicking', 'false');
-                addToLog('⚠️ Автокликер не включён: система неактивна (ночь без угля)');
             } else {
                 isAutoClicking = false;
                 localStorage.setItem('corebox_autoclicking', 'false');
                 document.getElementById('floatingMineBtn')?.classList.remove('auto-clicking');
                 const status = document.getElementById('autoClickStatus');
                 if (status) { status.textContent = 'ОТКЛЮЧЕНА'; status.classList.remove('auto-clicking-status'); }
-                if (savedAutoClick && power < 3) {
-                    addToLog('⚠️ Автокликер не включён: недостаточно мощности (нужно минимум 3)', 'warning');
+
+                if (savedAutoClick && power < minCost) {
+                    addToLog(`⚠️ Автокликер не включён: недостаточно мощности (нужно минимум ${minCost})`, 'warning');
+                } else if (savedAutoClick && !isActive) {
+                    addToLog('⚠️ Автокликер не включён: система неактивна (ночь без угля)');
                 }
             }
         }, 800);
@@ -3583,6 +3454,9 @@ async function initializeGame(existingSave = null) {
         craftModule.init(game);
         designModule.init(game, currentUser?.id);
         fleetModule.init(game, currentUser?.id);
+        tradeModule.init(game, currentUser?.id);
+
+        attachTradeListener();
 
         if (currentUser) {
             console.log('ℹ️ Мультиплеер инициализирован');
@@ -3609,6 +3483,7 @@ async function initializeGame(existingSave = null) {
         setupEventListeners();
         initializeCollapsiblePanels();
         updatePowerGlow();
+        updatePowerTierLabel();
         isGameInitialized = true;
 
         // Восстановить последнюю открытую вкладку
@@ -3668,9 +3543,17 @@ async function initializeGame(existingSave = null) {
 
             const fleetCombat = fleetModule.getFleetDefenseContribution(cachedRustStats.defense_debuff_remaining || 0);
             const fleetCargo = fleetModule.getCargoMiningBonus();
+            const fleetRecon = fleetModule.getScoutReconBonus();
             try {
-                if (typeof game.set_fleet_defense_bonus === 'function' && fleetCombat > 0) game.set_fleet_defense_bonus(Math.floor(fleetCombat / 50));
-                if (typeof game.set_fleet_cargo_bonus === 'function' && fleetCargo > 0) game.set_fleet_cargo_bonus(fleetCargo);
+                if (typeof game.set_fleet_defense_bonus === 'function' && fleetCombat > 0) {
+                    game.set_fleet_defense_bonus(fleetCombat);
+                }
+                if (typeof game.set_fleet_cargo_bonus === 'function' && fleetCargo > 0) {
+                    game.set_fleet_cargo_bonus(fleetCargo);
+                }
+                if (typeof game.set_fleet_power_bonus === 'function') {
+                    game.set_fleet_power_bonus(Math.floor(fleetCargo / 10));
+                }
             } catch(e) {}
 
             craftModule.syncFromStats(cachedRustStats);
@@ -3690,7 +3573,6 @@ async function initializeGame(existingSave = null) {
 
         if (_saveInterval) clearInterval(_saveInterval);
         _saveInterval = setInterval(() => {
-            if (currentUser && gameStats) scheduleSave();
             if (game && typeof game.save_current_state === 'function') {
                 game.save_current_state();
             }
@@ -3769,7 +3651,7 @@ function switchMainTab(tabName) {
     } else if (tabName === 'fleet') {
         _refreshFleetWithMissions();
     } else if (tabName === 'trade') {
-        renderTradeTab();
+        tradeModule.loadOffers();
     } else if (tabName === 'quests') {
         renderQuestsTab();
     } else if (tabName === 'space') {
@@ -3844,6 +3726,7 @@ function syncUIAfterCloudLoad(cloudSave) {
 
     if (cloudSave.computational_power !== undefined) {
         updatePowerGlow();
+        updatePowerTierLabel();
         const powerText = document.getElementById('powerText');
         if (powerText) {
             powerText.textContent = `${cloudSave.computational_power}/${cloudSave.max_computational_power || 1000}`;
@@ -3887,10 +3770,10 @@ function syncUIAfterCloudLoad(cloudSave) {
     }
 
     if (designModule) {
+        // ✅ Используем ТОЛЬКО актуальное значение из Rust — оно источник истины
         const rustPow = (game && typeof game.get_computational_power === 'function')
             ? game.get_computational_power() : 0;
-        const cloudPow = cloudSave.computational_power || 0;
-        designModule.updateComputationalPower(Math.max(rustPow, cloudPow));
+        designModule.updateComputationalPower(rustPow);
     }
 
     if (cloudSave.attack_history && Array.isArray(cloudSave.attack_history)) {
@@ -4041,13 +3924,25 @@ async function loadFromCloudAndMerge() {
                     addToLog(`💾 Загружено облачное сохранение (${new Date(cloudSave.timestamp).toLocaleString()})`);
 
                     if (cloudSave.fleet && Array.isArray(cloudSave.fleet) && window.fleetModule) {
+                        const validFleet = cloudSave.fleet.filter(s =>
+                            s && typeof s.id === 'string' && typeof s.type === 'string'
+                        );
                         const storageKey = window.fleetModule._getStorageKey();
-                        localStorage.setItem(storageKey, JSON.stringify(cloudSave.fleet));
-                        window.fleetModule.ships = cloudSave.fleet;
+                        localStorage.setItem(storageKey, JSON.stringify(validFleet));
+                        window.fleetModule.ships = validFleet;
+
+                        // ✅ Восстанавливаем защитника
+                        window.fleetModule._loadDefenseShip();
+
+                        // ✅ Синхронизируем статус
+                        if (window.fleetModule._syncFleetStatus) {
+                            window.fleetModule._syncFleetStatus();
+                        }
+
                         if (window.fleetModule._renderFleetTab) {
                             window.fleetModule._renderFleetTab();
                         }
-                        console.log(`✅ Флот восстановлен из облака: ${cloudSave.fleet.length} кораблей`);
+                        console.log(`✅ Флот восстановлен из облака: ${validFleet.length} кораблей`);
                     }
 
                     if (window._restorePlanetMissions) {
@@ -4061,6 +3956,7 @@ async function loadFromCloudAndMerge() {
                 setTimeout(() => {
                     syncUIAfterCloudLoad(cloudSave);
                     updatePowerGlow();
+                    updatePowerTierLabel();
                     updateTecUI();
 
                     if (craftModule) {
@@ -4130,6 +4026,7 @@ function calculateOfflineProgress(saved) {
         trash: (0.008 + miningLevel * 0.0012),
         ore: (0.006 + miningLevel * 0.0004)
     };
+    passive.power = passive.power || (0.05 + miningLevel * 0.002);
 
     const cycleDuration = 480;
     const cyclesElapsed = Math.floor(elapsed / cycleDuration);
@@ -4189,6 +4086,7 @@ function calculateOfflineProgress(saved) {
     const oreGained = Math.floor(ticks * passive.ore) - oreStolen;
     const chipsGained = -chipsStolen;
     const plasmaGained = -plasmaStolen;
+    const powerGained = Math.floor(ticks * passive.power);
 
     return {
         elapsedSeconds: elapsed,
@@ -4200,6 +4098,7 @@ function calculateOfflineProgress(saved) {
         oreGained: Math.max(0, oreGained),
         chipsGained: Math.max(0, chipsGained),
         plasmaGained: Math.max(0, plasmaGained),
+        powerGained: Math.max(0, powerGained),
 
         coalBurned: coalBurned,
 
@@ -4261,6 +4160,20 @@ function showOfflineRewardPopup(p) {
         if (p.oreStolen > 0) game.subtract_resource('ore', p.oreStolen);
         if (p.chipsStolen > 0) game.subtract_resource('chips', p.chipsStolen);
         if (p.plasmaStolen > 0) game.subtract_resource('plasma', p.plasmaStolen);
+
+    if (p.powerGained > 0) {
+        addToLog(`⚡ +${p.powerGained} вычислительной мощности (пассивная добыча)`);
+        game.add_power(p.powerGained);
+    }
+
+    handleRebelAttackStolen({
+            stolen: {
+                coal: p.coalStolen || 0,
+                ore: p.oreStolen || 0,
+                chips: p.chipsStolen || 0,
+                plasma: p.plasmaStolen || 0,
+            }
+        });
     }
 
     if (p.protectionBreaches > 0) {
@@ -4459,7 +4372,7 @@ async function _applyReleasedShips(userId) {
         for (const entry of released) {
             const { data: mission } = await supabase
                 .from('missions')
-                .select('status')
+                .select('status, ship_type')
                 .eq('fleet_ship_id', entry.ship_id)
                 .eq('attacker_id', userId)
                 .in('status', ['flying', 'returning'])
@@ -4473,7 +4386,7 @@ async function _applyReleasedShips(userId) {
                 }
             }
 
-            if (mission && mission.status === 'cargo' && entry.loot && Object.keys(entry.loot).length > 0) {
+            if (mission && mission.ship_type === 'cargo' && entry.loot && Object.keys(entry.loot).length > 0) {
                 const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
                 for (const [res, amt] of Object.entries(entry.loot)) {
                     if (amt && amt > 0) {

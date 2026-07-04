@@ -439,7 +439,12 @@ export const spaceModule = {
             activeMissions = JSON.parse(this.game?.get_active_planet_missions?.() ?? '[]');
         } catch {}
 
-        const TRAVEL_SEC = { scout: 300, combat: 480, cargo: 360 };
+        const cfg = window.gameConfig?.fleet_config;
+        const TRAVEL_SEC = {
+            scout: cfg?.scout?.travel_time_sec ?? 30,
+            combat: cfg?.combat?.travel_time_sec ?? 45,
+            cargo: cfg?.cargo?.travel_time_sec ?? 40
+        };
 
         for (const mission of activeMissions) {
             const arrivesAt = normalizeTimestamp(mission.arrives_at);
@@ -556,6 +561,14 @@ export const spaceModule = {
         }
     },
 
+    // ✅ Публичный метод для принудительной перерисовки линий полётов
+    renderFlightLines() {
+        if (!this._ctx) return;
+        const now = Date.now();
+        this._drawFlightLines(this._ctx);
+        this._renderOutgoingPvpMissions(this._ctx, now);
+    },
+
     async tradeWithStation(station) {
         let stats = null;
         try {
@@ -650,6 +663,11 @@ export const spaceModule = {
             if (result.success) {
                 this._applyMissionResult(availableShip, planet, result.mission, shipType);
                 window.showNotif?.(`КОРАБЛЬ ОТПРАВЛЕН НА ${planet.name}`, false);
+                if (window.fleetModule?._addFleetLog) {
+                    window.fleetModule._addFleetLog(
+                        `🚀 ${availableShip.name} отправлен на планету ${planet.name}`
+                    );
+                }
             } else {
                 window.showNotif?.(`ОШИБКА: ${result.error}`, true);
             }
@@ -683,6 +701,11 @@ export const spaceModule = {
             planet,
             mission
         });
+        if (window.fleetModule?._addFleetLog) {
+            window.fleetModule._addFleetLog(
+                `✅ ${fleetShip.name} завершил миссию на ${planet.name}`
+            );
+        }
     },
 
     async startResearch() {
@@ -1555,14 +1578,19 @@ export const spaceModule = {
         const myPos = this._getMyPlanetPosition();
         const myScreen = this._worldToScreen(myPos.x, myPos.y);
 
-        // Сначала проверяем игроков (приоритет игрокам, а не базе)
+        // ✅ СНАЧАЛА БАЗА (своя)
+        if (this._hitTestPoint(cx, cy, myScreen.x, myScreen.y, CLICK_RADIUS)) {
+            this.showBaseInfo();
+            return;
+        }
+        // Потом игроки
         const clickedPlayer = this._hitTestPlayer(cx, cy);
         if (clickedPlayer) {
             this.showPlayerInfo(clickedPlayer.user_id);
             return;
         }
 
-        // Затем планеты
+        // Потом планеты
         for (const planet of this.planets) {
             const isExhausted = this._isPlanetExhausted(planet);
             const screen = this._worldToScreen(planet.x, planet.y);
@@ -1576,19 +1604,13 @@ export const spaceModule = {
             }
         }
 
-        // Затем станции
+        // Потом станции
         for (const station of this.neutralStations) {
             const screen = this._worldToScreen(station.x, station.y);
             if (this._hitTestPoint(cx, cy, screen.x, screen.y, CLICK_RADIUS)) {
                 this.showStationInfo(station);
                 return;
             }
-        }
-
-        // И только потом базу
-        if (this._hitTestPoint(cx, cy, myScreen.x, myScreen.y, CLICK_RADIUS)) {
-            this.showBaseInfo();
-            return;
         }
     },
 
@@ -2547,12 +2569,14 @@ export const spaceModule = {
         if (this._animFrameId) return;
 
         const loop = () => {
-            this._animFrameId = requestAnimationFrame(loop);
-            if (!this.isTabActive) return;
-
+            if (!this.isTabActive) {
+                this._animFrameId = null;
+                return;
+            }
             this._animationTime = Date.now();
             this._renderFrame();
             this._renderDirty = false;
+            this._animFrameId = requestAnimationFrame(loop);
         };
 
         this._animFrameId = requestAnimationFrame(loop);
@@ -2650,13 +2674,25 @@ export const spaceModule = {
         this._multiplayerChannel
             .on('presence', { event: 'sync' }, () => {
                 const state = this._multiplayerChannel.presenceState();
-                this._onlinePlayerIds = Object.values(state).flat()
-                    .map(p => p.user_id).filter(Boolean);
+                const presences = Object.values(state).flat();
+                this._onlinePlayerIds = presences.map(p => p.user_id).filter(Boolean);
+                // ✅ Обновляем позиции игроков из presence
+                presences.forEach(p => {
+                    if (p.user_id && p.map_x != null && p.map_y != null) {
+                        this._playerPositions[p.user_id] = { x: p.map_x, y: p.map_y };
+                    }
+                });
                 this.renderPlayers();
                 this._markDirty();
             })
             .on('presence', { event: 'join' }, ({ newPresences }) => {
                 console.log(`🟢 Игроки вошли: ${newPresences.length}`);
+                // ✅ Обновляем позиции вошедших игроков
+                newPresences.forEach(p => {
+                    if (p.user_id && p.map_x != null && p.map_y != null) {
+                        this._playerPositions[p.user_id] = { x: p.map_x, y: p.map_y };
+                    }
+                });
                 this.renderPlayers();
                 this._markDirty();
             })
@@ -2708,11 +2744,27 @@ export const spaceModule = {
         try {
             const { getActiveMissions } = await import('./multiplayer_combat.js');
             const all = await getActiveMissions(this.currentUser.id);
-            this._cachedIncomingMissions = (all || []).filter(m =>
+            const newIncoming = (all || []).filter(m =>
                 m.target_id === this.currentUser.id &&
                 m.status === 'flying' &&
                 m.ship_type !== 'scout'
             );
+            
+            // ✅ Логируем НОВЫХ вражеских кораблей в журнал флота
+            const oldIds = new Set((this._cachedIncomingMissions || []).map(m => m.id));
+            for (const m of newIncoming) {
+                if (!oldIds.has(m.id)) {
+                    const icons = { scout: '🔭', combat: '⚔️', cargo: '📦' };
+                    const icon = icons[m.ship_type] || '🚀';
+                    const typeNames = { scout: 'Разведчик', combat: 'Боевой', cargo: 'Грузовой' };
+                    const typeName = typeNames[m.ship_type] || m.ship_type;
+                    window.fleetModule?._addFleetLog?.(
+                        `⚠️ ВРАЖЕСКИЙ ${icon} ${typeName} летит к базе!`
+                    );
+                }
+            }
+            
+            this._cachedIncomingMissions = newIncoming;
         } catch(e) {
             console.warn('REFRESH INCOMING MISSIONS ERROR:', e);
         }

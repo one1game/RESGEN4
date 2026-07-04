@@ -179,10 +179,10 @@
     "max_computational_power": 1000,
     "clicks_per_power": 8,
     "power_per_manual_click": 4,
-    "auto_click_interval": 8,
+    "auto_click_interval": 2,
     "power_per_auto_click": 3,
     "use_same_chances_as_manual": true,
-    "auto_click_chance_multiplier": 1.0,
+    "auto_click_chance_multiplier": 0.8,
     "long_press_duration": 600,
     "visual_feedback": true
   },
@@ -219,25 +219,46 @@
   "fleet_config": {
     "scout": {
       "travel_time_sec": 30,
-      "upgrade_levels": 5,
+      "upgrade_levels": 10,
       "base_cost": { "ore": 100, "chips": 100, "plasma": 20 }
     },
     "combat": {
       "travel_time_sec": 45,
-      "upgrade_levels": 5,
+      "upgrade_levels": 10,
       "base_cost": { "ore": 300, "chips": 150, "plasma": 30 }
     },
     "cargo": {
       "travel_time_sec": 40,
-      "upgrade_levels": 5,
+      "upgrade_levels": 10,
       "base_cost": { "ore": 200, "chips": 50, "plasma": 10 },
       "capacity": 0.50
     },
+    "base_max_fleet_size": 20,
+    "fleet_size_per_neuro_level": 2,
+    "fleet_size_cap": 60,
+    "repair": {
+      "ore_per_hp": 0.35,
+      "chips_per_hp": 0.12,
+      "level_multiplier": 1.15,
+      "min_cost_ore": 5,
+      "min_cost_chips": 2
+    },
+    "upgrade": {
+      "base_ore": 50,
+      "base_chips": 20,
+      "base_plasma": 3,
+      "ore_growth": 1.55,
+      "chips_growth": 1.55,
+      "plasma_growth": 1.35,
+      "hp_per_level": 25,
+      "combat_per_level": 1.18,
+      "capacity_per_level": 1.12
+    },
     "loot_chance_min": 0.20,
     "loot_chance_max": 0.60,
-    "compensation_min": 0.10,
-    "compensation_max": 0.60,
-    "max_fleet_log_entries": 10,
+    "compensation_min": 0.30,
+    "compensation_max": 0.70,
+    "max_fleet_log_entries": 25,
     "combat_chances": {
       "equal_levels_defense_win": 0.70,
       "diff_1_strong_win": 0.50,
@@ -245,6 +266,12 @@
       "diff_3_strong_win": 0.97,
       "diff_4_strong_win": 0.995,
       "diff_5plus_strong_win": 1.0
+    },
+    "fleet_bonuses": {
+      "scout_recon_per_speed": 0.15,
+      "cargo_mining_per_capacity": 0.008,
+      "defense_power_per_combat": 0.04,
+      "max_bonus_percent": 50
     }
   }
 }

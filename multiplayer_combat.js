@@ -16,15 +16,19 @@ setInterval(() => {
     }
 }, 30 * 60 * 1000);
 
-const SHIP_CONFIG = {
-    scout:  { travel_seconds: 300,  label: 'Разведчик',  icon: '🔭' },
-    combat: { travel_seconds: 480,  label: 'Боевой',     icon: '⚔️' },
-    cargo:  { travel_seconds: 360,  label: 'Грузовой',   icon: '🚚' },
-};
+function getShipTravelSeconds(shipType) {
+    const cfg = window.gameConfig?.fleet_config;
+    const defaults = { scout: 30, combat: 45, cargo: 40 };
+    return cfg?.[shipType]?.travel_time_sec ?? defaults[shipType] ?? 60;
+}
+
+const SHIP_ICONS = { scout: '🔭', combat: '⚔️', cargo: '🚚' };
+const SHIP_LABELS = { scout: 'Разведчик', combat: 'Боевой', cargo: 'Грузовой' };
 
 export async function sendShip(attackerId, targetId, shipType) {
-    const cfg = SHIP_CONFIG[shipType];
-    if (!cfg) return { success: false, error: 'Неизвестный тип корабля' };
+    const icon = SHIP_ICONS[shipType] || '🚀';
+    const label = SHIP_LABELS[shipType] || shipType;
+    if (!SHIP_ICONS[shipType]) return { success: false, error: 'Неизвестный тип корабля' };
 
     if (attackerId === targetId) {
         return { success: false, error: 'Нельзя атаковать собственную базу' };
@@ -44,7 +48,7 @@ export async function sendShip(attackerId, targetId, shipType) {
     if (!ship) {
         return {
             success: false,
-            error: `Нет свободного ${cfg.icon} ${cfg.label} во флоте. Постройте его во вкладке КРАФТ.`
+            error: `Нет свободного ${icon} ${label} во флоте. Постройте его во вкладке КРАФТ.`
         };
     }
 
@@ -88,7 +92,7 @@ export async function sendShip(attackerId, targetId, shipType) {
     }
 
     const now = Date.now();
-    const travelTimeMs = cfg.travel_seconds * 1000;
+    const travelTimeMs = getShipTravelSeconds(shipType) * 1000;
     const arrivesAt = new Date(now + travelTimeMs);
     const returnsAt = new Date(now + travelTimeMs * 2);
 
@@ -109,7 +113,7 @@ export async function sendShip(attackerId, targetId, shipType) {
         combatMissionId = latestCombat?.id || null;
     }
 
-    const flightMinutes = cfg.travel_seconds / 60;
+    const flightMinutes = getShipTravelSeconds(shipType) / 60;
 
     const { data: mission, error } = await supabase
         .from('missions')
@@ -136,17 +140,17 @@ export async function sendShip(attackerId, targetId, shipType) {
 
     if (window.fleetModule) {
         window.fleetModule._addFleetLog(
-            `🚀 ${cfg.icon} ${ship.name} отправлен (прибытие: ${new Date(arrivesAt).toLocaleTimeString()})`
+            `🚀 ${icon} ${ship.name} отправлен (прибытие: ${new Date(arrivesAt).toLocaleTimeString()})`
         );
     }
 
     await pushNotification(attackerId, 'mission_sent', {
-        message: `🚀 Миссия отправлена (${cfg.icon} ${cfg.label}), прибытие через ${Math.round(flightMinutes)} мин`,
+        message: `🚀 Миссия отправлена (${icon} ${label}), прибытие через ${Math.round(flightMinutes)} мин`,
         payload: { mission_id: mission.id, ship_type: shipType, arrives_at: arrivesAt.toISOString() }
     });
 
     await pushNotification(targetId, 'incoming_ship', {
-        message: `⚠️ К вашей планете летит ${cfg.icon} ${cfg.label}! Прибудет через ${Math.floor(cfg.travel_seconds / 60)} мин.`,
+        message: `⚠️ К вашей планете летит ${icon} ${label}! Прибудет через ${Math.floor(getShipTravelSeconds(shipType) / 60)} мин.`,
         payload: { arrives_at: arrivesAt.toISOString(), mission_id: mission.id, ship_type: shipType }
     });
 
@@ -307,8 +311,9 @@ export async function processArrivedMissions(currentUserId) {
             }
 
             if (typeof window.showNotif === 'function') {
-                const cfg = SHIP_CONFIG[mission.ship_type];
-                window.showNotif(`✅ ${cfg?.icon || '🚀'} ${cfg?.label || 'Корабль'} вернулся!`, false);
+                const icon = SHIP_ICONS[mission.ship_type];
+                const label = SHIP_LABELS[mission.ship_type];
+                window.showNotif(`✅ ${icon || '🚀'} ${label || 'Корабль'} вернулся!`, false);
             }
 
             if (mission.ship_type === 'cargo' && mission.loot_result) {
@@ -384,7 +389,7 @@ async function _processScout(mission) {
             scout_data: scoutData,
         })
         .eq('id', mission.id)
-        .eq('status', 'arrived');
+        .eq('status', 'processing');
 
     if (error) {
         console.warn(`Ошибка обновления scout миссии ${mission.id}:`, error);
@@ -412,7 +417,7 @@ async function _processCombat(mission) {
         await supabase.from('missions').update({
             status: 'returning',
             loot: loot
-        }).eq('id', mission.id).eq('status', 'arrived');
+        }).eq('id', mission.id).eq('status', 'processing');
 
         await pushNotification(mission.target_id, 'under_attack', {
             message: `💥 Ваша планета атакована! Потери: ${_formatLoot(loot)}`,
@@ -472,7 +477,7 @@ async function _processCargo(mission) {
             loot_result: loot,
         })
         .eq('id', mission.id)
-        .eq('status', 'arrived');
+        .eq('status', 'processing');
 
     if (error) {
         console.warn(`Ошибка обновления cargo миссии ${mission.id}:`, error);

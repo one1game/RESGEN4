@@ -1949,7 +1949,7 @@ impl RebelSystem {
     ) {
         let duration = 25 + (self.psych_pressure * 15.0) as i32;
         state.autoclick_debuff_remaining = duration;
-        state.autoclick_debuff_percent = demoralization as f32;
+        state.autoclick_debuff_percent = (demoralization as f32).min(0.9);  // ← cap 90%
         summary.autoclick_damaged = true;
         summary.player_harmed = demoralization > 0.0;
         events.push(GameEvent::LogMessage(format!(
@@ -2195,9 +2195,15 @@ impl RebelSystem {
             } else {
                 1
             };
-            let activity_bonus = (config.rebels.activity_bonus_per_level
+            // Используем вероятностную модель вместо детерминированной
+            let activity_chance = config.rebels.activity_bonus_per_level
                 * state.upgrades.mining as f64
-                * increase as f64) as u32;
+                * increase as f64;
+            let activity_bonus = if rand::thread_rng().gen::<f64>() < activity_chance {
+                increase
+            } else {
+                0
+            };
             state.rebel_activity = (state.rebel_activity + increase + activity_bonus)
                 .min(config.rebels.max_activity);
 

@@ -664,18 +664,11 @@
             <div class="tab-content" id="trade-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>💱 ТОРГОВЫЙ ТЕРМИНАЛ</span>
+                        <span>💱 P2P ТОРГОВЛЯ</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
-                        <div class="trade-container">
-                            <div class="trade-mode-toggle">
-                                <button id="buyModeBtn" class="trade-mode-btn active">🔄 ОБМЕН</button>
-                                <button id="sellModeBtn" class="trade-mode-btn">💰 ПРОДАЖА</button>
-                            </div>
-                            <div id="buyItemsContainer" class="trade-items-grid"></div>
-                            <div id="sellItemsContainer" class="trade-items-grid" style="display: none;"></div>
-                        </div>
+                        <div id="tradeContainer"></div>
                     </div>
                 </div>
             </div>
@@ -1076,6 +1069,7 @@
             <span class="btn-icon">⚙️</span>
             <span class="btn-text">ДОБЫЧА</span>
             <span id="miningBonusFloat" class="mining-bonus">+0%</span>
+            <span id="clickComboIndicator" class="click-combo-indicator" style="display:none;"></span>
         </div>
     </div>
 

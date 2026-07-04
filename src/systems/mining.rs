@@ -39,23 +39,27 @@ impl MiningSystem {
 
         let base_heat: f64 = if is_auto { 0.8 } else { 1.8 };
         let overheat_multiplier = 1.0 + (state.turbine_heat as f64 / 120.0);
-        let upgrade_reduction = 1.0 - (state.turbine_upgrade_level as f64 * 0.10).min(0.50);
-
-        let cooling_module_reduction = 1.0 - (state.upgrades.cooling_level as f64 * 0.15).min(0.75);
-        let consciousness_cooling = 1.0 - bonuses.heat_reduction;
+        // Суммируем все бонусы охлаждения, но ограничиваем максимум 70%
+        let total_cooling_bonus =
+            (state.turbine_upgrade_level as f64 * 0.04) +
+            (state.upgrades.cooling_level as f64 * 0.05) +
+            bonuses.heat_reduction;
+        let heat_multiplier = (1.0 - total_cooling_bonus).max(0.30); // минимум 30% нагрева всегда
 
         let jitter = 0.88 + rng.gen::<f64>() * 0.24;
 
         let heat_increase = base_heat
             * overheat_multiplier
-            * upgrade_reduction
-            * cooling_module_reduction
-            * consciousness_cooling
+            * heat_multiplier
             * jitter;
 
         let old_heat = state.turbine_heat;
-        let new_heat = ((state.turbine_heat as f64 + heat_increase).min(100.0)) as u32;
-        state.turbine_heat = new_heat;
+        // Накапливаем дробную часть, чтобы малые значения реально прибавлялись
+        state.turbine_heat_fraction += heat_increase;
+        let whole = state.turbine_heat_fraction.floor() as u32;
+        state.turbine_heat_fraction -= whole as f64;
+        state.turbine_heat = (state.turbine_heat + whole).min(100);
+        let new_heat = state.turbine_heat;
 
         if new_heat >= 100 && old_heat < 100 {
             state.turbine_cooling = true;
@@ -68,17 +72,19 @@ impl MiningSystem {
         };
 
         let mining_lvl = state.upgrades.mining as f64;
+        let auto_multiplier = if is_auto { self.config.auto_click_chance_multiplier } else { 1.0 };
 
         let mut coal_chance = (self.config.base_chances.coal
             + if state.coal_enabled { self.config.coal_bonus } else { 0.0 }
             + mining_lvl * self.config.upgrade_bonus)
-            * heat_penalty;
+            * heat_penalty
+            * auto_multiplier;
 
         let mut trash_chance =
-            (self.config.base_chances.trash + mining_lvl * 0.005) * heat_penalty;
+            (self.config.base_chances.trash + mining_lvl * 0.005) * heat_penalty * auto_multiplier;
 
         let mut ore_chance =
-            (self.config.base_chances.ore + mining_lvl * 0.003) * heat_penalty;
+            (self.config.base_chances.ore + mining_lvl * 0.003) * heat_penalty * auto_multiplier;
 
         coal_chance = (coal_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
         trash_chance = (trash_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;

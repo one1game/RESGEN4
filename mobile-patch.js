@@ -90,72 +90,41 @@
     let touchStartY = 0;
     let touchStartTime = 0;
     let clickProcessed = false;
-    const LONG_PRESS_MS = 600;
+    const LONG_PRESS_MS = window.gameConfig?.auto_click_config?.long_press_duration ?? 600;
     const MOVE_THRESHOLD = 10;
 
-    btn.addEventListener('mousedown', (e) => {
+    const handlePointerDown = (e) => {
       e.preventDefault();
       isLongPress = false;
-      pressTimer = setTimeout(() => {
-        isLongPress = true;
-        Haptic.longPress();
-        if (typeof window.toggleAutoClicking === 'function') {
-          window.toggleAutoClicking();
-        }
-      }, LONG_PRESS_MS);
-    });
-
-    btn.addEventListener('mouseup', () => {
-      clearTimeout(pressTimer);
-      if (!isLongPress && typeof window.handleClick === 'function') {
-        window.handleClick();
-      }
-      isLongPress = false;
-      btn.style.transform = '';
-    });
-
-    btn.addEventListener('mouseleave', () => {
-      clearTimeout(pressTimer);
-      isLongPress = false;
-      btn.style.transform = '';
-    });
-
-    btn.addEventListener('touchstart', (e) => {
-      const touch = e.touches[0];
+      clickProcessed = false;
+      const touch = e.touches ? e.touches[0] : e;
       touchStartX = touch.clientX;
       touchStartY = touch.clientY;
       touchStartTime = Date.now();
-      isLongPress = false;
-      clickProcessed = false;
-
-      btn.style.transform = 'scale(0.92)';
+      btn.style.transform = 'scale(0.94)';
       Haptic.light();
 
       pressTimer = setTimeout(() => {
         isLongPress = true;
         Haptic.longPress();
         btn.style.transform = '';
+        // ⚠️ Проверяем перегрев перед запуском автокликера
+        const heat = window.cachedRustStats?.turbine_heat ?? 0;
+        if (heat >= 100) {
+          if (typeof window.addToLog === 'function') {
+            window.addToLog('🌡️ Перегрев! Охладите турбину перед запуском автокликов', 'warning');
+          }
+          return;
+        }
         if (typeof window.toggleAutoClicking === 'function') {
           window.toggleAutoClicking();
         }
       }, LONG_PRESS_MS);
-    }, { passive: true });
+    };
 
-    btn.addEventListener('touchmove', (e) => {
-      const touch = e.touches[0];
-      const deltaX = Math.abs(touch.clientX - touchStartX);
-      const deltaY = Math.abs(touch.clientY - touchStartY);
-
-      if (deltaX > MOVE_THRESHOLD || deltaY > MOVE_THRESHOLD) {
-        clearTimeout(pressTimer);
-        isLongPress = false;
-      }
-    }, { passive: true });
-
-    btn.addEventListener('touchend', (e) => {
-      e.preventDefault();
+    const handlePointerUp = (e) => {
+      if (e) e.preventDefault();
       clearTimeout(pressTimer);
-
       const elapsed = Date.now() - touchStartTime;
       btn.style.transform = '';
 
@@ -167,14 +136,27 @@
         }
       }
       isLongPress = false;
-    });
+    };
 
-    btn.addEventListener('touchcancel', () => {
-      clearTimeout(pressTimer);
-      isLongPress = false;
-      btn.style.transform = '';
-      clickProcessed = false;
-    });
+    const handlePointerMove = (e) => {
+      const touch = e.touches ? e.touches[0] : e;
+      const deltaX = Math.abs(touch.clientX - touchStartX);
+      const deltaY = Math.abs(touch.clientY - touchStartY);
+      if (deltaX > MOVE_THRESHOLD || deltaY > MOVE_THRESHOLD) {
+        clearTimeout(pressTimer);
+        isLongPress = false;
+        btn.style.transform = '';
+      }
+    };
+
+    btn.addEventListener('mousedown', handlePointerDown);
+    btn.addEventListener('mouseup', handlePointerUp);
+    btn.addEventListener('mouseleave', handlePointerUp);
+    btn.addEventListener('mousemove', handlePointerMove);
+    btn.addEventListener('touchstart', handlePointerDown, { passive: false });
+    btn.addEventListener('touchend', handlePointerUp, { passive: false });
+    btn.addEventListener('touchmove', handlePointerMove, { passive: true });
+    btn.addEventListener('touchcancel', handlePointerUp, { passive: true });
 
     const observer = new MutationObserver(() => {
       if (btn.classList.contains('auto-clicking')) {

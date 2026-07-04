@@ -80,6 +80,10 @@ function getBlueprintsStorageKey() {
 }
 
 function getFleetStorageKey() {
+    // ✅ Используем fleetModule._getStorageKey если доступен — единый источник истины
+    if (window.fleetModule && typeof window.fleetModule._getStorageKey === 'function') {
+        return window.fleetModule._getStorageKey();
+    }
     const userId = window.currentUser?.id;
     return userId ? `corebox_fleet_${userId}` : 'corebox_fleet';
 }
@@ -88,17 +92,16 @@ export async function applyPendingLoot() {
     const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
     if (Object.keys(pending).length === 0) return;
     if (!window.game) return;
-
+    // ✅ СНАЧАЛА очищаем — защита от повторного вызова
+    localStorage.removeItem('corebox_pending_loot');
     for (const [res, amt] of Object.entries(pending)) {
         if (amt > 0 && typeof window.game.add_resource === 'function') {
             window.game.add_resource(res, amt);
         }
     }
-
     if (window.addToLog) {
         window.addToLog(`📦 Восстановлен лут: ${Object.entries(pending).map(([r,a])=>`${a} ${r}`).join(', ')}`);
     }
-    localStorage.removeItem('corebox_pending_loot');
 }
 
 function getFleet() {
@@ -133,8 +136,13 @@ function restoreFleet(fleet) {
         localStorage.setItem(key, JSON.stringify(validFleet));
         if (window.fleetModule) {
             window.fleetModule.ships = validFleet;
+            // ✅ НОВОЕ: восстановление защиты и синхронизация
+            window.fleetModule._loadDefenseShip();
             if (window.fleetModule._renderFleetTab) {
                 window.fleetModule._renderFleetTab();
+            }
+            if (window.fleetModule._syncFleetStatus) {
+                window.fleetModule._syncFleetStatus();
             }
         }
         console.log(`📦 restoreFleet: восстановлено ${validFleet.length} кораблей`);
@@ -218,10 +226,11 @@ function migrateSave(oldSave, userId) {
         let consciousness = oldSave.neuro?.consciousness || 0.05;
         consciousness = normalizeNeuroConsciousness(consciousness);
 
+        const now = Date.now();
         const migrated = {
             version: 3,
-            timestamp: oldSave.timestamp || Date.now(),
-            _savedAt: oldSave._savedAt || oldSave.timestamp || Date.now(),
+            timestamp: now,
+            _savedAt: now,
             last_game_change: Date.now(),
             inventory: oldSave.inventory || {},
             upgrades: oldSave.upgrades || {},

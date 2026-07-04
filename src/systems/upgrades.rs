@@ -168,7 +168,7 @@ impl UpgradeSystem {
             return events;
         }
 
-        let cost: u32 = 500 * (lvl + 1);
+        let cost: u32 = (200.0 * 1.3_f64.powi(lvl as i32)) as u32;
 
         if state.inventory.coal >= cost {
             state.inventory.coal -= cost;
@@ -225,40 +225,4 @@ impl UpgradeSystem {
         events
     }
 
-    pub fn upgrade_consciousness(&self, state: &mut GameState, neuro_ecosystem: &mut crate::systems::neuro_ecosystem::NeuroEcosystem) -> Vec<GameEvent> {
-        let mut events = Vec::new();
-        let lvl = state.upgrades.crit_level;
-
-        if lvl >= 10 {
-            events.push(GameEvent::LogMessage("🧠 Нейро-сознание уже максимально!".to_string()));
-            return events;
-        }
-
-        let cost_chips = 50 + lvl * 25;
-        let cost_plasma = 10 + lvl * 5;
-
-        if state.inventory.chips >= cost_chips && state.inventory.plasma >= cost_plasma {
-            state.inventory.chips -= cost_chips;
-            state.inventory.plasma -= cost_plasma;
-            state.upgrades.crit_level += 1;
-
-            let evo_bonus = 0.02 * (neuro_ecosystem.evolution_level as f64);
-            let defend_bonus = 0.01 * (state.attacks_defended as f64).min(10.0);
-            let boost = evo_bonus + defend_bonus;
-
-            neuro_ecosystem.system_consciousness = (neuro_ecosystem.system_consciousness + boost).min(1.0);
-
-            events.push(GameEvent::LogMessage(format!(
-                "🧠 Нейро-сознание увеличено до ур.{}! (+{:.0}% сознания, -{}🎛️, -{}⚡)",
-                state.upgrades.crit_level, boost * 100.0, cost_chips, cost_plasma
-            )));
-        } else {
-            events.push(GameEvent::LogMessage(format!(
-                "❌ Нужно {} чипов и {} плазмы для апгрейда сознания",
-                cost_chips, cost_plasma
-            )));
-        }
-
-        events
-    }
 }

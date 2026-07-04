@@ -198,6 +198,7 @@ pub struct GameState {
     pub rebel_activity: u32,
 
     pub turbine_heat: u32,
+    pub turbine_heat_fraction: f64,
     pub turbine_upgrade_level: u32,
     pub turbine_cooling: bool,
 
@@ -215,6 +216,7 @@ pub struct GameState {
     pub max_computational_power: u32,
     pub last_auto_click_time: i32,
     pub manual_clicks: u32,
+    pub total_manual_clicks: u32,
 
     pub rebel_protection_nights: u32,
     pub rebel_protection_active: bool,
@@ -244,6 +246,7 @@ pub struct GameState {
 
     pub temporary_mining_bonus: u32,
     pub temporary_defense_bonus: u32,
+    pub fleet_power_bonus: u32,
     pub temporary_bonus_remaining: i32,
 
     pub highest_rebel_activity: u32,
@@ -460,7 +463,13 @@ impl GameState {
             self.last_fear_event_time = self.tick_count as i32;
         }
 
-        let cooling = 2 + self.turbine_upgrade_level + self.upgrades.cooling_level;
+        // Базовое 1.5, +0.25 за уровень турбины, +0.30 за уровень охлаждения
+        // При ур.3+3: 1.5 + 0.75 + 0.9 = 3.15 → 4 в секунду
+        // При ур.8+8: 1.5 + 2.0 + 2.4 = 5.9 → 6 в секунду (максимум)
+        let cooling_f = 1.5
+            + (self.turbine_upgrade_level as f64 * 0.25)
+            + (self.upgrades.cooling_level as f64 * 0.30);
+        let cooling = (cooling_f.ceil() as u32).max(1);
         if self.turbine_heat > 0 {
             self.turbine_heat = self.turbine_heat.saturating_sub(cooling);
             if self.turbine_heat == 0 && self.turbine_cooling {
@@ -807,6 +816,7 @@ impl Default for GameState {
             nights_survived: 0,
             rebel_activity: 0,
             turbine_heat: 0,
+            turbine_heat_fraction: 0.0,
             turbine_upgrade_level: 0,
             turbine_cooling: false,
             last_click_time: 0,
@@ -821,6 +831,7 @@ impl Default for GameState {
             max_computational_power: 1000,
             last_auto_click_time: 0,
             manual_clicks: 0,
+            total_manual_clicks: 0,
             rebel_protection_nights: 0,
             rebel_protection_active: false,
             total_coal_mined: 0,
@@ -844,6 +855,7 @@ impl Default for GameState {
             total_defense_activations: 0,
             temporary_mining_bonus: 0,
             temporary_defense_bonus: 0,
+            fleet_power_bonus: 0,
             temporary_bonus_remaining: 0,
             highest_rebel_activity: 0,
             longest_defense_streak: 0,

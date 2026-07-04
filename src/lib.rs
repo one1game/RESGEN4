@@ -75,6 +75,19 @@ pub fn apply_config_from_admin(config_json: String) -> String {
     }
 }
 
+struct StatsGuard<'a>(&'a Cell<bool>);
+impl<'a> StatsGuard<'a> {
+    fn new(cell: &'a Cell<bool>) -> Self {
+        cell.set(true);
+        StatsGuard(cell)
+    }
+}
+impl<'a> Drop for StatsGuard<'a> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
+
 impl CoreGame {
     fn build_universal_save_value(&self, state: &GameState, timestamp_key: &str) -> serde_json::Value {
         let mut save = serde_json::json!({
@@ -227,12 +240,15 @@ impl CoreGame {
         let saved_map_y = loaded.map_y;
 
         self.state = loaded;
+        // ✅ Для старых сейвов: total_manual_clicks не должен быть меньше manual_clicks
+        self.state.total_manual_clicks = self.state.total_manual_clicks.max(self.state.manual_clicks);
         self.state.active_planet_missions = saved_planet_missions;
         self.state.planets = saved_planets;
         self.state.map_x = saved_map_x;
         self.state.map_y = saved_map_y;
 
-        self.state.max_computational_power = old_max.max(saved_max_power);
+        let config_max = Self::load_config_from_storage().auto_click_config.max_computational_power;
+        self.state.max_computational_power = old_max.max(saved_max_power).max(config_max);
         self.state.power_tier = saved_power_tier.max(old_power_tier);
 
         if saved_power > 0 {
@@ -560,16 +576,24 @@ impl CoreGame {
         }
 
         self.state.manual_clicks += 1;
-        let cfg = CONFIG.lock().unwrap();
-        if self.state.manual_clicks >= cfg.auto_click_config.clicks_per_power {
-            let base = cfg.auto_click_config.power_per_manual_click;
+        self.state.total_manual_clicks += 1;
+        let clicks_per_power;
+        let base;
+        {
+            let cfg = CONFIG.lock().unwrap();
+            clicks_per_power = cfg.auto_click_config.clicks_per_power;
+            base = cfg.auto_click_config.power_per_manual_click;
+        }
+        // ✅ while вместо if — сливаем все накопившиеся клики
+        while self.state.manual_clicks >= clicks_per_power {
             let tier = self.state.power_tier;
 
             let bonuses = self.neuro_ecosystem.get_consciousness_bonuses();
             let consciousness_power_bonus = bonuses.power_bonus;
 
-            let power = (base + tier + (tier * tier) / 5 + consciousness_power_bonus).min(100);
-            self.state.manual_clicks = 0;
+            let dynamic_cap = 100 + (self.state.power_tier * 15) + (self.neuro_ecosystem.evolution_level * 10);
+            let power = (base + tier + consciousness_power_bonus).min(dynamic_cap as u32);
+            self.state.manual_clicks = self.state.manual_clicks.saturating_sub(clicks_per_power);
             self.state.computational_power = (self.state.computational_power + power)
                 .min(self.state.max_computational_power);
             events.push(GameEvent::ComputationalPowerAdded { amount: power, total: self.state.computational_power });
@@ -748,23 +772,29 @@ impl CoreGame {
         events.extend(self.mining_system.passive_mining(&mut self.state, &self.neuro_ecosystem));
 
         if self.state.auto_clicking {
+            // ⚠️ Фикс: перегрев блокирует автодобычу
+            if self.state.turbine_heat >= 100 {
+                self.state.auto_clicking = false;
+                events.push(GameEvent::AutoClickingStopped);
+                events.push(GameEvent::LogMessage("⏹️ Автодобыча остановлена: турбина перегрета".to_string()));
+            } else {
             self.state.last_auto_click_time += 1;
             let interval = if self.state.autoclick_debuff_remaining > 0 {
                 (cfg.auto_click_config.auto_click_interval as f64 * (1.0 + self.state.autoclick_debuff_percent as f64)) as i32
             } else { cfg.auto_click_config.auto_click_interval };
             if self.state.last_auto_click_time >= interval {
-                let cost = cfg.auto_click_config.power_per_auto_click + self.state.power_tier;
+                let cost = cfg.auto_click_config.power_per_auto_click;
                 if self.state.computational_power >= cost {
                     self.state.computational_power -= cost;
                     self.state.last_auto_click_time = 0;
                     events.extend(self.mining_system.auto_mine_resources(&mut self.state, &self.neuro_ecosystem));
-                    events.extend(self.check_power_tier());
                 } else {
                     self.state.auto_clicking = false;
                     events.push(GameEvent::ComputationalPowerDepleted);
                     events.push(GameEvent::LogMessage("❌ Недостаточно мощности! Автоклики отключены".to_string()));
                 }
             }
+        }
         }
 
         if self.state.current_quest < self.state.quests.len() {
@@ -936,6 +966,67 @@ impl CoreGame {
     }
 
     #[wasm_bindgen]
+    pub fn add_manual_click_with_multiplier(&mut self, mult: u32) {
+        let mult = mult.max(1).min(5);
+        self.state.manual_clicks += mult;
+        self.state.total_manual_clicks += mult;
+        let clicks_per_power;
+        let base;
+        {
+            let cfg = CONFIG.lock().unwrap();
+            clicks_per_power = cfg.auto_click_config.clicks_per_power;
+            base = cfg.auto_click_config.power_per_manual_click;
+        }
+        // ✅ while-loop обрабатывает все накопленные клики (включая криты x5)
+        let mut events = Vec::new();
+        while self.state.manual_clicks >= clicks_per_power {
+            let tier = self.state.power_tier;
+            let bonuses = self.neuro_ecosystem.get_consciousness_bonuses();
+            let dynamic_cap = 100 + (self.state.power_tier * 15) + (self.neuro_ecosystem.evolution_level * 10);
+            let fleet_bonus = self.state.fleet_power_bonus;
+            let power = (base + tier + bonuses.power_bonus + fleet_bonus).min(dynamic_cap as u32);
+            self.state.manual_clicks = self.state.manual_clicks.saturating_sub(clicks_per_power);
+            self.state.computational_power = (self.state.computational_power + power)
+                .min(self.state.max_computational_power);
+            events.extend(self.check_power_tier());
+        }
+        events.extend(self.mine_resources_internal());
+        self.handle_events(events);
+        self.force_save_throttled();
+        self.statistics_dirty.set(true);
+    }
+
+    #[wasm_bindgen]
+    pub fn add_manual_click_with_combo(&mut self, combo_power_bonus: u32) {
+        self.state.manual_clicks += 1;
+        self.state.total_manual_clicks += 1;
+        let clicks_per_power;
+        let base;
+        {
+            let cfg = CONFIG.lock().unwrap();
+            clicks_per_power = cfg.auto_click_config.clicks_per_power;
+            base = cfg.auto_click_config.power_per_manual_click;
+        }
+        // ✅ while вместо if — сливаем все накопившиеся клики
+        let mut events = Vec::new();
+        while self.state.manual_clicks >= clicks_per_power {
+            let tier = self.state.power_tier;
+            let bonuses = self.neuro_ecosystem.get_consciousness_bonuses();
+            let dynamic_cap = 100 + (self.state.power_tier * 15) + (self.neuro_ecosystem.evolution_level * 10);
+            let fleet_bonus = self.state.fleet_power_bonus;
+            let power = (base + tier + bonuses.power_bonus + combo_power_bonus + fleet_bonus).min(dynamic_cap as u32);
+            self.state.manual_clicks = self.state.manual_clicks.saturating_sub(clicks_per_power);
+            self.state.computational_power = (self.state.computational_power + power)
+                .min(self.state.max_computational_power);
+            events.extend(self.check_power_tier());
+        }
+        events.extend(self.mine_resources_internal());
+        self.handle_events(events);
+        self.force_save_throttled();
+        self.statistics_dirty.set(true);
+    }
+
+    #[wasm_bindgen]
     pub fn add_manual_click(&mut self) {
         let events = self.add_manual_click_internal();
         self.handle_events(events);
@@ -1103,17 +1194,15 @@ impl CoreGame {
             return "{}".to_string();
         }
 
-        self.in_get_statistics.set(true);
+        let _guard = StatsGuard::new(&self.in_get_statistics);
 
         if !self.statistics_dirty.get() {
             let cached = self.cached_statistics.take();
             if !cached.is_empty() {
                 self.cached_statistics.set(cached.clone());
-                self.in_get_statistics.set(false);
                 return cached;
             }
         }
-
         let fleet_shield_remaining = if self.state.fleet_shield_active {
             (self.state.fleet_shield_expires_at - self.state.tick_count).max(0) as i32
         } else {
@@ -1138,8 +1227,11 @@ impl CoreGame {
             0
         };
 
+        let manual_clicks_remainder = self.state.manual_clicks;
+
         let result = serde_json::json!({
-            "total_clicks": self.state.manual_clicks,
+            "total_clicks": self.state.total_manual_clicks,
+            "manual_clicks_remainder": manual_clicks_remainder,
             "total_mined": self.state.total_mined,
             "nights_survived": self.state.nights_survived,
             "rebel_attacks_count": self.state.rebel_attacks_count,
@@ -1205,6 +1297,7 @@ impl CoreGame {
             "map_y": self.state.map_y,
             "temporary_mining_bonus": self.state.temporary_mining_bonus,
             "temporary_defense_bonus": self.state.temporary_defense_bonus,
+            "fleet_power_bonus": self.state.fleet_power_bonus,
             "temporary_bonus_remaining": self.state.temporary_bonus_remaining,
 
             "blueprint_locked": (self.state.tick_count) < self.state.blueprint_locked_until,
@@ -1232,7 +1325,7 @@ impl CoreGame {
 
         self.cached_statistics.set(result.clone());
         self.statistics_dirty.set(false);
-        self.in_get_statistics.set(false);
+        // ✅ in_get_statistics сбросится автоматически через StatsGuard
 
         result
     }
@@ -1294,12 +1387,15 @@ impl CoreGame {
 
     #[wasm_bindgen]
     pub fn design_ship(&mut self, ship_type: String) -> String {
-        let cost = match ship_type.as_str() {
+        let base_cost = match ship_type.as_str() {
             "cargo" => 200,
             "scout" => 50,
             "combat" => 800,
             _ => return "error".to_string()
         };
+        // ✅ Применяем скидку ИИ (как в JS design.js)
+        let discount_percent = (self.neuro_ecosystem.system_consciousness * 100.0 / 20.0 * 0.03).min(0.30);
+        let cost = ((base_cost as f64) * (1.0 - discount_percent)).ceil().max(1.0) as u32;
 
         if self.state.computational_power >= cost {
             self.state.computational_power -= cost;
@@ -1309,7 +1405,7 @@ impl CoreGame {
                 "combat" => self.state.blueprint_combat_unlocked = true,
                 _ => {}
             }
-            self.log_to_js(&format!("📐 Создан чертеж {} корабля!", ship_type));
+            self.log_to_js(&format!("📐 Создан чертеж {} корабля! (стоимость: {}⚡)", ship_type, cost));
             self.force_save_throttled();
             self.statistics_dirty.set(true);
             "success".to_string()
@@ -1397,6 +1493,16 @@ impl CoreGame {
                 ship_type, discount_text, ore, chips, plasma));
 
             self.force_save_throttled();
+            // ✅ Синхронизируем флот с JS
+            if let Some(window) = web_sys::window() {
+                if let Ok(fleet_module) = js_sys::Reflect::get(&window, &JsValue::from_str("fleetModule")) {
+                    if let Ok(save_fn) = js_sys::Reflect::get(&fleet_module, &JsValue::from_str("saveFleet")) {
+                        if save_fn.is_function() {
+                            let _ = js_sys::Function::from(save_fn).call0(&fleet_module);
+                        }
+                    }
+                }
+            }
             "success".to_string()
         } else {
             self.log_to_js(&format!(
@@ -1411,8 +1517,18 @@ impl CoreGame {
             if let Ok(fleet_module) = js_sys::Reflect::get(&window, &JsValue::from_str("fleetModule")) {
                 if let Ok(add_fn) = js_sys::Reflect::get(&fleet_module, &JsValue::from_str("addShip")) {
                     if add_fn.is_function() {
-                        let _ = js_sys::Function::from(add_fn).call1(&fleet_module, &JsValue::from_str(ship_type));
+                        let result = js_sys::Function::from(add_fn).call1(&fleet_module, &JsValue::from_str(ship_type));
+                        // ✅ Проверяем результат addShip
+                        if let Ok(result_obj) = result {
+                            if let Ok(success_val) = js_sys::Reflect::get(&result_obj, &JsValue::from_str("success")) {
+                                if success_val.is_falsy() {
+                                    self.log_to_js("❌ Не удалось добавить корабль во флот (лимит или ошибка)");
+                                    return;
+                                }
+                            }
+                        }
                         self.log_to_js("🚢 Корабль добавлен во флот!");
+                        // ✅ УДАЛЕНО: дублирование в журнал флота (JS уже пишет красивое имя)
                     }
                 }
             }
@@ -1469,7 +1585,14 @@ impl CoreGame {
 
     #[wasm_bindgen]
     pub fn set_fleet_cargo_bonus(&mut self, bonus: u32) {
-        self.state.temporary_mining_bonus = self.state.temporary_mining_bonus.max(bonus).min(100);
+        // ✅ Перезаписываем бонус флота, а не берём максимум
+        self.state.temporary_mining_bonus = bonus.min(100);
+        self.statistics_dirty.set(true);
+    }
+
+    #[wasm_bindgen]
+    pub fn set_fleet_power_bonus(&mut self, bonus: u32) {
+        self.state.fleet_power_bonus = bonus;
         self.statistics_dirty.set(true);
     }
 
@@ -1554,15 +1677,21 @@ impl CoreGame {
     #[wasm_bindgen]
     pub fn add_power(&mut self, amount: u32) {
         self.state.computational_power = (self.state.computational_power + amount).min(self.state.max_computational_power);
+        let events = self.check_power_tier();
+        self.handle_events(events);
         self.force_save_throttled();
         self.statistics_dirty.set(true);
     }
 
     #[wasm_bindgen]
-    pub fn subtract_power(&mut self, amount: u32) {
-        self.state.computational_power = self.state.computational_power.saturating_sub(amount);
+    pub fn subtract_power(&mut self, amount: u32) -> bool {
+        if self.state.computational_power < amount {
+            return false;
+        }
+        self.state.computational_power -= amount;
         self.force_save_throttled();
         self.statistics_dirty.set(true);
+        true
     }
 
     #[wasm_bindgen]
@@ -1751,6 +1880,7 @@ impl CoreGame {
         let ship_id = ship_data["id"].as_str().unwrap_or("").to_string();
         let ship_name = ship_data["name"].as_str().unwrap_or("Корабль").to_string();
         let ship_type = ship_data["type"].as_str().unwrap_or("cargo").to_string();
+        let cargo_capacity = ship_data["capacity"].as_u64().unwrap_or(100) as u32;
 
         let planet_index = self.state.planets.iter().position(|p| p.id == planet_id);
         let planet_index = match planet_index {
@@ -1765,7 +1895,6 @@ impl CoreGame {
 
         let planet = self.state.planets[planet_index].clone();
 
-        let cargo_capacity = 100;
         let mut coal = planet.resources_remaining.coal.min(cargo_capacity);
         let mut plasma = planet.resources_remaining.plasma.min(cargo_capacity);
         let mut ore = planet.resources_remaining.ore.min(cargo_capacity);

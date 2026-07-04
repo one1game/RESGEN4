@@ -47,6 +47,7 @@ pub struct MiningConfig {
     pub critical_chance: f64,
     pub critical_multiplier: u32,
     pub passive_chances: PassiveChances,
+    pub auto_click_chance_multiplier: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -248,6 +249,7 @@ impl Default for GameConfig {
                     trash: 0.008,
                     ore: 0.006,
                 },
+                auto_click_chance_multiplier: 0.8,
             },
             economy_config: EconomyConfig {
                 trash_base_price: 2,
@@ -343,10 +345,10 @@ impl Default for GameConfig {
                 max_computational_power: 1000,
                 clicks_per_power: 8,
                 power_per_manual_click: 4,
-                auto_click_interval: 8,
+                auto_click_interval: 2,
                 power_per_auto_click: 3,
                 use_same_chances_as_manual: true,
-                auto_click_chance_multiplier: 1.0,
+                auto_click_chance_multiplier: 0.8,
                 long_press_duration: 600,
                 visual_feedback: true,
             },

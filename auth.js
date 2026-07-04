@@ -13,6 +13,10 @@ function getAuthChannel() {
             _authChannel.onmessage = (e) => {
                 if (e.data.type === 'logout' && e.data.sessionId !== _sessionId) {
                     console.log('🔓 Выход из системы в другой вкладке');
+                    // ✅ Триггерим GameBus для всех подписчиков
+                    if (typeof GameBus !== 'undefined' && typeof EVENTS !== 'undefined' && EVENTS?.LOGOUT) {
+                        GameBus.emit(EVENTS.LOGOUT);
+                    }
                     if (_onLogoutCallback) _onLogoutCallback();
                 }
             };

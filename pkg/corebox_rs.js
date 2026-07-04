@@ -24,6 +24,18 @@ export class CoreGame {
         wasm.coregame_add_manual_click(this.__wbg_ptr);
     }
     /**
+     * @param {number} combo_power_bonus
+     */
+    add_manual_click_with_combo(combo_power_bonus) {
+        wasm.coregame_add_manual_click_with_combo(this.__wbg_ptr, combo_power_bonus);
+    }
+    /**
+     * @param {number} mult
+     */
+    add_manual_click_with_multiplier(mult) {
+        wasm.coregame_add_manual_click_with_multiplier(this.__wbg_ptr, mult);
+    }
+    /**
      * @param {number} amount
      */
     add_power(amount) {
@@ -575,6 +587,12 @@ export class CoreGame {
         wasm.coregame_set_fleet_defense_bonus(this.__wbg_ptr, _bonus);
     }
     /**
+     * @param {number} bonus
+     */
+    set_fleet_power_bonus(bonus) {
+        wasm.coregame_set_fleet_power_bonus(this.__wbg_ptr, bonus);
+    }
+    /**
      * @param {number} max
      */
     set_max_power(max) {
@@ -606,9 +624,11 @@ export class CoreGame {
     }
     /**
      * @param {number} amount
+     * @returns {boolean}
      */
     subtract_power(amount) {
-        wasm.coregame_subtract_power(this.__wbg_ptr, amount);
+        const ret = wasm.coregame_subtract_power(this.__wbg_ptr, amount);
+        return ret !== 0;
     }
     /**
      * @param {string} resource
@@ -706,6 +726,10 @@ export function start_game() {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_is_falsy_402d3af0d5f09bc6: function(arg0) {
+            const ret = !arg0;
+            return ret;
+        },
         __wbg___wbindgen_is_function_5cd60d5cf78b4eef: function(arg0) {
             const ret = typeof(arg0) === 'function';
             return ret;
@@ -800,13 +824,6 @@ function __wbg_get_imports() {
             const ret = Reflect.get(arg0, arg1);
             return ret;
         }, arguments); },
-        __wbg_innerHTML_283adc96792b9ae9: function(arg0, arg1) {
-            const ret = arg1.innerHTML;
-            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-            const len1 = WASM_VECTOR_LEN;
-            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
-            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
-        },
         __wbg_instanceof_HtmlElement_02c2813e0b28553a: function(arg0) {
             let result;
             try {
@@ -857,10 +874,6 @@ function __wbg_get_imports() {
             const ret = arg0.nextElementSibling;
             return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
         },
-        __wbg_nextSibling_d0304086a31dfcad: function(arg0) {
-            const ret = arg0.nextSibling;
-            return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-        },
         __wbg_node_84ea875411254db1: function(arg0) {
             const ret = arg0.node;
             return ret;
@@ -882,9 +895,6 @@ function __wbg_get_imports() {
         __wbg_removeChild_d0ea60c90e6c7715: function() { return handleError(function (arg0, arg1) {
             const ret = arg0.removeChild(arg1);
             return ret;
-        }, arguments); },
-        __wbg_removeItem_9b48e0e4faf386fc: function() { return handleError(function (arg0, arg1, arg2) {
-            arg0.removeItem(getStringFromWasm0(arg1, arg2));
         }, arguments); },
         __wbg_require_b4edbdcf3e2a1ef0: function() { return handleError(function () {
             const ret = module.require;

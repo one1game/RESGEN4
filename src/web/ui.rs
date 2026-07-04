@@ -1,9 +1,7 @@
+use std::cell::Cell;
 use crate::game::{GameState, GameEvent, QuestType};
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, HtmlElement};
-
-const MAX_LOG_ENTRIES: usize = 50;
-const LOG_STORAGE_KEY: &str = "corebox_game_log";
 
 fn should_log(msg: &str) -> bool {
     if msg.contains("Пассивный рост") || msg.contains("КРИТИЧЕСКАЯ АКТИВНОСТЬ")
@@ -18,6 +16,7 @@ pub struct GameUI {
     document: Document,
     current_tab: String,
     log_box: Option<HtmlElement>,
+    log_entry_count: Cell<usize>,
     inventory_div: Option<HtmlElement>,
     quests_container: Option<HtmlElement>,
     craft_container: Option<HtmlElement>,
@@ -33,6 +32,7 @@ impl GameUI {
             document: doc.clone(),
             current_tab: "inventory".to_string(),
             log_box: doc.get_element_by_id("logBox").and_then(|e| e.dyn_into().ok()),
+            log_entry_count: Cell::new(0),
             inventory_div: doc.get_element_by_id("resourcesContainer").and_then(|e| e.dyn_into().ok()),
             quests_container: doc.get_element_by_id("questsContainer").and_then(|e| e.dyn_into().ok()),
             craft_container: doc.get_element_by_id("craftContainer").and_then(|e| e.dyn_into().ok()),
@@ -42,27 +42,16 @@ impl GameUI {
         }
     }
 
-    fn save_log(&self) {
-        if let Some(log) = &self.log_box {
-            if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok()).flatten() {
-                let _ = storage.set_item(LOG_STORAGE_KEY, &log.inner_html());
-            }
-        }
-    }
-
     fn trim_log(&self) {
         if let Some(log) = &self.log_box {
-            let mut count: i32 = 0;
-            let mut child = log.first_child();
-            while let Some(_) = child {
-                count += 1;
-                child = child.and_then(|c| c.next_sibling());
-            }
-            for _ in 0..(count as usize).saturating_sub(MAX_LOG_ENTRIES) {
+            let cfg = crate::CONFIG.lock().unwrap();
+            let max = cfg.ui_config.max_log_entries as usize;
+            for _ in 0..self.log_entry_count.get().saturating_sub(max) {
                 if let Some(first) = log.first_child() {
                     let _ = log.remove_child(&first);
                 }
             }
+            self.log_entry_count.set(self.log_entry_count.get().min(max));
         }
     }
 
@@ -72,9 +61,9 @@ impl GameUI {
             entry.set_class_name("log-entry");
             entry.set_text_content(Some(msg));
             log.append_child(&entry)?;
+            self.log_entry_count.set(self.log_entry_count.get() + 1);
             self.trim_log();
             log.set_scroll_top(log.scroll_height());
-            self.save_log();
         }
         Ok(())
     }
@@ -82,13 +71,7 @@ impl GameUI {
     pub fn clear_log(&self) {
         if let Some(log) = &self.log_box {
             log.set_inner_html("");
-            Self::clear_storage();
-        }
-    }
-
-    fn clear_storage() {
-        if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok()).flatten() {
-            let _ = storage.remove_item(LOG_STORAGE_KEY);
+            self.log_entry_count.set(0);
         }
     }
 
@@ -110,7 +93,7 @@ impl GameUI {
         match event {
             GameEvent::LogMessage(msg) => {
                 if should_log(msg) {
-                    self.add_log_entry(&format!("> {}", msg))?;
+                    self.add_log_entry(msg)?;
                 }
             }
             GameEvent::ResourceMined { resource, amount, critical } => {
@@ -205,6 +188,9 @@ impl GameUI {
     fn update_click_system(&self, state: &GameState) -> Result<(), JsValue> {
         let cfg = crate::CONFIG.lock().unwrap();
         let active = state.is_ai_active();
+        let clicks_per_power = cfg.auto_click_config.clicks_per_power;
+        // ✅ manual_clicks теперь всегда 0..clicks_per_power (остаток)
+        let remainder = if active { state.manual_clicks } else { 0 };
         let perc = (state.computational_power as f32 / state.max_computational_power as f32 * 100.0) as u32;
 
         if let Some(el) = self.document.get_element_by_id("powerFill") {
@@ -213,15 +199,16 @@ impl GameUI {
         if let Some(el) = self.document.get_element_by_id("powerText") {
             el.set_text_content(Some(&format!("{}/{}", state.computational_power, state.max_computational_power)));
         }
+        // ✅ ИСПРАВЛЕНО: показываем ОСТАТОК, а не сырые manual_clicks
         if let Some(el) = self.document.get_element_by_id("clickProgress") {
-            let click_perc = if active {
-                (state.manual_clicks as f32 / cfg.auto_click_config.clicks_per_power as f32 * 100.0) as u32
+            let click_perc = if clicks_per_power > 0 {
+                (remainder as f32 / clicks_per_power as f32 * 100.0) as u32
             } else { 0 };
             el.set_attribute("style", &format!("width: {}%", click_perc))?;
         }
         if let Some(el) = self.document.get_element_by_id("clickProgressText") {
             let text = if active {
-                format!("{}/{}", state.manual_clicks, cfg.auto_click_config.clicks_per_power)
+                format!("{}/{}", remainder, clicks_per_power)
             } else {
                 "СИСТЕМА НЕАКТИВНА".to_string()
             };
