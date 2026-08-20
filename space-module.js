@@ -34,6 +34,7 @@ export const spaceModule = {
     _incomingMissionInterval: null,
 
     _processingMissions: new Set(),
+    _warningedMissionIds: new Set(),
 
     neutralStations: [],
 
@@ -108,6 +109,9 @@ export const spaceModule = {
                    'ПОЛЛЮКС', 'КАСТОР', 'АЛЬТАИР', 'ДЕНЕБ', 'РЕГУЛ'],
 
     init(gameInstance, user) {
+        if (this.initialized || this._missionCheckInterval || this._incomingMissionInterval) {
+            this.destroy();
+        }
         if (this._animFrameId) {
             cancelAnimationFrame(this._animFrameId);
             this._animFrameId = null;
@@ -136,6 +140,48 @@ export const spaceModule = {
         this._startRenderLoop();
 
         console.log('SPACE MODULE INITIALIZED [v10.0]');
+    },
+
+    destroy() {
+        if (this._animFrameId) cancelAnimationFrame(this._animFrameId);
+        if (this._missionCheckInterval) clearInterval(this._missionCheckInterval);
+        if (this._missionTimerInterval) clearInterval(this._missionTimerInterval);
+        if (this._incomingMissionInterval) clearInterval(this._incomingMissionInterval);
+        if (this._flightLineInterval) clearInterval(this._flightLineInterval);
+        if (this._flightPopupInterval) clearInterval(this._flightPopupInterval);
+        if (this._adaptiveLoadTimeout) clearTimeout(this._adaptiveLoadTimeout);
+        if (this._flightLineDebounce) clearTimeout(this._flightLineDebounce);
+        if (this._tooltipTimeout) clearTimeout(this._tooltipTimeout);
+
+        for (const unsubscribe of this._gameBusUnsubscribers || []) {
+            try { if (typeof unsubscribe === 'function') unsubscribe(); } catch (e) {}
+        }
+        this._gameBusUnsubscribers = [];
+
+        for (const channel of [this._multiplayerChannel, this._presenceChannel, this.planetsChannel]) {
+            if (channel) {
+                try { supabase.removeChannel(channel); } catch (e) {}
+            }
+        }
+        if (this._resizeObserver) this._resizeObserver.disconnect();
+        if (this._starsResizeObserver) this._starsResizeObserver.disconnect();
+
+        this._animFrameId = null;
+        this._missionCheckInterval = null;
+        this._missionTimerInterval = null;
+        this._incomingMissionInterval = null;
+        this._flightLineInterval = null;
+        this._flightPopupInterval = null;
+        this._adaptiveLoadTimeout = null;
+        this._resizeObserver = null;
+        this._starsResizeObserver = null;
+        this._processingMissions.clear();
+        this._warningedMissionIds.clear();
+        this._multiplayerChannel = null;
+        this._presenceChannel = null;
+        this.planetsChannel = null;
+        this.isTabActive = false;
+        this.initialized = false;
     },
 
     _getDefaultStations() {
@@ -2501,6 +2547,7 @@ export const spaceModule = {
 
         const timeoutsToClear = [
             '_adaptiveLoadTimeout',
+            '_fleetReadyTimeout',
             '_flightLineDebounce',
             '_tooltipTimeout'
         ];
@@ -2649,16 +2696,16 @@ export const spaceModule = {
         if (this._missionTimerInterval) clearInterval(this._missionTimerInterval);
         this._missionTimerInterval = setInterval(() => this.updateMissionTimers(), 1000);
 
-        setTimeout(() => {
-            const checkReady = () => {
-                if (window.fleetModule && !window.fleetModule.isInitializing) {
-                    this._restorePlanetMissions();
-                } else {
-                    setTimeout(checkReady, 500);
-                }
-            };
-            checkReady();
-        }, 500);
+        const checkReady = () => {
+            if (!this.isTabActive && !this.currentUser) return;
+            if (window.fleetModule && !window.fleetModule.isInitializing) {
+                this._restorePlanetMissions();
+                this._fleetReadyTimeout = null;
+            } else {
+                this._fleetReadyTimeout = setTimeout(checkReady, 500);
+            }
+        };
+        this._fleetReadyTimeout = setTimeout(checkReady, 500);
     },
 
     _reconnectMultiplayer() {
@@ -2894,10 +2941,17 @@ export const spaceModule = {
 
             const now = Date.now();
 
+            let changed = false;
+            const activeIds = new Set(missions.map(m => m.id));
+            for (const id of this._warningedMissionIds) {
+                if (!activeIds.has(id)) this._warningedMissionIds.delete(id);
+            }
+
             for (const mission of missions) {
                 if (mission.remaining_ms <= 30000 && mission.remaining_ms > 0 && mission.status === 'flying') {
-                    if (!mission._warningShown) {
-                        mission._warningShown = true;
+                    if (!this._warningedMissionIds.has(mission.id)) {
+                        this._warningedMissionIds.add(mission.id);
+                        changed = true;
                         const ship = window.fleetModule?.ships.find(s => s.id === mission.ship_id);
                         if (ship) {
                             window.showNotif?.(`КОРАБЛЬ ВОЗВРАЩАЕТСЯ ЧЕРЕЗ ${Math.floor(mission.remaining_ms / 1000)}С`, false);
@@ -2906,7 +2960,7 @@ export const spaceModule = {
                 }
             }
 
-            this._markDirty();
+            if (changed) this._markDirty();
         } catch(e) {
             console.warn('TIMER ERROR:', e);
         }

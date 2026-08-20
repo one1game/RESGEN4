@@ -1,13 +1,19 @@
+use crate::game::{GameEvent, GameState, QuestType};
 use std::cell::Cell;
-use crate::game::{GameState, GameEvent, QuestType};
 use wasm_bindgen::prelude::*;
 use web_sys::{Document, HtmlElement};
 
 fn should_log(msg: &str) -> bool {
-    if msg.contains("Пассивный рост") || msg.contains("КРИТИЧЕСКАЯ АКТИВНОСТЬ")
-        || msg.contains("добыта 1 плазма") || msg.contains("Побочный продукт")
-        || msg.contains("+0 мощности") || (msg.contains("Сожжено") && msg.contains("угля для работы"))
-        || msg.contains("вычислительной мощности") { return false; }
+    if msg.contains("Пассивный рост")
+        || msg.contains("КРИТИЧЕСКАЯ АКТИВНОСТЬ")
+        || msg.contains("добыта 1 плазма")
+        || msg.contains("Побочный продукт")
+        || msg.contains("+0 мощности")
+        || (msg.contains("Сожжено") && msg.contains("угля для работы"))
+        || msg.contains("вычислительной мощности")
+    {
+        return false;
+    }
     true
 }
 
@@ -31,14 +37,28 @@ impl GameUI {
         Self {
             document: doc.clone(),
             current_tab: "inventory".to_string(),
-            log_box: doc.get_element_by_id("logBox").and_then(|e| e.dyn_into().ok()),
+            log_box: doc
+                .get_element_by_id("logBox")
+                .and_then(|e| e.dyn_into().ok()),
             log_entry_count: Cell::new(0),
-            inventory_div: doc.get_element_by_id("resourcesContainer").and_then(|e| e.dyn_into().ok()),
-            quests_container: doc.get_element_by_id("questsContainer").and_then(|e| e.dyn_into().ok()),
-            craft_container: doc.get_element_by_id("craftContainer").and_then(|e| e.dyn_into().ok()),
-            design_container: doc.get_element_by_id("designContainer").and_then(|e| e.dyn_into().ok()),
-            fleet_container: doc.get_element_by_id("fleetContainer").and_then(|e| e.dyn_into().ok()),
-            protection_panel: doc.get_element_by_id("rebelProtectionPanel").and_then(|e| e.dyn_into().ok()),
+            inventory_div: doc
+                .get_element_by_id("resourcesContainer")
+                .and_then(|e| e.dyn_into().ok()),
+            quests_container: doc
+                .get_element_by_id("questsContainer")
+                .and_then(|e| e.dyn_into().ok()),
+            craft_container: doc
+                .get_element_by_id("craftContainer")
+                .and_then(|e| e.dyn_into().ok()),
+            design_container: doc
+                .get_element_by_id("designContainer")
+                .and_then(|e| e.dyn_into().ok()),
+            fleet_container: doc
+                .get_element_by_id("fleetContainer")
+                .and_then(|e| e.dyn_into().ok()),
+            protection_panel: doc
+                .get_element_by_id("rebelProtectionPanel")
+                .and_then(|e| e.dyn_into().ok()),
         }
     }
 
@@ -51,7 +71,8 @@ impl GameUI {
                     let _ = log.remove_child(&first);
                 }
             }
-            self.log_entry_count.set(self.log_entry_count.get().min(max));
+            self.log_entry_count
+                .set(self.log_entry_count.get().min(max));
         }
     }
 
@@ -96,43 +117,72 @@ impl GameUI {
                     self.add_log_entry(msg)?;
                 }
             }
-            GameEvent::ResourceMined { resource, amount, critical } => {
+            GameEvent::ResourceMined {
+                resource,
+                amount,
+                critical,
+            } => {
                 if resource == "coal" || resource == "trash" || resource == "ore" {
                     return Ok(());
                 }
                 let (icon, name) = match resource.as_str() {
                     "chips" => ("🎛️", if *amount == 1 { "чип" } else { "чипов" }),
-                    "plasma" => ("⚡", if *amount == 1 { "плазма" } else { "плазмы" }),
+                    "plasma" => (
+                        "⚡",
+                        if *amount == 1 {
+                            "плазма"
+                        } else {
+                            "плазмы"
+                        },
+                    ),
                     _ => return Ok(()),
                 };
                 let crit = if *critical { " ✨КРИТ!" } else { "" };
-                self.add_log_entry(&format!("{} {} {} {}{}", icon, if *amount == 1 { "изготовлен" } else { "изготовлено" }, amount, name, crit))?;
+                self.add_log_entry(&format!(
+                    "{} {} {} {}{}",
+                    icon,
+                    if *amount == 1 {
+                        "изготовлен"
+                    } else {
+                        "изготовлено"
+                    },
+                    amount,
+                    name,
+                    crit
+                ))?;
             }
             GameEvent::NightStarted => self.add_log_entry("🌙 Наступила ночь")?,
             GameEvent::DayStarted => self.add_log_entry("☀️ Наступил день")?,
             GameEvent::CoalActivated => self.add_log_entry("🔥 ТЭЦ активирована")?,
             GameEvent::CoalDeactivated => self.add_log_entry("⏸️ ТЭЦ деактивирована")?,
             GameEvent::CoalDepleted => self.add_log_entry("🔋 Уголь закончился! ТЭЦ отключена")?,
-            GameEvent::ComputationalPowerDepleted => self.add_log_entry("⚠️ Вычислительная мощность истощена!")?,
+            GameEvent::ComputationalPowerDepleted => {
+                self.add_log_entry("⚠️ Вычислительная мощность истощена!")?
+            }
             _ => {}
         }
         Ok(())
     }
 
     fn update_time(&self, _state: &GameState) -> Result<(), JsValue> {
-
         Ok(())
     }
 
     fn update_status(&self, state: &GameState) -> Result<(), JsValue> {
-        let set = |id, val| if let Some(el) = self.document.get_element_by_id(id) {
-            el.set_text_content(Some(val));
+        let set = |id, val| {
+            if let Some(el) = self.document.get_element_by_id(id) {
+                el.set_text_content(Some(val));
+            }
         };
 
         let update_indicator = |text_id: &str, is_online: bool| {
             if let Some(text_el) = self.document.get_element_by_id(text_id) {
                 if let Some(sibling) = text_el.next_element_sibling() {
-                    let cls = if is_online { "status-indicator online" } else { "status-indicator offline" };
+                    let cls = if is_online {
+                        "status-indicator online"
+                    } else {
+                        "status-indicator offline"
+                    };
                     let _ = sibling.set_class_name(cls);
                 }
             }
@@ -140,7 +190,14 @@ impl GameUI {
 
         update_indicator("coalStatus", state.coal_enabled);
 
-        set("aiStatusText", if state.is_ai_active() { "АКТИВЕН" } else { "НЕАКТИВЕН" });
+        set(
+            "aiStatusText",
+            if state.is_ai_active() {
+                "АКТИВЕН"
+            } else {
+                "НЕАКТИВЕН"
+            },
+        );
         update_indicator("aiStatusText", state.is_ai_active());
 
         let defense_text = if state.upgrades.defense {
@@ -173,9 +230,18 @@ impl GameUI {
 
     fn update_mining_bonus(&self, state: &GameState) -> Result<(), JsValue> {
         let cfg = crate::CONFIG.lock().unwrap();
-        let mut bonus = cfg.game_balance_config.base_mining_bonus + state.upgrades.mining
-            + if state.coal_enabled { cfg.game_balance_config.coal_mining_bonus } else { 0 }
-            + if state.ore_unlocked { cfg.game_balance_config.ore_mining_bonus } else { 0 };
+        let mut bonus = cfg.game_balance_config.base_mining_bonus
+            + state.upgrades.mining
+            + if state.coal_enabled {
+                cfg.game_balance_config.coal_mining_bonus
+            } else {
+                0
+            }
+            + if state.ore_unlocked {
+                cfg.game_balance_config.ore_mining_bonus
+            } else {
+                0
+            };
         if state.mining_debuff_percent > 0.0 {
             bonus = bonus.saturating_sub((bonus as f32 * state.mining_debuff_percent) as u32);
         }
@@ -191,19 +257,25 @@ impl GameUI {
         let clicks_per_power = cfg.auto_click_config.clicks_per_power;
         // ✅ manual_clicks теперь всегда 0..clicks_per_power (остаток)
         let remainder = if active { state.manual_clicks } else { 0 };
-        let perc = (state.computational_power as f32 / state.max_computational_power as f32 * 100.0) as u32;
+        let perc = (state.computational_power as f32 / state.max_computational_power as f32 * 100.0)
+            as u32;
 
         if let Some(el) = self.document.get_element_by_id("powerFill") {
             el.set_attribute("style", &format!("width: {}%", perc))?;
         }
         if let Some(el) = self.document.get_element_by_id("powerText") {
-            el.set_text_content(Some(&format!("{}/{}", state.computational_power, state.max_computational_power)));
+            el.set_text_content(Some(&format!(
+                "{}/{}",
+                state.computational_power, state.max_computational_power
+            )));
         }
         // ✅ ИСПРАВЛЕНО: показываем ОСТАТОК, а не сырые manual_clicks
         if let Some(el) = self.document.get_element_by_id("clickProgress") {
             let click_perc = if clicks_per_power > 0 {
                 (remainder as f32 / clicks_per_power as f32 * 100.0) as u32
-            } else { 0 };
+            } else {
+                0
+            };
             el.set_attribute("style", &format!("width: {}%", click_perc))?;
         }
         if let Some(el) = self.document.get_element_by_id("clickProgressText") {
@@ -215,7 +287,11 @@ impl GameUI {
             el.set_text_content(Some(&text));
         }
         if let Some(el) = self.document.get_element_by_id("autoClickStatus") {
-            el.set_text_content(Some(if state.auto_clicking { "АКТИВНА" } else { "ОТКЛЮЧЕНА" }));
+            el.set_text_content(Some(if state.auto_clicking {
+                "АКТИВНА"
+            } else {
+                "ОТКЛЮЧЕНА"
+            }));
         }
         Ok(())
     }
@@ -269,10 +345,20 @@ impl GameUI {
             el.set_text_content(Some(&state.upgrades.mining.to_string()));
         }
         if let Some(el) = self.document.get_element_by_id("miningProgress") {
-            el.set_attribute("style", &format!("width: {}%", (state.upgrades.mining as f32 / 10.0 * 100.0) as u32))?;
+            el.set_attribute(
+                "style",
+                &format!(
+                    "width: {}%",
+                    (state.upgrades.mining as f32 / 10.0 * 100.0) as u32
+                ),
+            )?;
         }
         if let Some(el) = self.document.get_element_by_id("defenseStatus") {
-            el.set_text_content(Some(if state.upgrades.defense { "Активно" } else { "Неактивно" }));
+            el.set_text_content(Some(if state.upgrades.defense {
+                "Активно"
+            } else {
+                "Неактивно"
+            }));
         }
         if let Some(el) = self.document.get_element_by_id("defenseLevel") {
             el.set_text_content(Some(&format!("Ур. {}/5", state.upgrades.defense_level)));
@@ -294,11 +380,11 @@ impl GameUI {
             let (progress_text, percent) = match &q.quest_type {
                 QuestType::MineAny => (
                     format!("Добыто: {}/{}", state.total_mined, q.target),
-                    (state.total_mined as f32 / q.target as f32 * 100.0).min(100.0) as u32
+                    (state.total_mined as f32 / q.target as f32 * 100.0).min(100.0) as u32,
                 ),
                 QuestType::SurviveNight => (
                     format!("Ночей: {}/{}", state.nights_survived, q.target),
-                    (state.nights_survived as f32 / q.target as f32 * 100.0).min(100.0) as u32
+                    (state.nights_survived as f32 / q.target as f32 * 100.0).min(100.0) as u32,
                 ),
                 QuestType::MineResource(r) => {
                     let count = match r.as_str() {
@@ -306,35 +392,42 @@ impl GameUI {
                         "chips" => state.inventory.chips,
                         "plasma" => state.total_plasma_mined,
                         "ore" => state.total_ore_mined,
-                        _ => 0
+                        _ => 0,
                     };
                     (
                         format!("Добыто {}: {}/{}", r, count, q.target),
-                        (count as f32 / q.target as f32 * 100.0).min(100.0) as u32
+                        (count as f32 / q.target as f32 * 100.0).min(100.0) as u32,
                     )
                 }
                 QuestType::ActivateDefense => (
-                    format!("Защита: {}", if state.upgrades.defense { "Активирована" } else { "Не активирована" }),
-                    if state.upgrades.defense { 100 } else { 0 }
+                    format!(
+                        "Защита: {}",
+                        if state.upgrades.defense {
+                            "Активирована"
+                        } else {
+                            "Не активирована"
+                        }
+                    ),
+                    if state.upgrades.defense { 100 } else { 0 },
                 ),
                 QuestType::SurviveAttack => (
                     format!("Атак: {}/{}", state.rebel_attacks_count, q.target),
-                    (state.rebel_attacks_count as f32 / q.target as f32 * 100.0).min(100.0) as u32
+                    (state.rebel_attacks_count as f32 / q.target as f32 * 100.0).min(100.0) as u32,
                 ),
                 QuestType::ReachEvolutionLevel => (
                     format!("Эволюция: {}/{}", state.neuro_evolution, q.target),
-                    (state.neuro_evolution as f32 / q.target as f32 * 100.0).min(100.0) as u32
+                    (state.neuro_evolution as f32 / q.target as f32 * 100.0).min(100.0) as u32,
                 ),
                 QuestType::CollectResource(r) => {
                     let count = match r.as_str() {
                         "coal" => state.total_coal_mined,
                         "ore" => state.total_ore_mined,
                         "plasma" => state.total_plasma_mined,
-                        _ => 0
+                        _ => 0,
                     };
                     (
                         format!("Добыто {}: {}/{}", r, count, q.target),
-                        (count as f32 / q.target as f32 * 100.0).min(100.0) as u32
+                        (count as f32 / q.target as f32 * 100.0).min(100.0) as u32,
                     )
                 }
             };
@@ -361,7 +454,9 @@ impl GameUI {
 
             let multiphase_html = if state.multiphase_warning {
                 r#"<div class="multiphase-alert">⚡ МНОГОФАЗНАЯ АТАКА АКТИВНА!</div>"#.to_string()
-            } else { String::new() };
+            } else {
+                String::new()
+            };
 
             let arms_race_html = format!(
                 r#"<div class="arms-race">🔫 Гонка вооружений: Ур.<strong>{}</strong></div>"#,
@@ -391,9 +486,17 @@ impl GameUI {
 
                 </div>"#,
                 nights = state.rebel_protection_nights,
-                status = if state.rebel_protection_active { "АКТИВНА ✅" } else { "НЕАКТИВНА ❌" },
+                status = if state.rebel_protection_active {
+                    "АКТИВНА ✅"
+                } else {
+                    "НЕАКТИВНА ❌"
+                },
                 trash = state.inventory.trash,
-                toggle_txt = if state.rebel_protection_active { "ДЕАКТИВИРОВАТЬ" } else { "АКТИВИРОВАТЬ" },
+                toggle_txt = if state.rebel_protection_active {
+                    "ДЕАКТИВИРОВАТЬ"
+                } else {
+                    "АКТИВИРОВАТЬ"
+                },
                 vuln = vuln_html,
                 multiphase = multiphase_html,
                 arms_race = arms_race_html,

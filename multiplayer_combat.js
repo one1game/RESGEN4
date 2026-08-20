@@ -304,7 +304,10 @@ export async function processArrivedMissions(currentUserId) {
                         timestamp: Date.now()
                     };
                     try {
-                        localStorage.setItem('corebox_last_combat_result', JSON.stringify(window.fleetModule._lastCombatResult));
+                        const resultKey = typeof window.fleetModule._getResultStorageKey === 'function'
+                            ? window.fleetModule._getResultStorageKey('combat')
+                            : `corebox_last_combat_result_${mission.attacker_id || 'anon'}`;
+                        localStorage.setItem(resultKey, JSON.stringify(window.fleetModule._lastCombatResult));
                     } catch(e) {}
                     console.log(`⚔️ _lastCombatResult установлен для боевого корабля, target=${mission.target_id}`);
                 }
@@ -392,7 +395,7 @@ async function _processScout(mission) {
         .eq('status', 'processing');
 
     if (error) {
-        console.warn(`Ошибка обновления scout миссии ${mission.id}:`, error);
+        throw error;
     }
 
     await pushNotification(mission.target_id, 'scout_passed', {
@@ -410,14 +413,17 @@ async function _processCombat(mission) {
         });
 
         if (error) throw error;
-        if (!result) return;
+        if (!result) {
+            throw new Error('atomic_pvp_steal вернул пустой результат');
+        }
 
         const loot = result.loot || {};
 
-        await supabase.from('missions').update({
+        const { error: statusError } = await supabase.from('missions').update({
             status: 'returning',
             loot: loot
         }).eq('id', mission.id).eq('status', 'processing');
+        if (statusError) throw statusError;
 
         await pushNotification(mission.target_id, 'under_attack', {
             message: `💥 Ваша планета атакована! Потери: ${_formatLoot(loot)}`,
@@ -428,6 +434,9 @@ async function _processCombat(mission) {
 
     } catch(e) {
         console.error('Combat error:', e);
+        // Важно пробросить ошибку в processArrivedMissions(),
+        // чтобы его общий rollback вернул миссию из processing в flying.
+        throw e;
     }
 }
 
@@ -480,7 +489,7 @@ async function _processCargo(mission) {
         .eq('status', 'processing');
 
     if (error) {
-        console.warn(`Ошибка обновления cargo миссии ${mission.id}:`, error);
+        throw error;
     }
 }
 
@@ -504,7 +513,7 @@ function _formatLoot(loot) {
 
 async function pushNotification(playerId, type, { message, payload }) {
     try {
-        await supabase.from('notifications').insert({
+        const { error } = await supabase.from('notifications').insert({
             player_id: playerId,
             type,
             message,
@@ -512,6 +521,7 @@ async function pushNotification(playerId, type, { message, payload }) {
             created_at: new Date().toISOString(),
             is_read: false
         });
+        if (error && error.code !== '23505') throw error;
     } catch(e) {
         if (e.code !== '23505') {
             console.warn(`Ошибка уведомления [${type}]:`, e.message);
@@ -554,9 +564,16 @@ export async function getTargetPlayers(currentUserId) {
 
     if (error) throw error;
 
-    const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username');
+    const targetIds = (saves ?? []).map(s => s.user_id).filter(Boolean);
+    let profiles = [];
+    if (targetIds.length > 0) {
+        const { data, error: profilesError } = await supabase
+            .from('profiles')
+            .select('id, username')
+            .in('id', targetIds);
+        if (profilesError) throw profilesError;
+        profiles = data ?? [];
+    }
 
     const profileMap = {};
     (profiles ?? []).forEach(p => { profileMap[p.id] = p.username; });

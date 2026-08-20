@@ -1,7 +1,9 @@
 {
   "name": "corebox-rs",
   "type": "module",
+  "description": "CoreBox game engine compiled to WebAssembly",
   "version": "3.0.0",
+  "license": "MIT",
   "files": [
     "corebox_rs_bg.wasm",
     "corebox_rs.js",

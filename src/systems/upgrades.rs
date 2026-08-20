@@ -1,5 +1,5 @@
-use crate::game::{GameState, GameEvent};
 use crate::game::config::UpgradeConfig;
+use crate::game::{GameEvent, GameState};
 
 #[derive(Clone)]
 pub struct UpgradeSystem {
@@ -16,7 +16,9 @@ impl UpgradeSystem {
         let mut events = Vec::new();
 
         if state.upgrades.mining >= 15 {
-            events.push(GameEvent::LogMessage("⛏️ Добыча уже максимально улучшена!".to_string()));
+            events.push(GameEvent::LogMessage(
+                "⛏️ Добыча уже максимально улучшена!".to_string(),
+            ));
             return events;
         }
 
@@ -30,10 +32,10 @@ impl UpgradeSystem {
                 upgrade_type: "mining".to_string(),
                 level: state.upgrades.mining,
             });
-            events.push(GameEvent::LogMessage(
-                format!("⛏️ Улучшена добыча до уровня {}! (-{} чипов)",
-                    state.upgrades.mining, required_chips)
-            ));
+            events.push(GameEvent::LogMessage(format!(
+                "⛏️ Улучшена добыча до уровня {}! (-{} чипов)",
+                state.upgrades.mining, required_chips
+            )));
         } else {
             events.push(GameEvent::NotEnoughResources {
                 resource: "Чипы".to_string(),
@@ -49,7 +51,9 @@ impl UpgradeSystem {
         let mut events = Vec::new();
 
         if state.upgrades.defense {
-            events.push(GameEvent::LogMessage("🛡️ Защита уже активирована".to_string()));
+            events.push(GameEvent::LogMessage(
+                "🛡️ Защита уже активирована".to_string(),
+            ));
             return events;
         }
 
@@ -58,10 +62,10 @@ impl UpgradeSystem {
             state.upgrades.defense = true;
 
             events.push(GameEvent::DefenseActivated);
-            events.push(GameEvent::LogMessage(
-                format!("🛡️ Система защиты активирована! (-{} плазмы)",
-                    self.config.defense_activation_cost)
-            ));
+            events.push(GameEvent::LogMessage(format!(
+                "🛡️ Система защиты активирована! (-{} плазмы)",
+                self.config.defense_activation_cost
+            )));
         } else {
             events.push(GameEvent::NotEnoughResources {
                 resource: "Плазма".to_string(),
@@ -77,12 +81,16 @@ impl UpgradeSystem {
         let mut events = Vec::new();
 
         if !state.upgrades.defense {
-            events.push(GameEvent::LogMessage("🛡️ Сначала активируйте защиту!".to_string()));
+            events.push(GameEvent::LogMessage(
+                "🛡️ Сначала активируйте защиту!".to_string(),
+            ));
             return events;
         }
 
         if state.upgrades.defense_level >= 8 {
-            events.push(GameEvent::LogMessage("🛡️ Защита уже максимально улучшена!".to_string()));
+            events.push(GameEvent::LogMessage(
+                "🛡️ Защита уже максимально улучшена!".to_string(),
+            ));
             return events;
         }
 
@@ -98,10 +106,10 @@ impl UpgradeSystem {
                 upgrade_type: "defense".to_string(),
                 level: state.upgrades.defense_level,
             });
-            events.push(GameEvent::LogMessage(
-                format!("🛡️ Улучшена защита до уровня {}! (-{} чипов, -{} плазмы)",
-                    state.upgrades.defense_level, chips_cost, plasma_cost)
-            ));
+            events.push(GameEvent::LogMessage(format!(
+                "🛡️ Улучшена защита до уровня {}! (-{} чипов, -{} плазмы)",
+                state.upgrades.defense_level, chips_cost, plasma_cost
+            )));
         } else {
             if state.inventory.chips < chips_cost {
                 events.push(GameEvent::NotEnoughResources {
@@ -127,7 +135,9 @@ impl UpgradeSystem {
         let lvl = state.upgrades.crit_level;
 
         if lvl >= 15 {
-            events.push(GameEvent::LogMessage("💥 Крит-модуль максимален!".to_string()));
+            events.push(GameEvent::LogMessage(
+                "💥 Крит-модуль максимален!".to_string(),
+            ));
             return events;
         }
 
@@ -135,9 +145,12 @@ impl UpgradeSystem {
         let other_cost = (lvl + 1) * 2;
 
         let inv = &state.inventory;
-        if inv.chips >= chips_cost && inv.ore >= other_cost
-            && inv.coal >= other_cost && inv.plasma >= other_cost && inv.trash >= other_cost {
-
+        if inv.chips >= chips_cost
+            && inv.ore >= other_cost
+            && inv.coal >= other_cost
+            && inv.plasma >= other_cost
+            && inv.trash >= other_cost
+        {
             state.inventory.chips -= chips_cost;
             state.inventory.ore -= other_cost;
             state.inventory.coal -= other_cost;
@@ -164,7 +177,9 @@ impl UpgradeSystem {
         let lvl = state.upgrades.cooling_level;
 
         if lvl >= 15 {
-            events.push(GameEvent::LogMessage("❄️ Охлаждение максимально!".to_string()));
+            events.push(GameEvent::LogMessage(
+                "❄️ Охлаждение максимально!".to_string(),
+            ));
             return events;
         }
 
@@ -193,7 +208,9 @@ impl UpgradeSystem {
         let mut events = Vec::new();
 
         if state.turbine_upgrade_level >= 8 {
-            events.push(GameEvent::LogMessage("⚙️ Турбина уже на максимальном уровне (8)!".to_string()));
+            events.push(GameEvent::LogMessage(
+                "⚙️ Турбина уже на максимальном уровне (8)!".to_string(),
+            ));
             return events;
         }
 
@@ -218,11 +235,11 @@ impl UpgradeSystem {
                 missing.push(format!("чипов ({}/{})", state.inventory.chips, cost_chips));
             }
             events.push(GameEvent::LogMessage(format!(
-                "❌ Недостаточно ресурсов: {}", missing.join(", ")
+                "❌ Недостаточно ресурсов: {}",
+                missing.join(", ")
             )));
         }
 
         events
     }
-
 }

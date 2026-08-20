@@ -17,8 +17,13 @@ export let gameStats = {
 };
 
 let _statisticsLoadedOnce = false;
+let _statisticsUserId = null;
 let _statsDisplayTimer = null;
 let _sessionSnapshot = null;
+
+function scopedSessionKey(base) {
+    return `${base}_${window.currentUser?.id || 'anon'}`;
+}
 
 export function scheduleStatsDisplayUpdate() {
     if (_statsDisplayTimer) return;
@@ -51,12 +56,12 @@ export function initStatistics() {
 
 export function takeSessionSnapshot() {
     _sessionSnapshot = { ...gameStats };
-    sessionStorage.setItem('corebox_session_snapshot', JSON.stringify(_sessionSnapshot));
+    sessionStorage.setItem(scopedSessionKey('corebox_session_snapshot'), JSON.stringify(_sessionSnapshot));
 }
 
 function getDelta(key) {
     if (!_sessionSnapshot) {
-        const saved = sessionStorage.getItem('corebox_session_snapshot');
+        const saved = sessionStorage.getItem(scopedSessionKey('corebox_session_snapshot'));
         if (saved) _sessionSnapshot = JSON.parse(saved);
     }
     if (!_sessionSnapshot) return 0;
@@ -79,6 +84,12 @@ export function loadUserStatistics(userStats) {
         return;
     }
     userStats = sanitizeStats(userStats);
+    const activeUserId = window.currentUser?.id || 'anon';
+    if (_statisticsUserId !== activeUserId) {
+        _statisticsUserId = activeUserId;
+        _statisticsLoadedOnce = false;
+        _sessionSnapshot = null;
+    }
 
     if (_statisticsLoadedOnce) {
         Object.keys(userStats).forEach(key => {
@@ -91,7 +102,7 @@ export function loadUserStatistics(userStats) {
     }
     _statisticsLoadedOnce = true;
 
-    const sessionCountedKey = 'corebox_session_counted';
+    const sessionCountedKey = scopedSessionKey('corebox_session_counted');
     const sessionAlreadyCounted = sessionStorage.getItem(sessionCountedKey) === 'true';
     if (!gameStats._sessionCounted && !sessionAlreadyCounted) {
         gameStats.sessionsCount = (userStats.sessionsCount || 0) + 1;

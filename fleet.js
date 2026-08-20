@@ -37,7 +37,7 @@ export const fleetModule = {
         let r = this._lastCombatResult;
         if (!r) {
             try {
-                const saved = localStorage.getItem('corebox_last_combat_result');
+                const saved = localStorage.getItem(this._getResultStorageKey('combat'));
                 if (saved) {
                     r = JSON.parse(saved);
                     this._lastCombatResult = r;
@@ -65,8 +65,8 @@ export const fleetModule = {
         localStorage.removeItem(this._getDefenseStorageKey());
         localStorage.removeItem(`corebox_fleet_log_${this.currentUserId || 'anon'}`);
         localStorage.removeItem(`corebox_pvp_missions_${this.currentUserId || 'anon'}`);
-        localStorage.removeItem('corebox_last_combat_result');
-        localStorage.removeItem('corebox_last_scout_result');
+        localStorage.removeItem(this._getResultStorageKey('combat'));
+        localStorage.removeItem(this._getResultStorageKey('scout'));
 
         console.log('🚀 Модуль флота очищен');
     },
@@ -77,6 +77,43 @@ export const fleetModule = {
 
     _getDefenseStorageKey() {
         return this.currentUserId ? `corebox_defense_ship_${this.currentUserId}` : 'corebox_defense_ship';
+    },
+
+    _getResultStorageKey(kind) {
+        const userId = this.currentUserId || 'anon';
+        return `corebox_last_${kind}_result_${userId}`;
+    },
+
+    _toRustFleetDto() {
+        return this.ships.filter(Boolean).map((ship) => ({
+            id: String(ship.id),
+            type: ship.type || ship.shipType || 'cargo',
+            name: ship.name || 'Корабль',
+            level: Number(ship.level) || 0,
+            health: Number(ship.health ?? ship.maxHealth) || 0,
+            maxHealth: Number(ship.maxHealth ?? ship.health) || 0,
+            experience: Number(ship.experience) || 0,
+            missions: Number(ship.missions ?? ship.missionsCompleted) || 0,
+            onMission: ship.onMission === true,
+            onDefense: ship.onDefense === true,
+            currentMissionId: ship.currentMissionId || null,
+            targetPlanetId: ship.targetPlanetId || null,
+            targetUserId: ship.targetUserId || null,
+            missionReturnsAt: ship.missionReturnsAt || null,
+            createdAt: Number(ship.createdAt ?? ship.created_at) || Date.now(),
+            speed: Number(ship.speed) || 1
+        }));
+    },
+
+    _syncRustFleet() {
+        if (!this.game || typeof this.game.sync_fleet_from_js !== 'function') return false;
+        try {
+            this.game.sync_fleet_from_js(JSON.stringify(this._toRustFleetDto()));
+            return true;
+        } catch (e) {
+            console.warn('sync_fleet_from_js failed:', e);
+            return false;
+        }
     },
 
     refreshActivePvpMissions() {
@@ -139,7 +176,7 @@ export const fleetModule = {
             this.saveFleet();
             // ✅ Синхронизация с Rust
             if (this.game && typeof this.game.sync_fleet_from_js === 'function') {
-                try { this.game.sync_fleet_from_js(JSON.stringify(this.ships)); } catch(e) {}
+                try { this._syncRustFleet(); } catch(e) {}
             }
             this.refreshActivePvpMissions();
             this._renderFleetTab?.();
@@ -175,31 +212,31 @@ export const fleetModule = {
         // ✅ Регистрируем глобальный обработчик для Rust-событий
         window._fleetLogFromRust = (msg) => this.logFleetEventFromRust(msg);
 
-        const savedScoutResult = localStorage.getItem('corebox_last_scout_result');
+        const savedScoutResult = localStorage.getItem(this._getResultStorageKey('scout'));
         if (savedScoutResult) {
             try {
                 this._lastScoutResult = JSON.parse(savedScoutResult);
                 if (Date.now() - this._lastScoutResult.timestamp > 30 * 60 * 1000) {
                     this._lastScoutResult = null;
-                    localStorage.removeItem('corebox_last_scout_result');
+                    localStorage.removeItem(this._getResultStorageKey('scout'));
                 }
             } catch(e) {
                 this._lastScoutResult = null;
-                localStorage.removeItem('corebox_last_scout_result');
+                localStorage.removeItem(this._getResultStorageKey('scout'));
             }
         }
 
-        const savedCombatResult = localStorage.getItem('corebox_last_combat_result');
+        const savedCombatResult = localStorage.getItem(this._getResultStorageKey('combat'));
         if (savedCombatResult) {
             try {
                 this._lastCombatResult = JSON.parse(savedCombatResult);
                 if (Date.now() - this._lastCombatResult.timestamp > 30 * 60 * 1000) {
                     this._lastCombatResult = null;
-                    localStorage.removeItem('corebox_last_combat_result');
+                    localStorage.removeItem(this._getResultStorageKey('combat'));
                 }
             } catch(e) {
                 this._lastCombatResult = null;
-                localStorage.removeItem('corebox_last_combat_result');
+                localStorage.removeItem(this._getResultStorageKey('combat'));
             }
         }
 
@@ -637,7 +674,7 @@ export const fleetModule = {
         this._syncFleetStatus();
         // ✅ Синхронизация с Rust
         if (this.game && typeof this.game.sync_fleet_from_js === 'function') {
-            try { this.game.sync_fleet_from_js(JSON.stringify(this.ships)); } catch(e) {}
+            try { this._syncRustFleet(); } catch(e) {}
         }
         this._addFleetLog(`🛡️ Корабль снят с защиты`);
         this._renderFleetTab();
@@ -818,17 +855,9 @@ export const fleetModule = {
                 details: { attacker_id: this.currentUserId, attacker_name: scout.name }
             });
 
-            setTimeout(async () => {
-                // ✅ Проверяем, не обработана ли миссия через Supabase Realtime
-                try {
-                    const { data: m } = await supabase.from('missions').select('status').eq('id', mission.id).single();
-                    if (m?.status === 'done' || m?.status === 'destroyed' || m?.status === 'processing') {
-                        console.log('⏭️ Миссия разведки уже обработана realtime, пропускаем');
-                        return;
-                    }
-                } catch(e) { console.warn('Mission check failed:', e); }
-                this._processScoutArrival(mission.id, targetUserId, scout);
-            }, travelSec * 1000);
+            // Обработка прибытия выполняется централизованным processArrivedMissions().
+            // Клиентский setTimeout намеренно не используется: вкладка может быть закрыта,
+            // а параллельный обработчик создавал гонки и повторные результаты.
 
             window.showNotif?.(`🔭 Разведчик летит к противнику (${travelSec} сек.)`, false);
             return { success: true, mission };
@@ -879,7 +908,7 @@ export const fleetModule = {
                     missionId,
                     timestamp: Date.now()
                 };
-                localStorage.setItem('corebox_last_scout_result', JSON.stringify(this._lastScoutResult));
+                localStorage.setItem(this._getResultStorageKey('scout'), JSON.stringify(this._lastScoutResult));
                 this._renderFleetTab();
 
                 await this.refreshActiveMissions();
@@ -979,17 +1008,7 @@ export const fleetModule = {
             combatShip.missionReturnsAt = now + travelSec * 2 * 1000;
             this.saveFleet();
 
-            setTimeout(async () => {
-                // ✅ Проверяем, не обработана ли миссия через Supabase Realtime
-                try {
-                    const { data: m } = await supabase.from('missions').select('status').eq('id', mission.id).single();
-                    if (m?.status === 'done' || m?.status === 'destroyed' || m?.status === 'processing') {
-                        console.log('⏭️ Миссия боя уже обработана realtime, пропускаем');
-                        return;
-                    }
-                } catch(e) { console.warn('Mission check failed:', e); }
-                this._processCombatResult(mission.id, targetUserId, combatShip, hasDefender, attackerLevel, defenderLevel);
-            }, travelSec * 1000);
+            // Бой обрабатывается серверным RPC через централизованный mission processor.
 
             window.showNotif?.(`⚔️ Боевой корабль летит к врагу (${travelSec} сек.)`, false);
             return { success: true, mission };
@@ -1024,7 +1043,7 @@ export const fleetModule = {
             // ✅ СИНХРОНИЗАЦИЯ С RUST — критический фикс
             if (this.game && typeof this.game.sync_fleet_from_js === 'function') {
                 try {
-                    this.game.sync_fleet_from_js(JSON.stringify(this.ships));
+                    this._syncRustFleet();
                 } catch(e) {
                     console.warn('sync_fleet_from_js failed:', e);
                 }
@@ -1083,7 +1102,7 @@ export const fleetModule = {
 
             // ✅ Сброс _lastCombatResult при поражении — нельзя отправить грузовой после проигрыша
             this._lastCombatResult = { targetUserId, won: false, completed: true, timestamp: Date.now() };
-            localStorage.setItem('corebox_last_combat_result', JSON.stringify(this._lastCombatResult));
+            localStorage.setItem(this._getResultStorageKey('combat'), JSON.stringify(this._lastCombatResult));
 
             await supabase
                 .from('missions')
@@ -1108,7 +1127,7 @@ export const fleetModule = {
                     completed: true,
                     timestamp: Date.now()
                 };
-                localStorage.setItem('corebox_last_combat_result', JSON.stringify(this._lastCombatResult));
+                localStorage.setItem(this._getResultStorageKey('combat'), JSON.stringify(this._lastCombatResult));
                 this._renderFleetTab();
             }, travelSec * 1000);
 
@@ -1219,17 +1238,7 @@ export const fleetModule = {
             cargoShip.missionReturnsAt = now + travelSec * 2 * 1000;
             this.saveFleet();
 
-            setTimeout(async () => {
-                // ✅ Проверяем, не обработана ли миссия через Supabase Realtime
-                try {
-                    const { data: m } = await supabase.from('missions').select('status').eq('id', mission.id).single();
-                    if (m?.status === 'done' || m?.status === 'destroyed' || m?.status === 'processing') {
-                        console.log('⏭️ Миссия лута уже обработана realtime, пропускаем');
-                        return;
-                    }
-                } catch(e) { console.warn('Mission check failed:', e); }
-                this._processLoot(mission.id, targetUserId, cargoShip, capacity);
-            }, travelSec * 1000);
+            // Лут обрабатывается централизованным processArrivedMissions().
 
             window.showNotif?.(`📦 Грузовой летит к врагу (${travelSec} сек.)`, false);
             return { success: true, mission };
@@ -1636,7 +1645,7 @@ export const fleetModule = {
             this.saveFleet();
             // ⚠️ Фикс: синхронизация с Rust после ремонта
             if (this.game && typeof this.game.sync_fleet_from_js === 'function') {
-                try { this.game.sync_fleet_from_js(JSON.stringify(this.ships)); } catch(e) {}
+                try { this._syncRustFleet(); } catch(e) {}
             }
             this._addFleetLog(`🔧 "${ship.name}" отремонтирован (-${oreCost}⛏️, -${chipsCost}🎛️)`);
             return { success: true, message: `✅ "${ship.name}" отремонтирован (-${oreCost}⛏️, -${chipsCost}🎛️)` };
@@ -1708,7 +1717,7 @@ export const fleetModule = {
             this.saveFleet();
             // ⚠️ Фикс: синхронизация с Rust после улучшения
             if (this.game && typeof this.game.sync_fleet_from_js === 'function') {
-                try { this.game.sync_fleet_from_js(JSON.stringify(this.ships)); } catch(e) {}
+                try { this._syncRustFleet(); } catch(e) {}
             }
             this._addFleetLog(`⬆️ "${ship.name}" улучшен до ур.${ship.level} (-${oreCost}⛏️ -${chipsCost}🎛️ -${plasmaCost}⚡)`);
             return {
@@ -1876,11 +1885,11 @@ export const fleetModule = {
         // ✅ Очищаем устаревший результат разведки
         if (this._lastScoutResult && Date.now() - (this._lastScoutResult.timestamp || 0) > 30 * 60 * 1000) {
             this._lastScoutResult = null;
-            localStorage.removeItem('corebox_last_scout_result');
+            localStorage.removeItem(this._getResultStorageKey('scout'));
         }
         if (this._lastCombatResult && Date.now() - (this._lastCombatResult.timestamp || 0) > 30 * 60 * 1000) {
             this._lastCombatResult = null;
-            localStorage.removeItem('corebox_last_combat_result');
+            localStorage.removeItem(this._getResultStorageKey('combat'));
         }
         
         let defenseDebuffRemaining = 0;
@@ -2200,8 +2209,8 @@ export const fleetModule = {
             resetBtn.onclick = () => {
                 this._lastScoutResult = null;
                 this._lastCombatResult = null;
-                localStorage.removeItem('corebox_last_combat_result');
-                localStorage.removeItem('corebox_last_scout_result');
+                localStorage.removeItem(this._getResultStorageKey('combat'));
+                localStorage.removeItem(this._getResultStorageKey('scout'));
                 this._renderFleetTab();
                 window.showNotif?.('🗑️ Цель сброшена', false);
             };

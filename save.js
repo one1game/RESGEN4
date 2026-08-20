@@ -4,6 +4,14 @@ import { normalizeNeuroConsciousness } from './utils.js';
 const SAVE_VERSION = 3;
 const CONFLICT_RESOLUTION_STRATEGY = 'server_wins';
 
+function getStorageUserId(explicitUserId = null) {
+    return explicitUserId || window.currentUser?.id || 'anon';
+}
+
+function getScopedStorageKey(key, explicitUserId = null) {
+    return `${key}_${getStorageUserId(explicitUserId)}`;
+}
+
 function getSpiralCoordinate(n) {
     if (n === 0) return { x: 2500, y: 2500 };
     const k = Math.ceil((Math.sqrt(n + 1) - 1) / 2);
@@ -89,11 +97,18 @@ function getFleetStorageKey() {
 }
 
 export async function applyPendingLoot() {
-    const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
+    const pendingKey = getScopedStorageKey('corebox_pending_loot');
+    let pending = {};
+    try {
+        pending = JSON.parse(localStorage.getItem(pendingKey) || '{}');
+    } catch (e) {
+        console.warn('Повреждённый pending loot удалён:', e);
+        localStorage.removeItem(pendingKey);
+    }
     if (Object.keys(pending).length === 0) return;
     if (!window.game) return;
     // ✅ СНАЧАЛА очищаем — защита от повторного вызова
-    localStorage.removeItem('corebox_pending_loot');
+    localStorage.removeItem(pendingKey);
     for (const [res, amt] of Object.entries(pending)) {
         if (amt > 0 && typeof window.game.add_resource === 'function') {
             window.game.add_resource(res, amt);
@@ -104,11 +119,29 @@ export async function applyPendingLoot() {
     }
 }
 
+function normalizeFleetShip(ship) {
+    if (!ship || typeof ship.id !== 'string') return null;
+    const type = ship.type || ship.ship_type;
+    if (typeof type !== 'string') return null;
+    return {
+        ...ship,
+        type,
+        shipType: ship.shipType || type,
+        maxHealth: Number(ship.maxHealth ?? ship.max_health ?? ship.health ?? 0),
+        missions: Number(ship.missions ?? ship.missions_completed ?? 0),
+        onMission: ship.onMission ?? ship.on_mission ?? false,
+        onDefense: ship.onDefense ?? ship.on_defense ?? false,
+        currentMissionId: ship.currentMissionId ?? ship.current_mission_id ?? null,
+        targetPlanetId: ship.targetPlanetId ?? ship.target_planet_id ?? null,
+        targetUserId: ship.targetUserId ?? ship.target_user_id ?? null,
+        missionReturnsAt: ship.missionReturnsAt ?? ship.mission_returns_at ?? null,
+        createdAt: ship.createdAt ?? ship.created_at ?? Date.now(),
+    };
+}
+
 function getFleet() {
     if (window.fleetModule && window.fleetModule.ships && window.fleetModule.ships.length > 0) {
-        return window.fleetModule.ships.filter(s =>
-            s && typeof s.id === 'string' && typeof s.type === 'string'
-        );
+        return window.fleetModule.ships.map(normalizeFleetShip).filter(Boolean);
     }
 
     try {
@@ -116,9 +149,7 @@ function getFleet() {
         const saved = localStorage.getItem(key);
         if (saved) {
             const parsed = JSON.parse(saved);
-            const validShips = parsed.filter(s =>
-                s && typeof s.id === 'string' && typeof s.type === 'string'
-            );
+            const validShips = parsed.map(normalizeFleetShip).filter(Boolean);
             return validShips;
         }
     } catch(e) {
@@ -129,9 +160,7 @@ function getFleet() {
 
 function restoreFleet(fleet) {
     if (fleet && Array.isArray(fleet)) {
-        const validFleet = fleet.filter(s =>
-            s && typeof s.id === 'string' && typeof s.type === 'string'
-        );
+        const validFleet = fleet.map(normalizeFleetShip).filter(Boolean);
         const key = getFleetStorageKey();
         localStorage.setItem(key, JSON.stringify(validFleet));
         if (window.fleetModule) {
@@ -200,7 +229,7 @@ function getPassiveRates() {
 
 function getLocalSave() {
     try {
-        const raw = localStorage.getItem('corebox_save_backup');
+        const raw = localStorage.getItem(getScopedStorageKey('corebox_save_backup'));
         if (raw) {
             return JSON.parse(raw);
         }
@@ -213,7 +242,7 @@ function migrateSave(oldSave, userId) {
         return oldSave;
     }
 
-    const MIGRATION_KEY = 'corebox_migration_v3_done';
+    const MIGRATION_KEY = getScopedStorageKey('corebox_migration_v3_done', userId);
     const migrationDone = localStorage.getItem(MIGRATION_KEY) === 'true';
 
     if (migrationDone) {
@@ -528,7 +557,7 @@ export async function saveGameToCloud(gameInstance, force = false) {
 
             quests_progress: questsProgress,
 
-            auto_clicking: localStorage.getItem('corebox_autoclicking') === 'true',
+            auto_clicking: localStorage.getItem(getScopedStorageKey('corebox_autoclicking', user.id)) === 'true',
 
             planets: planets,
             active_planet_missions: activePlanetMissions,
@@ -541,7 +570,7 @@ export async function saveGameToCloud(gameInstance, force = false) {
             map_y: rustState?.map_y ?? window.spaceModule?._myMapPos?.y ?? null,
         };
 
-        localStorage.setItem('corebox_save_backup', JSON.stringify(saveData));
+        localStorage.setItem(getScopedStorageKey('corebox_save_backup', user.id), JSON.stringify(saveData));
 
         const cargoUnlocked = saveData.blueprints?.find(b => b.id === 'cargo')?.unlocked || false;
         const scoutUnlocked = saveData.blueprints?.find(b => b.id === 'scout')?.unlocked || false;
@@ -635,16 +664,14 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
         if (cloudSave.fleet && Array.isArray(cloudSave.fleet)) {
             restoreFleet(cloudSave.fleet);
             if (window.fleetModule) {
-                window.fleetModule.ships = cloudSave.fleet.filter(s =>
-                    s && typeof s.id === 'string' && typeof s.type === 'string'
-                );
+                window.fleetModule.ships = cloudSave.fleet.map(normalizeFleetShip).filter(Boolean);
                 window.fleetModule._loadDefenseShip();
             }
         }
 
         if (cloudSave.defense_ship_id && window.fleetModule) {
-            const userId = window.currentUser?.id;
-            const key = userId ? `corebox_defense_ship_${userId}` : 'corebox_defense_ship';
+            const userId = user.id;
+            const key = `corebox_defense_ship_${userId}`;
             localStorage.setItem(key, JSON.stringify(cloudSave.defense_ship_id));
             window.fleetModule.defenseShipId = cloudSave.defense_ship_id;
             const ship = window.fleetModule.ships.find(s => s.id === cloudSave.defense_ship_id);
@@ -652,8 +679,8 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
         }
 
         if (cloudSave.fleet_log && cloudSave.fleet_log.length > 0 && window.fleetModule) {
-            const userId = window.currentUser?.id;
-            const key = `corebox_fleet_log_${userId || 'anon'}`;
+            const userId = user.id;
+            const key = `corebox_fleet_log_${userId}`;
             const localSaved = localStorage.getItem(key);
             if (localSaved === null) {
                 localStorage.setItem(key, JSON.stringify(cloudSave.fleet_log));
@@ -662,7 +689,7 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
         }
 
         if (cloudSave.auto_clicking !== undefined) {
-            localStorage.setItem('corebox_autoclicking', cloudSave.auto_clicking ? 'true' : 'false');
+            localStorage.setItem(getScopedStorageKey('corebox_autoclicking', user.id), cloudSave.auto_clicking ? 'true' : 'false');
         }
 
         const universalSave = {
@@ -674,7 +701,7 @@ export async function loadGameFromCloud(mergeWithLocal = true) {
             plasma_unlocked: cloudSave.plasma_unlocked,
             timestamp: Date.now()
         };
-        localStorage.setItem('corebox_save_universal', JSON.stringify(universalSave));
+        localStorage.setItem(getScopedStorageKey('corebox_save_universal', user.id), JSON.stringify(universalSave));
 
         console.log(`✅ Загружено облачное сохранение от ${new Date(cloudSave.timestamp).toLocaleString()}`);
         return cloudSave;
@@ -705,7 +732,7 @@ export async function syncStatisticsToCloud(statistics) {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
-        await supabase.from('leaderboard').upsert({
+        await supabase.from('corebox_leaderboard').upsert({
             user_id: user.id,
             username: user.user_metadata?.username || user.email?.split('@')[0] || 'Игрок',
             total_mined: statistics.total_mined || 0,
@@ -722,7 +749,7 @@ export async function syncStatisticsToCloud(statistics) {
 export async function getLeaderboard(limit = 10) {
     try {
         const { data, error } = await supabase
-            .from('leaderboard')
+            .from('corebox_leaderboard')
             .select('username, total_mined, neuro_score, nights')
             .order('total_mined', { ascending: false })
             .limit(limit);

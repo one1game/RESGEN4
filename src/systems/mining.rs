@@ -1,6 +1,6 @@
-use rand::Rng;
-use crate::game::{GameState, GameEvent};
+use crate::game::{GameEvent, GameState};
 use crate::systems::neuro_ecosystem::NeuroEcosystem;
+use rand::Rng;
 
 #[derive(Clone)]
 pub struct MiningSystem {
@@ -16,7 +16,7 @@ impl MiningSystem {
         &self,
         state: &mut GameState,
         neuro: &NeuroEcosystem,
-        is_auto: bool
+        is_auto: bool,
     ) -> Vec<GameEvent> {
         let mut events = Vec::new();
 
@@ -40,18 +40,14 @@ impl MiningSystem {
         let base_heat: f64 = if is_auto { 0.8 } else { 1.8 };
         let overheat_multiplier = 1.0 + (state.turbine_heat as f64 / 120.0);
         // Суммируем все бонусы охлаждения, но ограничиваем максимум 70%
-        let total_cooling_bonus =
-            (state.turbine_upgrade_level as f64 * 0.04) +
-            (state.upgrades.cooling_level as f64 * 0.05) +
-            bonuses.heat_reduction;
+        let total_cooling_bonus = (state.turbine_upgrade_level as f64 * 0.04)
+            + (state.upgrades.cooling_level as f64 * 0.05)
+            + bonuses.heat_reduction;
         let heat_multiplier = (1.0 - total_cooling_bonus).max(0.30); // минимум 30% нагрева всегда
 
         let jitter = 0.88 + rng.gen::<f64>() * 0.24;
 
-        let heat_increase = base_heat
-            * overheat_multiplier
-            * heat_multiplier
-            * jitter;
+        let heat_increase = base_heat * overheat_multiplier * heat_multiplier * jitter;
 
         let old_heat = state.turbine_heat;
         // Накапливаем дробную часть, чтобы малые значения реально прибавлялись
@@ -72,10 +68,18 @@ impl MiningSystem {
         };
 
         let mining_lvl = state.upgrades.mining as f64;
-        let auto_multiplier = if is_auto { self.config.auto_click_chance_multiplier } else { 1.0 };
+        let auto_multiplier = if is_auto {
+            self.config.auto_click_chance_multiplier
+        } else {
+            1.0
+        };
 
         let mut coal_chance = (self.config.base_chances.coal
-            + if state.coal_enabled { self.config.coal_bonus } else { 0.0 }
+            + if state.coal_enabled {
+                self.config.coal_bonus
+            } else {
+                0.0
+            }
             + mining_lvl * self.config.upgrade_bonus)
             * heat_penalty
             * auto_multiplier;
@@ -86,8 +90,10 @@ impl MiningSystem {
         let mut ore_chance =
             (self.config.base_chances.ore + mining_lvl * 0.003) * heat_penalty * auto_multiplier;
 
-        coal_chance = (coal_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
-        trash_chance = (trash_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
+        coal_chance =
+            (coal_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
+        trash_chance =
+            (trash_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
         ore_chance = (ore_chance) * (1.0 + bonuses.mining_chance_bonus) * bonuses.global_multiplier;
 
         let mining_debuff = if state.mining_debuff_remaining > 0 {
@@ -106,7 +112,11 @@ impl MiningSystem {
         trash_chance *= mining_debuff * auto_debuff;
         ore_chance *= mining_debuff * auto_debuff;
 
-        let day_no_coal_penalty = if state.is_day && !state.coal_enabled { 0.5 } else { 1.0 };
+        let day_no_coal_penalty = if state.is_day && !state.coal_enabled {
+            0.5
+        } else {
+            1.0
+        };
         coal_chance *= day_no_coal_penalty;
         trash_chance *= day_no_coal_penalty;
         ore_chance *= day_no_coal_penalty;
@@ -124,24 +134,27 @@ impl MiningSystem {
         let crit_module_bonus = state.upgrades.crit_level as f64 * 0.025;
         let consciousness_crit_bonus = bonuses.crit_bonus;
 
-        let mut critical_chance = (self.config.critical_chance
-            + crit_module_bonus
-            + consciousness_crit_bonus)
-            * (1.0 - new_heat as f64 / 200.0);
+        let mut critical_chance =
+            (self.config.critical_chance + crit_module_bonus + consciousness_crit_bonus)
+                * (1.0 - new_heat as f64 / 200.0);
 
         if critical_chance > 0.30 {
             critical_chance = 0.30;
         }
 
         let is_critical = rng.gen::<f64>() < critical_chance;
-        let multiplier = if is_critical { self.config.critical_multiplier } else { 1 };
+        let multiplier = if is_critical {
+            self.config.critical_multiplier
+        } else {
+            1
+        };
 
         if rng.gen::<f64>() < coal_chance {
             let amount = multiplier;
             state.inventory.coal = (state.inventory.coal + amount).min(state.max_inventory_stack);
-            state.total_mined      += amount;
+            state.total_mined += amount;
             state.total_coal_mined += amount;
-            state.coal_unlocked     = true;
+            state.coal_unlocked = true;
 
             if !is_auto {
                 events.push(GameEvent::ResourceMined {
@@ -155,9 +168,9 @@ impl MiningSystem {
         if rng.gen::<f64>() < trash_chance {
             let amount = multiplier;
             state.inventory.trash = (state.inventory.trash + amount).min(state.max_inventory_stack);
-            state.total_mined       += amount;
+            state.total_mined += amount;
             state.total_trash_mined += amount;
-            state.trash_unlocked     = true;
+            state.trash_unlocked = true;
 
             if !is_auto {
                 events.push(GameEvent::ResourceMined {
@@ -172,8 +185,8 @@ impl MiningSystem {
         if rng.gen::<f64>() < ore_chance && ore_is_unlocked {
             let amount = multiplier;
             state.inventory.ore = (state.inventory.ore + amount).min(state.max_inventory_stack);
-            state.total_mined      += amount;
-            state.total_ore_mined  += amount;
+            state.total_mined += amount;
+            state.total_ore_mined += amount;
 
             if !is_auto {
                 events.push(GameEvent::ResourceMined {
@@ -191,7 +204,11 @@ impl MiningSystem {
         self.mine_resources_common(state, neuro, false)
     }
 
-    pub fn auto_mine_resources(&self, state: &mut GameState, neuro: &NeuroEcosystem) -> Vec<GameEvent> {
+    pub fn auto_mine_resources(
+        &self,
+        state: &mut GameState,
+        neuro: &NeuroEcosystem,
+    ) -> Vec<GameEvent> {
         self.mine_resources_common(state, neuro, true)
     }
 
@@ -211,7 +228,11 @@ impl MiningSystem {
             1.0
         };
 
-        let day_no_coal_penalty = if state.is_day && !state.coal_enabled { 0.5 } else { 1.0 };
+        let day_no_coal_penalty = if state.is_day && !state.coal_enabled {
+            0.5
+        } else {
+            1.0
+        };
 
         let fear_penalty = match state.fear_level {
             0..=4 => 1.0,
@@ -220,25 +241,44 @@ impl MiningSystem {
             _ => 0.85,
         };
 
-        if rng.gen::<f64>() < self.config.passive_chances.coal * debuff * passive_multiplier * day_no_coal_penalty * fear_penalty {
+        if rng.gen::<f64>()
+            < self.config.passive_chances.coal
+                * debuff
+                * passive_multiplier
+                * day_no_coal_penalty
+                * fear_penalty
+        {
             state.inventory.coal = (state.inventory.coal + 1).min(state.max_inventory_stack);
-            state.total_mined      += 1;
+            state.total_mined += 1;
             state.total_coal_mined += 1;
-            state.coal_unlocked     = true;
+            state.coal_unlocked = true;
         }
 
-        if rng.gen::<f64>() < self.config.passive_chances.trash * debuff * passive_multiplier * day_no_coal_penalty * fear_penalty {
+        if rng.gen::<f64>()
+            < self.config.passive_chances.trash
+                * debuff
+                * passive_multiplier
+                * day_no_coal_penalty
+                * fear_penalty
+        {
             state.inventory.trash = (state.inventory.trash + 1).min(state.max_inventory_stack);
-            state.total_mined       += 1;
+            state.total_mined += 1;
             state.total_trash_mined += 1;
-            state.trash_unlocked     = true;
+            state.trash_unlocked = true;
         }
 
         let ore_is_unlocked = state.ore_unlocked || state.neuro_evolution >= 3;
-        if ore_is_unlocked && rng.gen::<f64>() < self.config.passive_chances.ore * debuff * passive_multiplier * day_no_coal_penalty * fear_penalty {
+        if ore_is_unlocked
+            && rng.gen::<f64>()
+                < self.config.passive_chances.ore
+                    * debuff
+                    * passive_multiplier
+                    * day_no_coal_penalty
+                    * fear_penalty
+        {
             state.inventory.ore = (state.inventory.ore + 1).min(state.max_inventory_stack);
-            state.total_mined      += 1;
-            state.total_ore_mined  += 1;
+            state.total_mined += 1;
+            state.total_ore_mined += 1;
         }
 
         Vec::new()

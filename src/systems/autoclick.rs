@@ -1,5 +1,5 @@
-use crate::game::{GameState, GameEvent};
 use crate::game::config::AutoClickConfig;
+use crate::game::{GameEvent, GameState};
 use crate::systems::mining::MiningSystem;
 use crate::systems::neuro_ecosystem::NeuroEcosystem;
 
@@ -13,14 +13,19 @@ pub struct AutoClickSystem {
 #[allow(dead_code)]
 impl AutoClickSystem {
     pub fn new(config: AutoClickConfig, mining_system: MiningSystem) -> Self {
-        Self { config, mining_system }
+        Self {
+            config,
+            mining_system,
+        }
     }
 
     pub fn add_manual_click(&self, state: &mut GameState) -> Vec<GameEvent> {
         let mut events = Vec::new();
 
         if !state.is_ai_active() {
-            events.push(GameEvent::LogMessage("❌ Система неактивна! Включите ТЭЦ или дождитесь дня".to_string()));
+            events.push(GameEvent::LogMessage(
+                "❌ Система неактивна! Включите ТЭЦ или дождитесь дня".to_string(),
+            ));
             return events;
         }
 
@@ -29,12 +34,12 @@ impl AutoClickSystem {
         if state.manual_clicks >= self.config.clicks_per_power {
             let power_to_add = self.config.power_per_manual_click;
             state.manual_clicks = 0;
-            state.computational_power = (state.computational_power + power_to_add)
-                .min(state.max_computational_power);
+            state.computational_power =
+                (state.computational_power + power_to_add).min(state.max_computational_power);
 
             events.push(GameEvent::ComputationalPowerAdded {
                 amount: power_to_add,
-                total: state.computational_power
+                total: state.computational_power,
             });
         }
 
@@ -48,11 +53,17 @@ impl AutoClickSystem {
             state.auto_clicking = true;
             state.last_auto_click_time = 0;
             events.push(GameEvent::AutoClickingStarted);
-            events.push(GameEvent::LogMessage("🤖 Автоклики активированы!".to_string()));
+            events.push(GameEvent::LogMessage(
+                "🤖 Автоклики активированы!".to_string(),
+            ));
         } else if state.turbine_heat >= 100 {
-            events.push(GameEvent::LogMessage("🌡️ Перегрев! Охладите турбину перед запуском автокликов".to_string()));
+            events.push(GameEvent::LogMessage(
+                "🌡️ Перегрев! Охладите турбину перед запуском автокликов".to_string(),
+            ));
         } else if state.computational_power == 0 {
-            events.push(GameEvent::LogMessage("❌ Недостаточно мощности для автокликов".to_string()));
+            events.push(GameEvent::LogMessage(
+                "❌ Недостаточно мощности для автокликов".to_string(),
+            ));
         }
 
         events
@@ -64,13 +75,19 @@ impl AutoClickSystem {
         if state.auto_clicking {
             state.auto_clicking = false;
             events.push(GameEvent::AutoClickingStopped);
-            events.push(GameEvent::LogMessage("⏹️ Автоклики остановлены".to_string()));
+            events.push(GameEvent::LogMessage(
+                "⏹️ Автоклики остановлены".to_string(),
+            ));
         }
 
         events
     }
 
-    pub fn process_auto_click(&self, state: &mut GameState, neuro: &NeuroEcosystem) -> Vec<GameEvent> {
+    pub fn process_auto_click(
+        &self,
+        state: &mut GameState,
+        neuro: &NeuroEcosystem,
+    ) -> Vec<GameEvent> {
         let mut events = Vec::new();
 
         if !state.auto_clicking || !state.can_auto_click() || state.turbine_heat >= 100 {
@@ -88,14 +105,15 @@ impl AutoClickSystem {
 
                 events.extend(self.mining_system.auto_mine_resources(state, neuro));
 
-                events.push(GameEvent::LogMessage(
-                    format!("⚡ Автоклик: -{} мощности (интервал: {}сек)", power_cost, self.config.auto_click_interval)
-                ));
+                events.push(GameEvent::LogMessage(format!(
+                    "⚡ Автоклик: -{} мощности (интервал: {}сек)",
+                    power_cost, self.config.auto_click_interval
+                )));
             } else {
                 state.auto_clicking = false;
                 events.push(GameEvent::ComputationalPowerDepleted);
                 events.push(GameEvent::LogMessage(
-                    "❌ Недостаточно мощности! Автоклики отключены".to_string()
+                    "❌ Недостаточно мощности! Автоклики отключены".to_string(),
                 ));
             }
         }

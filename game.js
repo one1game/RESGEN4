@@ -70,6 +70,7 @@ const RES_ICON = { coal: '🪨', ore: '⛏️', chips: '🎛️', plasma: '⚡',
 const RES_NAME = { coal: 'уголь', ore: 'руда', chips: 'чип', plasma: 'плазма', trash: 'мусор' };
 
 const SAVE_KEY = (userId) => `corebox_v2_${userId || 'local'}`;
+const USER_STORAGE_KEY = (base, userId = currentUser?.id) => `${base}_${userId || 'anon'}`;
 
 let game;
 let currentUser = null;
@@ -938,13 +939,13 @@ function validateAndFixNeuroConsciousness() {
                 } catch(e) {}
             }
 
-            const universalSave = localStorage.getItem('corebox_save_universal');
+            const universalSave = localStorage.getItem(USER_STORAGE_KEY('corebox_save_universal'));
             if (universalSave) {
                 try {
                     const saveData = JSON.parse(universalSave);
                     if (saveData.neuro_consciousness !== undefined) {
                         saveData.neuro_consciousness = consciousness;
-                        localStorage.setItem('corebox_save_universal', JSON.stringify(saveData));
+                        localStorage.setItem(USER_STORAGE_KEY('corebox_save_universal'), JSON.stringify(saveData));
                     }
                 } catch(e) {}
             }
@@ -994,7 +995,7 @@ function initializeAuth() {
                 }
                 const unifiedKey = SAVE_KEY(currentUser?.id);
                 localStorage.setItem(unifiedKey, JSON.stringify(nestedState));
-                localStorage.setItem('corebox_save_backup', JSON.stringify(nestedState));
+                localStorage.setItem(USER_STORAGE_KEY('corebox_save_backup', currentUser.id), JSON.stringify(nestedState));
             }
             saveCurrentUserStatistics();
             updateLastSeen();
@@ -1004,6 +1005,7 @@ function initializeAuth() {
     initAuth(
         async (user) => {
             currentUser = user;
+            window.currentUser = user;
 
             try {
                 const savedMuted = localStorage.getItem('corebox_sound_muted') === 'true';
@@ -1077,6 +1079,7 @@ function initializeAuth() {
                 _saveInterval = null;
             }
             currentUser = null;
+            window.currentUser = null;
             showAuthUI();
             isGameInitialized = false;
             GameBus.clear();
@@ -1089,8 +1092,9 @@ let _saveInterval = null;
 async function loadUserStatsFromCloud(user) {
     if (!user) return;
     try {
-        const users = JSON.parse(localStorage.getItem('corebox_users') || '{}');
-        if (users[user.email]?.statistics) loadUserStatistics(users[user.email].statistics);
+        const scopedKey = USER_STORAGE_KEY('corebox_user_stats', user.id);
+        const raw = localStorage.getItem(scopedKey);
+        if (raw) loadUserStatistics(JSON.parse(raw));
         else { gameStats.startTime = Date.now(); gameStats.sessionsCount = 1; updateStatisticsDisplay(); }
     } catch(e) {}
 }
@@ -2441,7 +2445,7 @@ function toggleAutoClicking() {
         if (btn) btn.classList.remove('auto-clicking');
         const status = document.getElementById('autoClickStatus');
         if (status) { status.textContent = 'ОТКЛЮЧЕНА'; status.classList.remove('auto-clicking-status'); }
-        localStorage.setItem('corebox_autoclicking', 'false');
+        localStorage.setItem(USER_STORAGE_KEY('corebox_autoclicking'), 'false');
         Sounds.autoStop && Sounds.autoStop();
     } else {
         const cfg = window.gameConfig?.auto_click_config;
@@ -2453,7 +2457,7 @@ function toggleAutoClicking() {
             if (btn) btn.classList.add('auto-clicking');
             const status = document.getElementById('autoClickStatus');
             if (status) { status.textContent = 'АКТИВНА'; status.classList.add('auto-clicking-status'); }
-            localStorage.setItem('corebox_autoclicking', 'true');
+            localStorage.setItem(USER_STORAGE_KEY('corebox_autoclicking'), 'true');
             Sounds.autoStart && Sounds.autoStart();
 
             setTimeout(() => {
@@ -2868,9 +2872,8 @@ async function handleRebelAttackStolen(attackResult) {
 
 function saveCurrentUserStatistics() {
     if (!currentUser) return;
-    const users = JSON.parse(localStorage.getItem('corebox_users') || '{}');
-    if (!users[currentUser.email]) users[currentUser.email] = {};
-    users[currentUser.email].statistics = {
+    const key = USER_STORAGE_KEY('corebox_user_stats', currentUser.id);
+    const statistics = {
         totalClicks: gameStats.totalClicks,
         maxPowerReached: gameStats.maxPowerReached,
         nightsSurvived: gameStats.nightsSurvived,
@@ -2892,9 +2895,8 @@ function saveCurrentUserStatistics() {
         neuroEvolution: gameStats.neuroEvolution,
         neuroConsciousness: gameStats.neuroConsciousness,
         neuroScore: gameStats.neuroScore
-
     };
-    localStorage.setItem('corebox_users', JSON.stringify(users));
+    localStorage.setItem(key, JSON.stringify(statistics));
 }
 
 function cleanupGameTimers() {
@@ -3001,7 +3003,7 @@ function gameLoopFrame(timestamp) {
                     game.stop_auto_clicking();
                     isAutoClicking = false;
                     _lowPowerWarned = false;
-                    localStorage.setItem('corebox_autoclicking', 'false');
+                    localStorage.setItem(USER_STORAGE_KEY('corebox_autoclicking'), 'false');
                     document.getElementById('floatingMineBtn')?.classList.remove('auto-clicking');
                     const status = document.getElementById('autoClickStatus');
                     if (status) { status.textContent = 'ОТКЛЮЧЕНА'; status.classList.remove('auto-clicking-status'); }
@@ -3011,7 +3013,7 @@ function gameLoopFrame(timestamp) {
                 if (rustStats.auto_clicking === false && isAutoClicking) {
                     isAutoClicking = false;
                     _lowPowerWarned = false;
-                    localStorage.setItem('corebox_autoclicking', 'false');
+                    localStorage.setItem(USER_STORAGE_KEY('corebox_autoclicking'), 'false');
                     document.getElementById('floatingMineBtn')?.classList.remove('auto-clicking');
                     const status = document.getElementById('autoClickStatus');
                     if (status) { status.textContent = 'ОТКЛЮЧЕНА'; status.classList.remove('auto-clicking-status'); }
@@ -3238,13 +3240,13 @@ async function initializeGame(existingSave = null) {
         await applyPendingLoot();
 
         // 🧹 Очистка fleet-кэша при первом запуске после патча
-        if (localStorage.getItem('corebox_fleet_cleanup_v2') !== 'done') {
+        if (localStorage.getItem(USER_STORAGE_KEY('corebox_fleet_cleanup_v2')) !== 'done') {
             const userId = window.currentUser?.id;
             if (userId) {
                 localStorage.removeItem(`corebox_fleet_${userId}`);
                 localStorage.removeItem('corebox_last_combat_result');
                 localStorage.removeItem('corebox_last_scout_result');
-                localStorage.setItem('corebox_fleet_cleanup_v2', 'done');
+                localStorage.setItem(USER_STORAGE_KEY('corebox_fleet_cleanup_v2'), 'done');
                 console.log('🧹 Fleet cache cleaned');
             }
         }
@@ -3375,7 +3377,7 @@ async function initializeGame(existingSave = null) {
         }
 
         if (!loadedFromCloud) {
-            const universalSave = localStorage.getItem('corebox_save_universal');
+            const universalSave = localStorage.getItem(USER_STORAGE_KEY('corebox_save_universal'));
             if (universalSave) {
                 try {
                     const saveData = JSON.parse(universalSave);
@@ -3397,7 +3399,7 @@ async function initializeGame(existingSave = null) {
             }
         }
 
-        const universalSave = localStorage.getItem('corebox_save_universal');
+        const universalSave = localStorage.getItem(USER_STORAGE_KEY('corebox_save_universal'));
         if (universalSave && !offlineProgressShown) {
             try {
                 const savedState = JSON.parse(universalSave);
@@ -3406,6 +3408,11 @@ async function initializeGame(existingSave = null) {
                     if (offlineProgress.coalGained > 0) game.add_resource('coal', offlineProgress.coalGained);
                     if (offlineProgress.trashGained > 0) game.add_resource('trash', offlineProgress.trashGained);
                     if (offlineProgress.oreGained > 0) game.add_resource('ore', offlineProgress.oreGained);
+                    if (offlineProgress.coalStolen > 0) game.subtract_resource('coal', offlineProgress.coalStolen);
+                    if (offlineProgress.oreStolen > 0) game.subtract_resource('ore', offlineProgress.oreStolen);
+                    if (offlineProgress.chipsStolen > 0) game.subtract_resource('chips', offlineProgress.chipsStolen);
+                    if (offlineProgress.plasmaStolen > 0) game.subtract_resource('plasma', offlineProgress.plasmaStolen);
+                    if (offlineProgress.powerGained > 0 && typeof game.add_power === 'function') game.add_power(offlineProgress.powerGained);
                     offlineProgressShown = true;
                     showOfflineRewardPopup(offlineProgress);
                     scheduleCloudSave();
@@ -3418,7 +3425,7 @@ async function initializeGame(existingSave = null) {
         window._prevMineStats = null;
 
         setTimeout(() => {
-            const savedAutoClick = localStorage.getItem('corebox_autoclicking') === 'true';
+            const savedAutoClick = localStorage.getItem(USER_STORAGE_KEY('corebox_autoclicking')) === 'true';
             const power = game ? game.get_computational_power() : 0;
             const stats = cachedRustStats;
             const isActive = stats && (stats.is_day || (stats.coal_enabled && stats.coal_inventory > 0));
@@ -3437,7 +3444,7 @@ async function initializeGame(existingSave = null) {
                 addToLog(`🤖 Автокликер восстановлен (мощность: ${power})`);
             } else {
                 isAutoClicking = false;
-                localStorage.setItem('corebox_autoclicking', 'false');
+                localStorage.setItem(USER_STORAGE_KEY('corebox_autoclicking'), 'false');
                 document.getElementById('floatingMineBtn')?.classList.remove('auto-clicking');
                 const status = document.getElementById('autoClickStatus');
                 if (status) { status.textContent = 'ОТКЛЮЧЕНА'; status.classList.remove('auto-clicking-status'); }
@@ -3786,8 +3793,8 @@ function syncUIAfterCloudLoad(cloudSave) {
 
     const unifiedKey = SAVE_KEY(currentUser?.id);
     localStorage.setItem(unifiedKey, JSON.stringify(cloudSave));
-    localStorage.setItem('corebox_save_backup', JSON.stringify(cloudSave));
-    localStorage.setItem('corebox_save_universal', JSON.stringify({
+    localStorage.setItem(USER_STORAGE_KEY('corebox_save_backup', currentUser?.id), JSON.stringify(cloudSave));
+    localStorage.setItem(USER_STORAGE_KEY('corebox_save_universal'), JSON.stringify({
         inventory: cloudSave.inventory,
         computational_power: cloudSave.computational_power,
         max_computational_power: cloudSave.max_computational_power,
@@ -3806,8 +3813,8 @@ async function loadFromCloudAndMerge() {
 
     const CLOCK_TOLERANCE_MS = 60000;
     const unifiedKey = SAVE_KEY(currentUser.id);
-    const localBackup = localStorage.getItem('corebox_save_backup');
-    const localUniversal = localStorage.getItem('corebox_save_universal');
+    const localBackup = localStorage.getItem(USER_STORAGE_KEY('corebox_save_backup', currentUser.id));
+    const localUniversal = localStorage.getItem(USER_STORAGE_KEY('corebox_save_universal'));
 
     try {
         const cloudSave = await loadGameFromCloud(true);
@@ -4013,7 +4020,7 @@ async function loadFromCloudAndMerge() {
 }
 
 function calculateOfflineProgress(saved) {
-    const lastShown = parseInt(localStorage.getItem('corebox_offline_shown') || '0');
+    const lastShown = parseInt(localStorage.getItem(USER_STORAGE_KEY('corebox_offline_shown')) || '0');
     const savedTimestamp = saved?.timestamp || saved?._savedAt || Date.now();
     const elapsed = Math.min(Math.floor((Date.now() - savedTimestamp) / 1000), 8 * 3600);
 
@@ -4244,7 +4251,7 @@ function showOfflineRewardPopup(p) {
     document.getElementById('offlinePopupClose').onclick = closePopup;
     setTimeout(closePopup, 30000);
 
-    localStorage.setItem('corebox_offline_shown', Date.now().toString());
+    localStorage.setItem(USER_STORAGE_KEY('corebox_offline_shown'), Date.now().toString());
 }
 
 function switchStatusTab(tab) {
@@ -4387,13 +4394,14 @@ async function _applyReleasedShips(userId) {
             }
 
             if (mission && mission.ship_type === 'cargo' && entry.loot && Object.keys(entry.loot).length > 0) {
-                const pending = JSON.parse(localStorage.getItem('corebox_pending_loot') || '{}');
+                const pendingKey = USER_STORAGE_KEY('corebox_pending_loot', userId);
+                const pending = JSON.parse(localStorage.getItem(pendingKey) || '{}');
                 for (const [res, amt] of Object.entries(entry.loot)) {
                     if (amt && amt > 0) {
                         pending[res] = (pending[res] || 0) + amt;
                     }
                 }
-                localStorage.setItem('corebox_pending_loot', JSON.stringify(pending));
+                localStorage.setItem(pendingKey, JSON.stringify(pending));
 
                 const lootText = Object.entries(entry.loot)
                     .filter(([,a]) => a && a > 0)

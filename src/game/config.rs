@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct QuestConfig {
@@ -93,7 +93,6 @@ pub struct UpgradeConfig {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct RebelConfig {
-
     pub base_attack_chance: f64,
     pub activity_increase: u32,
     pub activity_decrease: u32,
@@ -211,7 +210,6 @@ pub struct GameBalanceConfig {
     pub base_mining_bonus: u32,
     pub coal_mining_bonus: u32,
     pub ore_mining_bonus: u32,
-
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -272,7 +270,6 @@ impl Default for GameConfig {
                 defense_max_level: 8,
             },
             rebels: RebelConfig {
-
                 base_attack_chance: 0.03,
                 activity_increase: 2,
                 activity_decrease: 1,
@@ -377,7 +374,6 @@ impl Default for GameConfig {
                 base_mining_bonus: 3,
                 coal_mining_bonus: 2,
                 ore_mining_bonus: 2,
-
             },
             debug_config: DebugConfig {
                 enable_debug_commands: true,

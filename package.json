@@ -1,0 +1,19 @@
+{
+  "name": "corebox-rs",
+  "private": true,
+  "version": "3.0.0",
+  "type": "module",
+  "scripts": {
+    "check:js": "node scripts/check-js.mjs",
+    "check:config": "node -e \"JSON.parse(require('fs').readFileSync('config.json', 'utf8')); console.log('config.json: OK')\"",
+    "check:rust": "cargo check",
+    "build:wasm": "wasm-pack build --target web --release --out-dir pkg",
+    "check:wasm": "npm run build:wasm",
+    "fmt:check": "cargo fmt -- --check",
+    "test": "cargo test",
+    "check": "npm run check:js && npm run check:config && npm run fmt:check && npm run check:rust && npm run check:wasm && npm test"
+  },
+  "dependencies": {
+    "pixi.js": "^8.19.0"
+  }
+}

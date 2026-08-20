@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize};
 use super::config::GameConfig;
 use rand::Rng;
-use std::collections::{VecDeque, HashMap};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AttackRecord {
@@ -16,19 +16,29 @@ pub struct AttackRecord {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FleetShip {
     pub id: String,
+    #[serde(alias = "type")]
     pub ship_type: String,
     pub name: String,
     pub level: u32,
     pub health: u32,
+    #[serde(alias = "maxHealth")]
     pub max_health: u32,
     pub experience: u32,
+    #[serde(alias = "missions")]
     pub missions_completed: u32,
+    #[serde(alias = "onMission")]
     pub on_mission: bool,
+    #[serde(alias = "onDefense")]
     pub on_defense: bool,
+    #[serde(alias = "currentMissionId")]
     pub current_mission_id: Option<String>,
+    #[serde(alias = "targetPlanetId")]
     pub target_planet_id: Option<String>,
+    #[serde(alias = "targetUserId")]
     pub target_user_id: Option<String>,
+    #[serde(alias = "missionReturnsAt")]
     pub mission_returns_at: Option<i64>,
+    #[serde(alias = "createdAt")]
     pub created_at: i64,
     pub speed: u32,
 }
@@ -181,7 +191,6 @@ pub enum QuestType {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct GameState {
-
     pub game_time: i32,
     pub is_day: bool,
     pub time_changed: bool,
@@ -419,7 +428,9 @@ impl GameState {
     pub fn load_quests(&mut self, config: &GameConfig) {
         self.quests.clear();
         for q in &config.quests {
-            if !q.enabled { continue; }
+            if !q.enabled {
+                continue;
+            }
             let qtype = match q.quest_type.as_str() {
                 "MineAny" => QuestType::MineAny,
                 "SurviveNight" => QuestType::SurviveNight,
@@ -450,15 +461,17 @@ impl GameState {
         }
     }
 
-    pub fn update_time(&mut self, delta: i32, config: &GameConfig) -> Vec<super::events::GameEvent> {
+    pub fn update_time(
+        &mut self,
+        delta: i32,
+        config: &GameConfig,
+    ) -> Vec<super::events::GameEvent> {
         use super::events::GameEvent;
         let mut events = Vec::new();
 
         self.tick_count += 1;
 
-        if self.fear_level > 0
-            && (self.tick_count) - self.last_fear_event_time as i64 > 30
-        {
+        if self.fear_level > 0 && (self.tick_count) - self.last_fear_event_time as i64 > 30 {
             self.fear_level = self.fear_level.saturating_sub(1);
             self.last_fear_event_time = self.tick_count as i32;
         }
@@ -507,7 +520,7 @@ impl GameState {
             if self.tec_sabotage_remaining == 0 {
                 self.tec_sabotaged = false;
                 events.push(GameEvent::LogMessage(
-                    "🔧 Саботаж ТЭЦ устранён — можно снова включить".to_string()
+                    "🔧 Саботаж ТЭЦ устранён — можно снова включить".to_string(),
                 ));
             }
         }
@@ -516,7 +529,7 @@ impl GameState {
             self.locked_blueprint_id = String::new();
             self.blueprint_locked_until = 0;
             events.push(GameEvent::LogMessage(
-                "📐 Чертеж восстановлен — можно снова крафтить".to_string()
+                "📐 Чертеж восстановлен — можно снова крафтить".to_string(),
             ));
         }
 
@@ -527,12 +540,16 @@ impl GameState {
 
         if self.blueprints_encrypted && self.tick_count >= self.blueprint_encryption_expires_at {
             self.blueprints_encrypted = false;
-            events.push(GameEvent::LogMessage("🔐 Шифрование чертежей истекло".to_string()));
+            events.push(GameEvent::LogMessage(
+                "🔐 Шифрование чертежей истекло".to_string(),
+            ));
         }
 
         if self.planets_fortified && self.tick_count >= self.planet_fortification_expires_at {
             self.planets_fortified = false;
-            events.push(GameEvent::LogMessage("🏰 Укрепление планет истекло".to_string()));
+            events.push(GameEvent::LogMessage(
+                "🏰 Укрепление планет истекло".to_string(),
+            ));
         }
 
         if self.game_time <= 0 {
@@ -554,18 +571,26 @@ impl GameState {
             if self.coal_enabled && self.inventory.coal > 0 {
                 let mut rng = rand::thread_rng();
                 let cost = if self.is_day {
-                    rng.gen_range(config.coal_consumption_config.day_coal_min..=config.coal_consumption_config.day_coal_max)
+                    rng.gen_range(
+                        config.coal_consumption_config.day_coal_min
+                            ..=config.coal_consumption_config.day_coal_max,
+                    )
                 } else {
-                    rng.gen_range(config.coal_consumption_config.night_coal_min..=config.coal_consumption_config.night_coal_max)
+                    rng.gen_range(
+                        config.coal_consumption_config.night_coal_min
+                            ..=config.coal_consumption_config.night_coal_max,
+                    )
                 };
                 let actual = cost.min(self.inventory.coal);
                 if actual > 0 {
                     self.inventory.coal -= actual;
                     self.total_coal_burned = self.total_coal_burned.saturating_add(actual as u64);
-                    let plasma_gen = self.total_coal_burned / config.coal_consumption_config.plasma_conversion_rate as u64;
+                    let plasma_gen = self.total_coal_burned
+                        / config.coal_consumption_config.plasma_conversion_rate as u64;
                     if plasma_gen > self.plasma_from_coal {
                         let new = (plasma_gen - self.plasma_from_coal) as u32;
-                        self.inventory.plasma = (self.inventory.plasma + new).min(self.max_inventory_stack);
+                        self.inventory.plasma =
+                            (self.inventory.plasma + new).min(self.max_inventory_stack);
                         self.plasma_from_coal = plasma_gen;
                         self.total_plasma_mined += new;
                         events.push(GameEvent::ResourceMined {
@@ -645,7 +670,9 @@ impl GameState {
                 self.rebel_protection_nights
             ))]
         } else {
-            vec![GameEvent::LogMessage("❌ Недостаточно мусора (нужно 100)".to_string())]
+            vec![GameEvent::LogMessage(
+                "❌ Недостаточно мусора (нужно 100)".to_string(),
+            )]
         }
     }
 
@@ -653,7 +680,9 @@ impl GameState {
         use super::events::GameEvent;
         if self.rebel_protection_active {
             self.rebel_protection_active = false;
-            vec![GameEvent::LogMessage("🛡️ Защита деактивирована".to_string())]
+            vec![GameEvent::LogMessage(
+                "🛡️ Защита деактивирована".to_string(),
+            )]
         } else if self.rebel_protection_nights > 0 {
             self.rebel_protection_active = true;
             vec![GameEvent::LogMessage(format!(
@@ -661,7 +690,9 @@ impl GameState {
                 self.rebel_protection_nights
             ))]
         } else {
-            vec![GameEvent::LogMessage("❌ Нет доступных ночей защиты".to_string())]
+            vec![GameEvent::LogMessage(
+                "❌ Нет доступных ночей защиты".to_string(),
+            )]
         }
     }
 
@@ -749,17 +780,22 @@ impl GameState {
     }
 
     pub fn get_available_ship(&self, ship_type: &str) -> Option<&FleetShip> {
-        self.fleet_ships.iter()
+        self.fleet_ships
+            .iter()
             .find(|s| s.ship_type == ship_type && !s.on_mission && !s.on_defense && s.health > 20)
     }
 
     pub fn add_planet_mission(&mut self, mission: PlanetMission) {
-        self.active_planet_missions.retain(|m| m.ship_id != mission.ship_id);
+        self.active_planet_missions
+            .retain(|m| m.ship_id != mission.ship_id);
         self.active_planet_missions.push(mission);
     }
 
     pub fn remove_planet_mission(&mut self, mission_id: &str) -> Option<PlanetMission> {
-        let index = self.active_planet_missions.iter().position(|m| m.id == mission_id);
+        let index = self
+            .active_planet_missions
+            .iter()
+            .position(|m| m.id == mission_id);
         if let Some(idx) = index {
             Some(self.active_planet_missions.remove(idx))
         } else {
@@ -768,7 +804,8 @@ impl GameState {
     }
 
     pub fn get_active_planet_missions(&self) -> Vec<&PlanetMission> {
-        self.active_planet_missions.iter()
+        self.active_planet_missions
+            .iter()
             .filter(|m| m.status == "flying" || m.status == "returning" || m.status == "arrived")
             .collect()
     }
@@ -790,10 +827,10 @@ impl Quest {
             QuestType::SurviveAttack => state.rebel_attacks_count >= self.target,
             QuestType::ReachEvolutionLevel => state.neuro_evolution >= self.target,
             QuestType::CollectResource(r) => match r.as_str() {
-                "coal"   => state.inventory.coal   >= self.target,
-                "ore"    => state.inventory.ore    >= self.target,
+                "coal" => state.inventory.coal >= self.target,
+                "ore" => state.inventory.ore >= self.target,
                 "plasma" => state.inventory.plasma >= self.target,
-                "chips"  => state.inventory.chips  >= self.target,
+                "chips" => state.inventory.chips >= self.target,
                 _ => false,
             },
         }
@@ -938,5 +975,27 @@ impl Default for GameState {
 
             tick_count: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FleetShip;
+
+    #[test]
+    fn fleet_ship_accepts_js_camel_case_dto() {
+        let raw = r#"{
+            "id":"ship-1","type":"cargo","name":"Cargo","level":2,
+            "health":90,"maxHealth":100,"experience":4,"missions":3,
+            "onMission":true,"onDefense":false,"currentMissionId":"m-1",
+            "targetPlanetId":"p-1","targetUserId":"u-1",
+            "missionReturnsAt":123,"createdAt":456,"speed":1
+        }"#;
+        let ship: FleetShip = serde_json::from_str(raw).expect("JS fleet DTO must deserialize");
+        assert_eq!(ship.ship_type, "cargo");
+        assert_eq!(ship.max_health, 100);
+        assert_eq!(ship.missions_completed, 3);
+        assert!(ship.on_mission);
+        assert_eq!(ship.current_mission_id.as_deref(), Some("m-1"));
     }
 }

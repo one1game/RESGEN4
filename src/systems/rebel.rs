@@ -1,10 +1,10 @@
-use crate::game::{GameState, GameEvent};
 use crate::game::config::GameConfig;
 use crate::game::state::AttackRecord;
-use rand::Rng;
+use crate::game::{GameEvent, GameState};
 use rand::seq::SliceRandom;
+use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use serde::{Serialize, Deserialize};
 use wasm_bindgen::JsValue;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -16,7 +16,9 @@ pub enum PersonalityType {
 }
 
 impl Default for PersonalityType {
-    fn default() -> Self { PersonalityType::Fanatic }
+    fn default() -> Self {
+        PersonalityType::Fanatic
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
@@ -32,10 +34,10 @@ pub struct CommanderState {
 impl CommanderState {
     fn new_for(faction_id: &str) -> Self {
         let (name, sig) = match faction_id {
-            "scavengers"   => ("Рекс «Падальщик»", AttackType::ResourceRaid),
-            "technomads"   => ("Доктор Вирус",     AttackType::Technological),
-            "cyber_rebels" => ("Призрак-7",        AttackType::Stealth),
-            _              => ("Неизвестный",      AttackType::DirectAssault),
+            "scavengers" => ("Рекс «Падальщик»", AttackType::ResourceRaid),
+            "technomads" => ("Доктор Вирус", AttackType::Technological),
+            "cyber_rebels" => ("Призрак-7", AttackType::Stealth),
+            _ => ("Неизвестный", AttackType::DirectAssault),
         };
         Self {
             name: name.to_string(),
@@ -65,7 +67,9 @@ pub enum AttackType {
 }
 
 impl Default for AttackType {
-    fn default() -> Self { AttackType::ResourceRaid }
+    fn default() -> Self {
+        AttackType::ResourceRaid
+    }
 }
 
 impl AttackType {
@@ -134,7 +138,9 @@ pub struct TacticGenome {
 impl TacticGenome {
     fn new_default() -> Self {
         Self {
-            weights: [0.25, 0.15, 0.12, 0.08, 0.08, 0.08, 0.06, 0.05, 0.05, 0.04, 0.02, 0.02],
+            weights: [
+                0.25, 0.15, 0.12, 0.08, 0.08, 0.08, 0.06, 0.05, 0.05, 0.04, 0.02, 0.02,
+            ],
             fitness: 0.0,
             age: 0,
             mutations: 0,
@@ -160,7 +166,9 @@ impl TacticGenome {
     fn normalize(&mut self) {
         let sum: f64 = self.weights.iter().sum();
         if sum > 0.0 {
-            for w in self.weights.iter_mut() { *w /= sum; }
+            for w in self.weights.iter_mut() {
+                *w /= sum;
+            }
         }
     }
     fn update_fitness(&mut self, success: bool) {
@@ -169,7 +177,9 @@ impl TacticGenome {
         self.age += 1;
     }
     #[allow(dead_code)]
-    fn get_weight(&self, idx: usize) -> f64 { self.weights[idx.min(11)] }
+    fn get_weight(&self, idx: usize) -> f64 {
+        self.weights[idx.min(11)]
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -661,13 +671,17 @@ impl RebelSystem {
         let genome_population = vec![
             TacticGenome::new_default(),
             TacticGenome {
-                weights: [0.15, 0.20, 0.08, 0.12, 0.12, 0.08, 0.05, 0.04, 0.04, 0.04, 0.04, 0.04],
+                weights: [
+                    0.15, 0.20, 0.08, 0.12, 0.12, 0.08, 0.05, 0.04, 0.04, 0.04, 0.04, 0.04,
+                ],
                 fitness: 0.0,
                 age: 0,
                 mutations: 0,
             },
             TacticGenome {
-                weights: [0.08, 0.08, 0.20, 0.15, 0.08, 0.15, 0.04, 0.04, 0.04, 0.04, 0.08, 0.06],
+                weights: [
+                    0.08, 0.08, 0.20, 0.15, 0.08, 0.15, 0.04, 0.04, 0.04, 0.04, 0.08, 0.06,
+                ],
                 fitness: 0.0,
                 age: 0,
                 mutations: 0,
@@ -763,7 +777,10 @@ impl RebelSystem {
         self.prng_counter += 1;
         let a: u64 = 2862933555777941757;
         let c: u64 = 3037000493;
-        let r = seed.wrapping_mul(a).wrapping_add(c).wrapping_add(self.prng_counter);
+        let r = seed
+            .wrapping_mul(a)
+            .wrapping_add(c)
+            .wrapping_add(self.prng_counter);
         (r >> 32) as f64 / u32::MAX as f64
     }
 
@@ -802,12 +819,8 @@ impl RebelSystem {
             0.60 * (1.0 + ai_evolution as f64 * 0.03),
             0.50 + (ai_evolution as f64 * 0.02).min(0.25),
         ];
-        let max_p = payoffs
-            .iter()
-            .cloned()
-            .fold(f64::NEG_INFINITY, f64::max);
-        let exps: [f64; 12] =
-            std::array::from_fn(|i| ((payoffs[i] - max_p) * 3.0).exp());
+        let max_p = payoffs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let exps: [f64; 12] = std::array::from_fn(|i| ((payoffs[i] - max_p) * 3.0).exp());
         let sum_exp: f64 = exps.iter().sum();
         for i in 0..12 {
             self.nash_strategy[i] = self.nash_strategy[i] * 0.7 + (exps[i] / sum_exp) * 0.3;
@@ -925,18 +938,12 @@ impl RebelSystem {
 
     fn get_player_fleet_count(&self, _state: &GameState) -> u32 {
         if let Some(window) = web_sys::window() {
-            if let Ok(fleet_module) = js_sys::Reflect::get(
-                &window,
-                &JsValue::from_str("fleetModule")
-            ) {
-                if let Ok(ships) = js_sys::Reflect::get(
-                    &fleet_module,
-                    &JsValue::from_str("ships")
-                ) {
-                    if let Ok(length) = js_sys::Reflect::get(
-                        &ships,
-                        &JsValue::from_str("length")
-                    ) {
+            if let Ok(fleet_module) =
+                js_sys::Reflect::get(&window, &JsValue::from_str("fleetModule"))
+            {
+                if let Ok(ships) = js_sys::Reflect::get(&fleet_module, &JsValue::from_str("ships"))
+                {
+                    if let Ok(length) = js_sys::Reflect::get(&ships, &JsValue::from_str("length")) {
                         return length.as_f64().unwrap_or(0.0) as u32;
                     }
                 }
@@ -945,11 +952,7 @@ impl RebelSystem {
         0
     }
 
-    fn calculate_attack_probability_ai(
-        &mut self,
-        state: &GameState,
-        config: &GameConfig,
-    ) -> f64 {
+    fn calculate_attack_probability_ai(&mut self, state: &GameState, config: &GameConfig) -> f64 {
         let mut p = config.rebels.base_attack_chance;
         p += ((state.rebel_activity as f64 + 1.0).ln() * 0.12).min(0.5);
         p += if !state.is_day { 0.28 } else { 0.0 };
@@ -961,17 +964,15 @@ impl RebelSystem {
         p += adaptation_bonus;
 
         if config.rebels.fear_scaling_enabled {
-            let neuro_scaling = state.neuro_evolution as f64
-                * config.rebels.attack_chance_per_neuro_level;
+            let neuro_scaling =
+                state.neuro_evolution as f64 * config.rebels.attack_chance_per_neuro_level;
             p += neuro_scaling.min(0.30);
 
-            let mining_scaling = state.upgrades.mining as f64
-                * config.rebels.mining_level_scaling;
+            let mining_scaling = state.upgrades.mining as f64 * config.rebels.mining_level_scaling;
             p += mining_scaling.min(0.10);
 
             let fleet_count = self.get_player_fleet_count(state);
-            let fleet_scaling = fleet_count as f64
-                * config.rebels.fleet_scaling_per_ship;
+            let fleet_scaling = fleet_count as f64 * config.rebels.fleet_scaling_per_ship;
             p += fleet_scaling.min(0.15);
         }
 
@@ -1007,8 +1008,7 @@ impl RebelSystem {
         }
 
         if self.stats.total_attacks > 0 {
-            let sr = self.stats.successful_attacks as f64
-                / self.stats.total_attacks as f64;
+            let sr = self.stats.successful_attacks as f64 / self.stats.total_attacks as f64;
             p += sr * 0.08;
         }
 
@@ -1043,13 +1043,15 @@ impl RebelSystem {
                         p += 0.10;
                     }
                     PersonalityType::Strategist => {
-                        mod_p = if consecutive_quiet_nights < 3 { 0.05 } else { 2.2 };
+                        mod_p = if consecutive_quiet_nights < 3 {
+                            0.05
+                        } else {
+                            2.2
+                        };
                     }
                     PersonalityType::Chaos => {
-                        let chaos = self.prng(
-                            state.tick_count as u64 * 31
-                                + self.stats.total_attacks as u64,
-                        );
+                        let chaos = self
+                            .prng(state.tick_count as u64 * 31 + self.stats.total_attacks as u64);
                         mod_p = 0.2 + chaos * 2.5;
                     }
                 }
@@ -1074,7 +1076,12 @@ impl RebelSystem {
         p.min(max_chance).max(0.04)
     }
 
-    fn select_attack_type_ai(&mut self, state: &GameState, config: &GameConfig, time: u64) -> AttackType {
+    fn select_attack_type_ai(
+        &mut self,
+        state: &GameState,
+        config: &GameConfig,
+        time: u64,
+    ) -> AttackType {
         let genome_w = &self.best_genome.weights;
         let nash_w = &self.nash_strategy;
         let sarsa_w = if let Some(fid) = &self.active_faction {
@@ -1111,10 +1118,8 @@ impl RebelSystem {
         let mut combined = [0.0f64; 12];
 
         for i in 0..6 {
-            combined[i] = alpha * genome_w[i]
-                + beta * nash_w[i]
-                + gamma * sarsa_w[i]
-                + delta * htn_boost[i];
+            combined[i] =
+                alpha * genome_w[i] + beta * nash_w[i] + gamma * sarsa_w[i] + delta * htn_boost[i];
             combined[i] += match i {
                 0 if state.inventory.coal > 50 => 0.1,
                 1 if state.computational_power > 100 => 0.1,
@@ -1128,8 +1133,7 @@ impl RebelSystem {
 
         let fleet_count = self.get_player_fleet_count(state);
         if fleet_count > 0 && config.rebels.fleet_attack_chance > 0.0 {
-            combined[6] = config.rebels.fleet_attack_chance
-                + (fleet_count as f64 * 0.01).min(0.15);
+            combined[6] = config.rebels.fleet_attack_chance + (fleet_count as f64 * 0.01).min(0.15);
         }
 
         if state.neuro_evolution >= 3 && config.rebels.blueprint_steal_chance > 0.0 {
@@ -1143,18 +1147,18 @@ impl RebelSystem {
         }
 
         if !state.planets.is_empty() && config.rebels.planet_harass_chance > 0.0 {
-            combined[8] = config.rebels.planet_harass_chance
-                + (state.planets.len() as f64 * 0.02).min(0.10);
+            combined[8] =
+                config.rebels.planet_harass_chance + (state.planets.len() as f64 * 0.02).min(0.10);
         }
 
         if state.coal_enabled && config.rebels.tec_sabotage_chance > 0.0 {
-            combined[9] = config.rebels.tec_sabotage_chance
-                + (state.inventory.coal as f64 * 0.001).min(0.10);
+            combined[9] =
+                config.rebels.tec_sabotage_chance + (state.inventory.coal as f64 * 0.001).min(0.10);
         }
 
         if self.current_campaign.is_some() && config.rebels.coalition_real_attack_chance > 0.0 {
-            combined[10] = config.rebels.coalition_real_attack_chance
-                + self.strategic_intelligence * 0.15;
+            combined[10] =
+                config.rebels.coalition_real_attack_chance + self.strategic_intelligence * 0.15;
         }
 
         if state.rebel_protection_active && state.rebel_activity >= 5 {
@@ -1206,13 +1210,9 @@ impl RebelSystem {
             }
         }
 
-        let max_c = combined
-            .iter()
-            .cloned()
-            .fold(f64::NEG_INFINITY, f64::max);
+        let max_c = combined.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
         let inv_temp = 1.0 / self.sa_temperature.max(0.01);
-        let exps: [f64; 12] =
-            std::array::from_fn(|i| ((combined[i] - max_c) * inv_temp).exp());
+        let exps: [f64; 12] = std::array::from_fn(|i| ((combined[i] - max_c) * inv_temp).exp());
         let total: f64 = exps.iter().sum();
         let rng = self.prng(time);
         let mut roll = rng * total;
@@ -1268,8 +1268,7 @@ impl RebelSystem {
             attack_type: attack_type.clone(),
             faction,
             targets,
-            success_probability: self
-                .calculate_success_probability_ai(state, &attack_type),
+            success_probability: self.calculate_success_probability_ai(state, &attack_type),
             stealth_level: stealth,
             expected_gain: self.calculate_expected_gain(state, &attack_type),
         };
@@ -1288,9 +1287,7 @@ impl RebelSystem {
     }
 
     fn select_attacking_faction(&mut self, attack_type: &AttackType) -> String {
-        let rng_val = self.prng(
-            self.stats.total_attacks as u64 * 7 + self.evolution_score as u64,
-        );
+        let rng_val = self.prng(self.stats.total_attacks as u64 * 7 + self.evolution_score as u64);
         let available: Vec<(&String, &RebelFaction)> = self
             .factions
             .iter()
@@ -1303,9 +1300,7 @@ impl RebelSystem {
             .iter()
             .find(|(_, f)| match attack_type {
                 AttackType::Stealth => f.specializations.contains(&"stealth".to_string()),
-                AttackType::Technological => {
-                    f.specializations.contains(&"technology".to_string())
-                }
+                AttackType::Technological => f.specializations.contains(&"technology".to_string()),
                 AttackType::Psychological => {
                     f.specializations.contains(&"psychological".to_string())
                 }
@@ -1349,14 +1344,11 @@ impl RebelSystem {
         attack_type: &AttackType,
     ) -> Vec<AttackTarget> {
         let mut targets = Vec::new();
-        let rng_val = self.prng(
-            self.stats.total_attacks as u64 + state.tick_count as u64,
-        );
+        let rng_val = self.prng(self.stats.total_attacks as u64 + state.tick_count as u64);
 
         if state.fake_depot_active {
             let trap_chance = 0.40 + self.strategic_intelligence * 0.25;
             if self.prng(state.tick_count as u64 * 99) < trap_chance {
-
                 targets.clear();
                 targets.push(AttackTarget::System {
                     system: "fake_depot".to_string(),
@@ -1382,11 +1374,7 @@ impl RebelSystem {
                                 "coal" => state.inventory.coal as f64,
                                 _ => 0.0,
                             });
-                        let vb = self
-                            .target_value_estimate
-                            .get(b)
-                            .cloned()
-                            .unwrap_or(0.0);
+                        let vb = self.target_value_estimate.get(b).cloned().unwrap_or(0.0);
                         va.partial_cmp(&vb).unwrap()
                     })
                     .copied()
@@ -1440,9 +1428,7 @@ impl RebelSystem {
             }
 
             AttackType::BlueprintTheft => {
-                targets.push(AttackTarget::Intelligence {
-                    data_loss: 1,
-                });
+                targets.push(AttackTarget::Intelligence { data_loss: 1 });
             }
 
             AttackType::PlanetHarass => {
@@ -1499,8 +1485,7 @@ impl RebelSystem {
 
             AttackType::PowerSabotage => {
                 if state.computational_power > 0 {
-                    let dmg = (state.computational_power as f64 * 0.22)
-                        .min(35.0) as u32;
+                    let dmg = (state.computational_power as f64 * 0.22).min(35.0) as u32;
                     targets.push(AttackTarget::System {
                         system: "computational_power".to_string(),
                         damage: dmg,
@@ -1525,9 +1510,7 @@ impl RebelSystem {
             AttackType::Stealth => {
                 if state.inventory.chips > 0 {
                     let loss = 5 + (rng_val * 12.0) as u32;
-                    targets.push(AttackTarget::Intelligence {
-                        data_loss: loss,
-                    });
+                    targets.push(AttackTarget::Intelligence { data_loss: loss });
                 }
             }
 
@@ -1586,11 +1569,7 @@ impl RebelSystem {
         p.min(0.88).max(0.15)
     }
 
-    fn calculate_expected_gain(
-        &mut self,
-        state: &GameState,
-        attack_type: &AttackType,
-    ) -> u32 {
+    fn calculate_expected_gain(&mut self, state: &GameState, attack_type: &AttackType) -> u32 {
         match attack_type {
             AttackType::ResourceRaid => (state.inventory.coal / 8).max(5),
             AttackType::PowerSabotage => (state.computational_power / 5).max(10),
@@ -1617,8 +1596,8 @@ impl RebelSystem {
         let defense_bonus = state.neuro_defense_bonus;
         let defense_power = if state.upgrades.defense {
             let base = config.rebels.defense_base_power as f64;
-            let level_bonus = state.upgrades.defense_level as f64
-                * config.rebels.defense_level_bonus as f64;
+            let level_bonus =
+                state.upgrades.defense_level as f64 * config.rebels.defense_level_bonus as f64;
             let neuro = defense_bonus * 55.0;
 
             let temp_bonus = state.temporary_defense_bonus as f64;
@@ -1646,9 +1625,7 @@ impl RebelSystem {
         } else {
             0.0
         };
-        let rng_val = self.prng(
-            state.tick_count as u64 * 137 + self.stats.total_attacks as u64,
-        );
+        let rng_val = self.prng(state.tick_count as u64 * 137 + self.stats.total_attacks as u64);
         let raw_success = rng_val < (success_chance + stealth_bonus + coalition_bonus);
 
         let mut summary = AttackExecutionSummary::new();
@@ -1693,7 +1670,6 @@ impl RebelSystem {
                 attack.faction, summary.result_details
             )));
         } else {
-
             state.fear_level = state.fear_level.saturating_sub(1);
 
             events.push(GameEvent::LogMessage(format!(
@@ -1732,7 +1708,9 @@ impl RebelSystem {
                     self.apply_resource_attack_target(state, resource, *amount, summary);
                 }
                 AttackTarget::System { system, damage } => {
-                    self.apply_system_attack_target(state, attack, system, *damage, summary, events);
+                    self.apply_system_attack_target(
+                        state, attack, system, *damage, summary, events,
+                    );
                 }
                 AttackTarget::Moral { demoralization } => {
                     self.apply_moral_attack_target(state, *demoralization, summary, events);
@@ -1887,7 +1865,9 @@ impl RebelSystem {
 
     fn notify_fleet_damage(&self, attack: &AttackPlan, attack_id: &str) {
         if let Some(window) = web_sys::window() {
-            if let Ok(fleet_module) = js_sys::Reflect::get(&window, &JsValue::from_str("fleetModule")) {
+            if let Ok(fleet_module) =
+                js_sys::Reflect::get(&window, &JsValue::from_str("fleetModule"))
+            {
                 if let Ok(damage_fn) = js_sys::Reflect::get(
                     &fleet_module,
                     &JsValue::from_str("damageRandomCombatShip"),
@@ -1919,12 +1899,14 @@ impl RebelSystem {
             return;
         }
 
-        let planet_idx = (self.prng(state.tick_count as u64 * 31) * state.planets.len() as f64) as usize
+        let planet_idx = (self.prng(state.tick_count as u64 * 31) * state.planets.len() as f64)
+            as usize
             % state.planets.len();
         let planet = &mut state.planets[planet_idx];
         let stolen_coal = (planet.resources_remaining.coal as f64 * 0.3) as u32;
         let stolen_ore = (planet.resources_remaining.ore as f64 * 0.3) as u32;
-        planet.resources_remaining.coal = planet.resources_remaining.coal.saturating_sub(stolen_coal);
+        planet.resources_remaining.coal =
+            planet.resources_remaining.coal.saturating_sub(stolen_coal);
         planet.resources_remaining.ore = planet.resources_remaining.ore.saturating_sub(stolen_ore);
 
         state.planet_under_harass = true;
@@ -1949,7 +1931,7 @@ impl RebelSystem {
     ) {
         let duration = 25 + (self.psych_pressure * 15.0) as i32;
         state.autoclick_debuff_remaining = duration;
-        state.autoclick_debuff_percent = (demoralization as f32).min(0.9);  // ← cap 90%
+        state.autoclick_debuff_percent = (demoralization as f32).min(0.9); // ← cap 90%
         summary.autoclick_damaged = true;
         summary.player_harmed = demoralization > 0.0;
         events.push(GameEvent::LogMessage(format!(
@@ -2016,8 +1998,8 @@ impl RebelSystem {
             .collect();
 
         if !unlocked.is_empty() {
-            let stolen_bp = unlocked[(self.prng(state.tick_count as u64 * 17) * unlocked.len() as f64)
-                as usize
+            let stolen_bp = unlocked[(self.prng(state.tick_count as u64 * 17)
+                * unlocked.len() as f64) as usize
                 % unlocked.len()];
 
             state.locked_blueprint_id = stolen_bp.to_string();
@@ -2045,12 +2027,7 @@ impl RebelSystem {
         }
     }
 
-    fn steal_resource(
-        &self,
-        state: &mut GameState,
-        resource: &str,
-        amount: u32,
-    ) -> u32 {
+    fn steal_resource(&self, state: &mut GameState, resource: &str, amount: u32) -> u32 {
         match resource {
             "coal" => {
                 let a = amount.min(state.inventory.coal);
@@ -2095,8 +2072,7 @@ impl RebelSystem {
             return None;
         }
 
-        state.background_sabotage_cooldown_remaining =
-            config.rebels.background_sabotage_cooldown;
+        state.background_sabotage_cooldown_remaining = config.rebels.background_sabotage_cooldown;
 
         let mut events = Vec::new();
         let sabotage_type = (rng * 1000.0) as u32 % 4;
@@ -2126,13 +2102,13 @@ impl RebelSystem {
                 state.autoclick_debuff_remaining = 15;
                 state.autoclick_debuff_percent = 0.2;
                 events.push(GameEvent::LogMessage(
-                    "😨 ФОНОВАЯ ДИВЕРСИЯ: автокликер замедлен на 15 сек!".to_string()
+                    "😨 ФОНОВАЯ ДИВЕРСИЯ: автокликер замедлен на 15 сек!".to_string(),
                 ));
             }
             3 => {
                 self.psych_pressure = (self.psych_pressure + 0.1).min(1.0);
                 events.push(GameEvent::LogMessage(
-                    "📡 ФОНОВАЯ ДИВЕРСИЯ: мораль повстанцев растёт!".to_string()
+                    "📡 ФОНОВАЯ ДИВЕРСИЯ: мораль повстанцев растёт!".to_string(),
                 ));
             }
             _ => {}
@@ -2156,35 +2132,15 @@ impl RebelSystem {
         if state.fleet_under_attack {
             let fleet_reset_delay = (state.fleet_attack_damage as i64).max(10).min(30);
             if state.last_fleet_attack_time > 0
-                && state.tick_count - state.last_fleet_attack_time as i64 > fleet_reset_delay {
+                && state.tick_count - state.last_fleet_attack_time as i64 > fleet_reset_delay
+            {
                 state.fleet_under_attack = false;
                 state.fleet_attack_damage = 0;
             }
         }
 
-        if state.background_sabotage_cooldown_remaining > 0 {
-            state.background_sabotage_cooldown_remaining -= 1;
-        }
-
-        if state.tec_sabotage_remaining > 0 {
-            state.tec_sabotage_remaining -= 1;
-            if state.tec_sabotage_remaining == 0 {
-                state.tec_sabotaged = false;
-                events.push(GameEvent::LogMessage(
-                    "🔧 Саботаж ТЭЦ устранён — можно снова включить".to_string()
-                ));
-            }
-        }
-
-        if state.blueprint_locked_until > 0
-            && state.tick_count > state.blueprint_locked_until
-        {
-            state.locked_blueprint_id = String::new();
-            state.blueprint_locked_until = 0;
-            events.push(GameEvent::LogMessage(
-                "📐 Чертеж восстановлен — можно снова крафтить".to_string()
-            ));
-        }
+        // Таймеры саботажа и временных блокировок обновляются централизованно
+        // в GameState::update_time. Здесь обрабатывается только поведение ИИ.
 
         if !state.is_day {
             let old_activity = state.rebel_activity;
@@ -2204,8 +2160,8 @@ impl RebelSystem {
             } else {
                 0
             };
-            state.rebel_activity = (state.rebel_activity + increase + activity_bonus)
-                .min(config.rebels.max_activity);
+            state.rebel_activity =
+                (state.rebel_activity + increase + activity_bonus).min(config.rebels.max_activity);
 
             let def_power = if state.upgrades.defense {
                 (config.rebels.defense_base_power as f64
@@ -2235,8 +2191,7 @@ impl RebelSystem {
                 self.aggression = (self.aggression + 0.1).min(1.0);
             } else if state.rebel_activity >= 12 && old_activity < 12 {
                 events.push(GameEvent::LogMessage(
-                    "⚠️ Активность повстанцев достигла опасного уровня!"
-                        .to_string(),
+                    "⚠️ Активность повстанцев достигла опасного уровня!".to_string(),
                 ));
             }
         } else {
@@ -2287,11 +2242,7 @@ impl RebelSystem {
         events
     }
 
-    pub fn on_night_start(
-        &mut self,
-        state: &mut GameState,
-        rng: &mut impl Rng,
-    ) -> Vec<GameEvent> {
+    pub fn on_night_start(&mut self, state: &mut GameState, rng: &mut impl Rng) -> Vec<GameEvent> {
         let mut events = Vec::new();
         let campaign_bonus = self
             .current_campaign
@@ -2353,13 +2304,11 @@ impl RebelSystem {
                     .insert("coal".to_string(), state.inventory.coal as f64);
                 self.target_value_estimate
                     .insert("plasma".to_string(), state.inventory.plasma as f64);
-                self.tactic_preferences.stealth =
-                    (self.tactic_preferences.stealth + 0.1).min(0.5);
+                self.tactic_preferences.stealth = (self.tactic_preferences.stealth + 0.1).min(0.5);
             }
             "raid" => {
                 events.push(GameEvent::LogMessage(
-                    "⚠️ НОЧЬ НАЛЁТА — геном оптимизирован под ресурсы!"
-                        .to_string(),
+                    "⚠️ НОЧЬ НАЛЁТА — геном оптимизирован под ресурсы!".to_string(),
                 ));
                 self.tactic_preferences.resource_raid =
                     (self.tactic_preferences.resource_raid + 0.2).min(0.6);
@@ -2387,16 +2336,14 @@ impl RebelSystem {
                     "💀 НОЧЬ ЭЛИТНОГО ШТУРМА!".to_string(),
                 ));
                 self.aggression = (self.aggression + 0.15).min(1.0);
-                self.strategic_intelligence =
-                    (self.strategic_intelligence + 0.1).min(1.0);
+                self.strategic_intelligence = (self.strategic_intelligence + 0.1).min(1.0);
                 for agent in self.sarsa_agents.values_mut() {
                     agent.alpha = (agent.alpha + 0.02).min(0.25);
                 }
             }
             "coordinated" => {
                 events.push(GameEvent::LogMessage(
-                    "⚡ КООРДИНИРОВАННАЯ КАМПАНИЯ — все фракции объединились!"
-                        .to_string(),
+                    "⚡ КООРДИНИРОВАННАЯ КАМПАНИЯ — все фракции объединились!".to_string(),
                 ));
                 self.aggression = (self.aggression + 0.2).min(1.0);
                 for val in self.coalition_matrix.values_mut() {
@@ -2456,16 +2403,14 @@ impl RebelSystem {
             return events;
         }
 
-        let attack_probability =
-            self.calculate_attack_probability_ai(state, config);
+        let attack_probability = self.calculate_attack_probability_ai(state, config);
         let rng_val = self.prng(
             (state.tick_count as u64 * 97 + self.stats.total_attacks as u64)
                 + (js_sys::Date::now() as u64 % 997),
         );
 
         if rng_val < attack_probability {
-            let time_seed =
-                state.tick_count as u64 * 1000 + self.stats.total_attacks as u64;
+            let time_seed = state.tick_count as u64 * 1000 + self.stats.total_attacks as u64;
             let attack = self.prepare_attack_ai(state, config, time_seed);
             let primary_faction = attack
                 .faction
@@ -2509,7 +2454,7 @@ impl RebelSystem {
                 state.protection_breached_this_night = true;
                 state.total_breaches += 1;
                 events.push(GameEvent::LogMessage(
-                    "💀 ПОВСТАНЦЫ ПРОБИЛИ ЗАЩИТУ! Откуп не помог!".to_string()
+                    "💀 ПОВСТАНЦЫ ПРОБИЛИ ЗАЩИТУ! Откуп не помог!".to_string(),
                 ));
 
                 let (attack_events, was_successful) = self.execute_attack(state, config, &attack);
@@ -2532,12 +2477,10 @@ impl RebelSystem {
             }
 
             if is_protected {
-                events.push(GameEvent::LogMessage(
-                    format!(
-                        "🛡️ Откуп отпугнул основную волну (шанс прорыва был {:.0}%)",
-                        breach_chance * 100.0
-                    )
-                ));
+                events.push(GameEvent::LogMessage(format!(
+                    "🛡️ Откуп отпугнул основную волну (шанс прорыва был {:.0}%)",
+                    breach_chance * 100.0
+                )));
                 if let Some(sabotage_events) = self.try_background_sabotage(state, config) {
                     events.extend(sabotage_events);
                 }
@@ -2617,8 +2560,8 @@ impl RebelSystem {
                     let i2 = (rng_val * 7.0 * self.genome_population.len() as f64) as usize
                         % self.genome_population.len();
                     let point = ((rng_val * 12.0) as usize).min(11);
-                    let child = self.genome_population[i1]
-                        .crossover(&self.genome_population[i2], point);
+                    let child =
+                        self.genome_population[i1].crossover(&self.genome_population[i2], point);
                     if let Some(worst_idx) = self
                         .genome_population
                         .iter()
@@ -2646,12 +2589,15 @@ impl RebelSystem {
     }
 
     pub fn encode_sarsa_state(&self, game_state: &GameState) -> usize {
-
         let activity_bucket = (game_state.rebel_activity / 3).min(4) as usize;
         let day_night = if game_state.is_day { 0 } else { 1 };
-        let defense_bucket = if !game_state.upgrades.defense { 0 }
-            else if game_state.upgrades.defense_level < 3 { 1 }
-            else { 2 };
+        let defense_bucket = if !game_state.upgrades.defense {
+            0
+        } else if game_state.upgrades.defense_level < 3 {
+            1
+        } else {
+            2
+        };
         let neuro_bucket = (game_state.neuro_evolution / 3).min(2) as usize;
 
         let raw = activity_bucket * 18 + day_night * 9 + defense_bucket * 3 + neuro_bucket;
@@ -2669,8 +2615,7 @@ impl RebelSystem {
     ) {
         if let Some(agent) = self.sarsa_agents.get_mut(faction_id) {
             let rng = agent.total_reward as u64 + time;
-            let next_action = agent
-                .choose_action(next_state, (rng % 1000) as f64 / 1000.0);
+            let next_action = agent.choose_action(next_state, (rng % 1000) as f64 / 1000.0);
             agent.update(state, action, reward, next_state, next_action);
         }
     }
@@ -2681,7 +2626,6 @@ impl RebelSystem {
         attack_type_idx: usize,
         was_successful: bool,
     ) {
-
         let sarsa_state = self.encode_sarsa_state(state);
         let sarsa_next = self.encode_sarsa_state(state);
 
@@ -2709,10 +2653,7 @@ impl RebelSystem {
             }
         };
 
-        let faction_id = self
-            .active_faction
-            .clone()
-            .unwrap_or_default();
+        let faction_id = self.active_faction.clone().unwrap_or_default();
         self.sarsa_update_faction(
             &faction_id,
             sarsa_state,
@@ -2855,8 +2796,7 @@ impl RebelSystem {
         }
         self.update_cache();
         if self.stats.total_attacks > 0 {
-            let sr = self.stats.successful_attacks as f64
-                / self.stats.total_attacks as f64;
+            let sr = self.stats.successful_attacks as f64 / self.stats.total_attacks as f64;
             self.morale = self.morale * 0.94 + sr * 0.06;
         }
     }
@@ -2893,9 +2833,7 @@ impl RebelSystem {
                 "«Стратег» — накапливает {} из 3 тихих ночей, затем наносит идеальный удар",
                 faction.consecutive_quiet_nights
             ),
-            PersonalityType::Chaos => {
-                "«Хаос» — непредсказуем, даже сам не знает план".to_string()
-            }
+            PersonalityType::Chaos => "«Хаос» — непредсказуем, даже сам не знает план".to_string(),
         };
         let frustration = if faction.commander.is_frustrated {
             format!(
@@ -2917,8 +2855,7 @@ impl RebelSystem {
             self.adaptation_level += diff;
             self.strategic_intelligence =
                 (self.strategic_intelligence + 0.06 * diff as f64).min(1.0);
-            self.ai_threat_perception =
-                (self.ai_threat_perception + 0.12).min(1.0);
+            self.ai_threat_perception = (self.ai_threat_perception + 0.12).min(1.0);
             if !self
                 .ai_adaptation
                 .recognized_patterns
@@ -2930,9 +2867,7 @@ impl RebelSystem {
             }
             self.develop_counter_tactic(strategy, ai_level);
             self.adapt_tactics_to_ai(strategy);
-            let rng = self.prng(
-                ai_level as u64 * 1337 + self.evolution_score as u64,
-            );
+            let rng = self.prng(ai_level as u64 * 1337 + self.evolution_score as u64);
             if rng < 0.4 {
                 let rng2 = self.prng(ai_level as u64 * 1338 + self.evolution_score as u64);
                 let rng3 = self.prng(ai_level as u64 * 1339 + self.evolution_score as u64);
@@ -2962,8 +2897,7 @@ impl RebelSystem {
     pub fn on_ai_prediction(&mut self, prediction_accuracy: f64) {
         self.ai_adaptation.prediction_evasion =
             (self.ai_adaptation.prediction_evasion + 0.06).min(0.6);
-        self.strategic_intelligence =
-            (self.strategic_intelligence + 0.04).min(1.0);
+        self.strategic_intelligence = (self.strategic_intelligence + 0.04).min(1.0);
         if prediction_accuracy > 0.65 {
             self.switch_to_evasion_tactics();
             self.best_genome.weights[4] += 0.08;
@@ -3010,8 +2944,7 @@ impl RebelSystem {
     fn adapt_tactics_to_ai(&mut self, ai_strategy: &str) {
         match ai_strategy {
             "predictive" => {
-                self.tactic_preferences.stealth =
-                    (self.tactic_preferences.stealth + 0.1).min(0.4);
+                self.tactic_preferences.stealth = (self.tactic_preferences.stealth + 0.1).min(0.4);
                 self.tactic_preferences.psychological =
                     (self.tactic_preferences.psychological + 0.05).min(0.3);
             }
@@ -3021,8 +2954,7 @@ impl RebelSystem {
                     (self.tactic_preferences.direct_assault + 0.1).min(0.5);
             }
             "aggressive" => {
-                self.tactic_preferences.stealth =
-                    (self.tactic_preferences.stealth + 0.15).min(0.5);
+                self.tactic_preferences.stealth = (self.tactic_preferences.stealth + 0.15).min(0.5);
                 self.tactic_preferences.sabotage =
                     (self.tactic_preferences.sabotage + 0.1).min(0.4);
             }
@@ -3031,8 +2963,7 @@ impl RebelSystem {
     }
 
     fn switch_to_evasion_tactics(&mut self) {
-        self.tactic_preferences.stealth =
-            (self.tactic_preferences.stealth + 0.15).min(0.6);
+        self.tactic_preferences.stealth = (self.tactic_preferences.stealth + 0.15).min(0.6);
         self.tactic_preferences.psychological =
             (self.tactic_preferences.psychological + 0.1).min(0.4);
         self.ai_adaptation.prediction_evasion =
@@ -3044,8 +2975,7 @@ impl RebelSystem {
         self.evolution_level += 1;
         self.evolution_score -= 100;
         self.stats.evolutions += 1;
-        self.strategic_intelligence =
-            (self.strategic_intelligence + 0.12).min(1.0);
+        self.strategic_intelligence = (self.strategic_intelligence + 0.12).min(1.0);
         self.ai_adaptation.adaptation_speed =
             (self.ai_adaptation.adaptation_speed + 0.06).min(0.85);
         match self.evolution_level {
@@ -3084,9 +3014,7 @@ impl RebelSystem {
             faction.commander.consecutive_losses += 1;
             faction.commander.last_loss_time = current_time;
             faction.commander.quiet_nights_accumulated = 0;
-            if faction.commander.consecutive_losses == 3
-                && !faction.commander.is_frustrated
-            {
+            if faction.commander.consecutive_losses == 3 && !faction.commander.is_frustrated {
                 faction.commander.is_frustrated = true;
                 events.push(GameEvent::LogMessage(format!(
                     "🎯 Нейро фиксирует: командир {} [{}] деморализован. \
@@ -3126,23 +3054,17 @@ impl RebelSystem {
     }
 
     #[allow(dead_code)]
-    pub fn record_decoy_result(
-        &mut self,
-        faction_id: &str,
-        was_ignored: bool,
-    ) {
+    pub fn record_decoy_result(&mut self, faction_id: &str, was_ignored: bool) {
         if let Some(faction) = self.factions.get_mut(faction_id) {
             if was_ignored {
                 faction.decoy_ignored_by_player += 1;
                 if faction.decoy_ignored_by_player == 5 {
                     faction.decoy_use_count = 0;
-                    faction.resources.manpower =
-                        (faction.resources.manpower + 10).min(200);
+                    faction.resources.manpower = (faction.resources.manpower + 10).min(200);
                 }
             } else {
                 faction.decoy_use_count += 1;
-                faction.decoy_ignored_by_player =
-                    faction.decoy_ignored_by_player.saturating_sub(1);
+                faction.decoy_ignored_by_player = faction.decoy_ignored_by_player.saturating_sub(1);
             }
         }
     }
@@ -3164,8 +3086,7 @@ impl RebelSystem {
         self.multiphase_phase = 1;
         self.multiphase_timer = 15;
         events.push(GameEvent::LogMessage(
-            "⚡ Повстанцы перешли к многофазной тактике! Фаза 1: отвлечение..."
-                .to_string(),
+            "⚡ Повстанцы перешли к многофазной тактике! Фаза 1: отвлечение...".to_string(),
         ));
         events
     }
@@ -3197,7 +3118,10 @@ impl RebelSystem {
                 let attack = AttackPlan {
                     id: format!("multiphase_{}", state.tick_count),
                     attack_type: AttackType::CoalitionStrike,
-                    faction: self.active_faction.clone().unwrap_or_else(|| "scavengers".to_string()),
+                    faction: self
+                        .active_faction
+                        .clone()
+                        .unwrap_or_else(|| "scavengers".to_string()),
                     targets: vec![
                         AttackTarget::Resource {
                             resource: "plasma".to_string(),
@@ -3232,11 +3156,7 @@ impl RebelSystem {
         events
     }
 
-    pub fn record_player_reaction(
-        &mut self,
-        warning_time: i64,
-        action_time: i64,
-    ) {
+    pub fn record_player_reaction(&mut self, warning_time: i64, action_time: i64) {
         let reaction = action_time - warning_time;
         self.player_reaction_times.push_back(reaction);
         if self.player_reaction_times.len() > 20 {
@@ -3249,10 +3169,7 @@ impl RebelSystem {
         }
     }
 
-    pub fn escalate_arms_race(
-        &mut self,
-        _trigger: &str,
-    ) -> Vec<GameEvent> {
+    pub fn escalate_arms_race(&mut self, _trigger: &str) -> Vec<GameEvent> {
         let mut events = Vec::new();
         self.arms_race_level += 1;
         let new_vuln = match self.arms_race_level % 4 {
@@ -3311,13 +3228,7 @@ impl RebelSystem {
             .iter()
             .enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
-            .map(|(i, &w)| {
-                format!(
-                    "Nash→{} ({:.0}%)",
-                    AttackType::from_index(i),
-                    w * 100.0
-                )
-            })
+            .map(|(i, &w)| format!("Nash→{} ({:.0}%)", AttackType::from_index(i), w * 100.0))
             .unwrap_or_default();
         format!(
             "☠️ Мятеж Ур.{} | Мораль:{:.0}% | Инт:{:.0}% | {} | {} | Кампания:{}",
