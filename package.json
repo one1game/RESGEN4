@@ -9,6 +9,8 @@
     "check:js": "node scripts/check-js.mjs",
     "check:config": "node -e \"JSON.parse(require('fs').readFileSync('config.json', 'utf8')); console.log('config.json: OK')\"",
     "test:local-db": "node scripts/test-local-db.mjs",
+    "seed:pvp": "node scripts/seed-pvp-test-accounts.mjs",
+    "test:local-pvp": "node scripts/test-local-pvp.mjs",
     "audit:balance": "node scripts/balance-audit.mjs",
     "test:quest-contract": "node scripts/test-quest-contract.mjs",
     "test:save-integrity": "node scripts/test-save-integrity.mjs",
