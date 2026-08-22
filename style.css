@@ -1541,3 +1541,14 @@ button:focus-visible, [role="button"]:focus-visible, .tab:focus-visible, .status
 .power-recovery-status.is-recovering { color:#ffcc66; border-left-color:#ffcc66; background:rgba(255,204,102,.06); }
 .power-recovery-status.is-blocked { color:#ff8a78; border-left-color:#ff6644; background:rgba(255,68,68,.06); }
 @media (max-width:768px) { .power-recovery-status { min-height:30px; display:flex; align-items:center; } }
+
+.ops-factions { display:flex; gap:5px; overflow-x:auto; margin:6px 0; }
+.ops-faction { display:flex; gap:5px; align-items:center; padding:5px 6px; border:1px solid rgba(255,204,102,.18); border-radius:4px; color:#9aaab0; font:9px var(--font-mono,monospace); white-space:nowrap; }
+.ops-faction i { color:#ffcc66; font-style:normal; }
+.ops-retention { margin-top:10px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08); }
+.ops-goal, .ops-project { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid rgba(255,255,255,.05); }
+.ops-goal b, .ops-project b { display:block; color:#d7e4e8; font:10px var(--font-mono,monospace); }
+.ops-goal small, .ops-project small { display:block; margin-top:2px; color:#74868e; font:9px var(--font-mono,monospace); }
+.ops-goal button, .ops-project button { flex:0 0 auto; min-width:54px; padding:5px 7px; border:1px solid rgba(74,255,157,.35); border-radius:4px; color:#4aff9d; background:rgba(74,255,157,.06); font:700 9px var(--font-mono,monospace); cursor:pointer; }
+.ops-goal button:disabled, .ops-project button:disabled { opacity:.45; cursor:default; }
+@media (max-width:768px) { .ops-goal button, .ops-project button { min-height:34px; } }
