@@ -366,6 +366,7 @@
 
             <div class="user-info" id="userInfo" style="display: none;">
                 <span id="usernameDisplay"></span>
+                <span id="saveIndicator" aria-live="polite">СОХРАНЕНО</span>
                 <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
             </div>
 
@@ -451,6 +452,7 @@
                             <span class="tec-status" id="coalStatusDisplay">ОФФЛАЙН</span>
                             <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal" aria-label="Включить или выключить ТЭЦ">⚡</button>
                             <span class="tec-info">Уголь: <b id="coalInventoryAmount">0</b> | Бонус: <b id="tecPowerBonus">+0</b>%</span>
+                            <span id="coalNightsHint" class="coal-info" aria-live="polite"></span>
                         </div>
                         <div id="tec-warning" class="tec-warning" style="display: none;"></div>
                     </div>
@@ -908,6 +910,11 @@
                                 <div id="space-objects-layer" style="display: none;"></div>
                             </div>
                             <canvas id="space-main-canvas" width="800" height="400"></canvas>
+                            <div class="map-zoom-controls" role="group" aria-label="Управление масштабом карты">
+                                <button id="map-zoom-in" type="button" aria-label="Увеличить карту" title="Увеличить">+</button>
+                                <button id="map-zoom-reset" type="button" aria-label="Сбросить масштаб" title="Центрировать">◎</button>
+                                <button id="map-zoom-out" type="button" aria-label="Уменьшить карту" title="Уменьшить">−</button>
+                            </div>
 
                             <div id="space-coordinates">
                                 🗺️ 5000×5000 📍 --- --- 🔍 ---x

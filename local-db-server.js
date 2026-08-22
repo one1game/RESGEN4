@@ -463,16 +463,23 @@ function computeSteal(defender, percent) {
 }
 function rpcAtomicPvpSteal(args) {
   const { p_attacker_id, p_defender_id, p_percent } = args;
-  const defender = getSaveOrError(p_defender_id);
-  const loot = computeSteal(defender, p_percent);
-  if (defender) {
-    for (const res of RESOURCES) setResource(p_defender_id, res, Number(defender[res]) - loot[res]);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const defender = getSaveOrError(p_defender_id);
+    const loot = computeSteal(defender, p_percent);
+    if (defender) {
+      for (const res of RESOURCES) setResource(p_defender_id, res, Number(defender[res]) - loot[res]);
+    }
+    const attacker = getSaveOrError(p_attacker_id);
+    if (attacker) {
+      for (const res of RESOURCES) if (loot[res] > 0) addResource(p_attacker_id, res, loot[res]);
+    }
+    db.exec('COMMIT');
+    return { loot };
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch {}
+    throw error;
   }
-  const attacker = getSaveOrError(p_attacker_id);
-  if (attacker) {
-    for (const res of RESOURCES) if (loot[res] > 0) addResource(p_attacker_id, res, loot[res]);
-  }
-  return { loot };
 }
 function rpcStealPvpResources(args) {
   const { p_defender_id, p_percent } = args;
