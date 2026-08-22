@@ -567,10 +567,12 @@ async function handleRest(req, res, url) {
       });
       sql += ' ORDER BY ' + ords.join(', ');
     }
-    const limit = url.searchParams.get('limit');
-    const offset = url.searchParams.get('offset');
-    if (limit) sql += ' LIMIT ' + Number(limit);
-    if (offset) sql += ' OFFSET ' + Number(offset);
+    const limitRaw = url.searchParams.get('limit');
+    const offsetRaw = url.searchParams.get('offset');
+    const limit = limitRaw !== null && /^\d+$/.test(limitRaw) ? Number(limitRaw) : null;
+    const offset = offsetRaw !== null && /^\d+$/.test(offsetRaw) ? Number(offsetRaw) : null;
+    if (limit !== null) sql += ' LIMIT ' + limit;
+    if (offset !== null) sql += ' OFFSET ' + offset;
     let rows = db.prepare(sql).all(...where.params).map(r => fromDb(table, r));
     if (select !== '*') {
       const want = select.split(',').map(s => s.trim()).filter(Boolean);

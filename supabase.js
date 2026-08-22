@@ -120,8 +120,8 @@ class QueryBuilder {
     in(c, v) { return this._push('in', [c, v]); }
     or(s) { return this._push('or', [s]); }
     order(c, o) { return this._push('order', [c, o || {}]); }
-    limit(n) { return this._push('limit', [n]); }
-    offset(n) { return this._push('offset', [n]); }
+    limit(n) { return n === undefined || n === null || n === '' ? this : this._push('limit', [n]); }
+    offset(n) { return n === undefined || n === null || n === '' ? this : this._push('offset', [n]); }
     single() { this._single = 'single'; return this; }
     maybeSingle() { this._single = 'maybe'; return this; }
     insert(body) { this._write = ['insert', body]; return this; }
