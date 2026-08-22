@@ -22,6 +22,38 @@ function getShipTravelSeconds(shipType) {
     return cfg?.[shipType]?.travel_time_sec ?? defaults[shipType] ?? 60;
 }
 
+export async function getFlightTiming(attackerId, targetId, shipType) {
+    const baseSeconds = getShipTravelSeconds(shipType);
+    const fallback = { x: 2500, y: 2500 };
+    let positions = new Map();
+    try {
+        const { data } = await supabase
+            .from('game_saves')
+            .select('user_id, map_x, map_y')
+            .in('user_id', [attackerId, targetId]);
+        (data || []).forEach(row => {
+            const x = Number(row.map_x);
+            const y = Number(row.map_y);
+            if (Number.isFinite(x) && Number.isFinite(y)) positions.set(row.user_id, { x, y });
+        });
+    } catch (e) {
+        console.warn('Flight coordinates unavailable, using safe fallback:', e);
+    }
+    const from = positions.get(attackerId) || fallback;
+    const to = positions.get(targetId) || fallback;
+    const distance = Math.hypot(to.x - from.x, to.y - from.y);
+    const distanceMultiplier = Math.min(3, 1 + distance / 2500);
+    const travelSeconds = Math.max(baseSeconds, Math.round(baseSeconds * distanceMultiplier));
+    return { baseSeconds, travelSeconds, distance: Math.round(distance), distanceMultiplier: Number(distanceMultiplier.toFixed(2)) };
+}
+
+function formatTravelTime(seconds) {
+    if (seconds < 60) return `${seconds} сек`;
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return remainder ? `${minutes} мин ${remainder} сек` : `${minutes} мин`;
+}
+
 const SHIP_ICONS = { scout: '🔭', combat: '⚔️', cargo: '🚚' };
 const SHIP_LABELS = { scout: 'Разведчик', combat: 'Боевой', cargo: 'Грузовой' };
 
@@ -92,7 +124,8 @@ export async function sendShip(attackerId, targetId, shipType) {
     }
 
     const now = Date.now();
-    const travelTimeMs = getShipTravelSeconds(shipType) * 1000;
+    const timing = await getFlightTiming(attackerId, targetId, shipType);
+    const travelTimeMs = timing.travelSeconds * 1000;
     const arrivesAt = new Date(now + travelTimeMs);
     const returnsAt = new Date(now + travelTimeMs * 2);
 
@@ -113,7 +146,7 @@ export async function sendShip(attackerId, targetId, shipType) {
         combatMissionId = latestCombat?.id || null;
     }
 
-    const flightMinutes = getShipTravelSeconds(shipType) / 60;
+    const flightLabel = formatTravelTime(timing.travelSeconds);
 
     const { data: mission, error } = await supabase
         .from('missions')
@@ -145,12 +178,13 @@ export async function sendShip(attackerId, targetId, shipType) {
     }
 
     await pushNotification(attackerId, 'mission_sent', {
-        message: `🚀 Миссия отправлена (${icon} ${label}), прибытие через ${Math.round(flightMinutes)} мин`,
+                    message: `🚀 Миссия отправлена (${icon} ${label}), прибытие через ${flightLabel}`,
+
         payload: { mission_id: mission.id, ship_type: shipType, arrives_at: arrivesAt.toISOString() }
     });
 
     await pushNotification(targetId, 'incoming_ship', {
-        message: `⚠️ К вашей планете летит ${icon} ${label}! Прибудет через ${Math.floor(getShipTravelSeconds(shipType) / 60)} мин.`,
+        message: `⚠️ К вашей планете летит ${icon} ${label}! Прибудет через ${flightLabel}.`,
         payload: { arrives_at: arrivesAt.toISOString(), mission_id: mission.id, ship_type: shipType }
     });
 
