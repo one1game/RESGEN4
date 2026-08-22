@@ -927,11 +927,34 @@ export const spaceModule = {
         visibleCandidates.push(player);
     }
 
-    this._visiblePlayers = visibleCandidates;
+    // При большом онлайне не рисуем тысячи перекрывающихся сфер.
+    // Игроки сохраняются в `otherPlayers` для списка, а canvas группирует
+    // близкие точки; представитель кластера остаётся PvP-кликабельным.
+    const MAX_RENDERED_PLAYERS = 280;
+    const PLAYER_CLUSTER_PX = 22;
+    const renderEntries = [];
+    if (visibleCandidates.length <= MAX_RENDERED_PLAYERS) {
+        renderEntries.push(...visibleCandidates.map(player => ({ player, count: 1 })));
+    } else {
+        const clusters = new Map();
+        for (const player of visibleCandidates) {
+            const screen = this._worldToScreen(player.pos.x, player.pos.y);
+            const key = `${Math.floor(screen.x / PLAYER_CLUSTER_PX)}:${Math.floor(screen.y / PLAYER_CLUSTER_PX)}`;
+            const cluster = clusters.get(key);
+            if (cluster) {
+                cluster.count++;
+            } else {
+                clusters.set(key, { player, count: 1 });
+            }
+        }
+        renderEntries.push(...clusters.values());
+    }
+
+    this._visiblePlayers = renderEntries.map(entry => entry.player);
 
     const baseRadius = 1.2 * this._zoom;
 
-    for (const player of visibleCandidates) {
+    for (const { player, count } of renderEntries) {
         const screen = this._worldToScreen(player.pos.x, player.pos.y);
         const color = this._getPlayerColor(player.user_id);
         const isOnline = this.isOnline(player);
