@@ -4145,13 +4145,13 @@ function calculateOfflineProgress(saved) {
     const hasBlueprint = Array.isArray(saved?.blueprints)
         ? saved.blueprints.some(bp => bp?.unlocked === true)
         : false;
-    const recommendedAction = successfulAttacks > 0
-        ? 'Проверь ФЛОТ и восстанови защиту после атаки.'
+    const recommendation = successfulAttacks > 0
+        ? { text: 'Проверь ФЛОТ и восстанови защиту после атаки.', tab: 'fleet', label: 'ОТКРЫТЬ ФЛОТ' }
         : !hasBlueprint && powerGained >= 200
-            ? 'Открой РАЗРАБОТКУ: мощности достаточно для первого чертежа.'
+            ? { text: 'Открой РАЗРАБОТКУ: мощности достаточно для первого чертежа.', tab: 'design', label: 'ОТКРЫТЬ РАЗРАБОТКУ' }
             : powerGained > 0
-                ? 'Проверь МОДУЛИ и вложи вычислительную мощность в следующий upgrade.'
-                : 'Собери ресурсы и выбери ближайшее задание.';
+                ? { text: 'Проверь МОДУЛИ и вложи вычислительную мощность в следующий upgrade.', tab: 'upgrades', label: 'ОТКРЫТЬ МОДУЛИ' }
+                : { text: 'Собери ресурсы и выбери ближайшее задание.', tab: 'quests', label: 'ОТКРЫТЬ ЗАДАНИЯ' };
 
     return {
         elapsedSeconds: elapsed,
@@ -4182,7 +4182,9 @@ function calculateOfflineProgress(saved) {
         fleetDamage: fleetDamage,
         tecSabotageCount: tecSabotageCount,
         blueprintTheftCount: blueprintTheftCount,
-        recommendedAction: recommendedAction,
+        recommendedAction: recommendation.text,
+        recommendedTab: recommendation.tab,
+        recommendedLabel: recommendation.label,
     };
 }
 
@@ -4298,7 +4300,10 @@ function showOfflineRewardPopup(p) {
         ${gainsHtml ? `<div class="offline-resources"><h4>📈 ДОБЫЧА:</h4>${gainsHtml}</div>` : ''}
         ${lossesHtml ? `<div class="offline-losses"><h4>📉 РАСХОД:</h4>${lossesHtml}</div>` : ''}
         ${eventsHtml ? `<div class="offline-events"><h4>⚠️ СОБЫТИЯ:</h4>${eventsHtml}</div>` : ''}
-        <button id="offlinePopupClose">ПРОДОЛЖИТЬ</button>
+        <div class="offline-popup-actions">
+            <button id="offlineNextAction" class="offline-next-button">${p.recommendedLabel || 'ОТКРЫТЬ СЛЕДУЮЩИЙ ШАГ'}</button>
+            <button id="offlinePopupClose" class="offline-close-button">ПРОДОЛЖИТЬ</button>
+        </div>
     `;
 
     document.body.appendChild(popup);
@@ -4308,6 +4313,10 @@ function showOfflineRewardPopup(p) {
     };
 
     document.getElementById('offlinePopupClose').onclick = closePopup;
+    document.getElementById('offlineNextAction').onclick = () => {
+        closePopup();
+        if (p.recommendedTab) switchMainTab(p.recommendedTab);
+    };
     setTimeout(closePopup, 30000);
 
     localStorage.setItem(USER_STORAGE_KEY('corebox_offline_shown'), Date.now().toString());
