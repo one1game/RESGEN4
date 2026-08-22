@@ -1486,3 +1486,52 @@ button:focus-visible, [role="button"]:focus-visible, .tab:focus-visible, .status
   .map-zoom-controls { top: 8px; right: 8px; }
   .map-zoom-controls button { width: 42px; height: 42px; min-height: 42px; font-size: 20px; }
 }
+
+
+/* Operations Deck: compact command surface */
+.ops-deck { margin: 10px 0; padding: 12px; border: 1px solid rgba(74,255,157,.24); border-radius: 8px; background: linear-gradient(135deg, rgba(11,24,29,.96), rgba(8,14,22,.96)); contain: content; }
+.ops-deck-head, .ops-status-line, .ops-contract-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ops-kicker, .ops-subtitle { color:#4aff9d; font:700 9px/1.3 var(--font-mono, monospace); letter-spacing:1px; }
+.ops-deck h3 { margin:3px 0 0; color:#f1faf7; font:700 14px/1.2 var(--font-mono, monospace); }
+.ops-clock { color:#82939a; font:700 14px/1 var(--font-mono, monospace); font-variant-numeric:tabular-nums; }
+.ops-clock.is-live { color:#ffcc66; }
+.ops-status-line { margin:9px 0; color:#aeb9bf; font:11px/1.3 var(--font-mono, monospace); }
+.ops-mini-btn { border:1px solid rgba(74,158,255,.35); border-radius:5px; padding:6px 8px; color:#a9c9ff; background:rgba(74,158,255,.08); font:700 10px var(--font-mono, monospace); cursor:pointer; white-space:nowrap; }
+.ops-mini-btn.is-on { color:#071014; background:#4aff9d; border-color:#4aff9d; }
+.ops-sectors { display:flex; gap:5px; overflow-x:auto; padding:2px 0 8px; scrollbar-width:thin; }
+.ops-sector-chip { flex:0 0 auto; padding:5px 6px; border:1px solid rgba(255,255,255,.1); border-radius:4px; color:#7f9098; font:9px var(--font-mono, monospace); }
+.ops-sector-chip b { color:#ffb86b; margin-left:3px; }
+.ops-sector-chip.is-active { border-color:rgba(74,255,157,.55); color:#d9fff0; background:rgba(74,255,157,.08); }
+.ops-contracts { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+.ops-contract { min-width:0; min-height:78px; padding:8px; text-align:left; border:1px solid rgba(100,140,160,.22); border-radius:6px; color:#aeb9bf; background:rgba(255,255,255,.025); font:10px/1.3 var(--font-mono, monospace); cursor:pointer; }
+.ops-contract:hover, .ops-contract:focus-visible { border-color:#4aff9d; background:rgba(74,255,157,.08); }
+.ops-contract.is-locked { opacity:.48; cursor:not-allowed; }
+.ops-contract b { display:block; overflow:hidden; color:#f1faf7; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.ops-contract em { color:#ffcc66; font-size:9px; font-style:normal; }
+.ops-contract small { display:block; margin-top:6px; color:#70838b; font-size:9px; }
+.ops-subgrid { display:grid; grid-template-columns:1.2fr 1fr; gap:8px; margin-top:10px; }
+.ops-report, .ops-empty { display:flex; flex-direction:column; gap:3px; min-height:36px; margin-top:5px; padding:7px; border-radius:5px; background:rgba(255,255,255,.035); color:#aeb9bf; font:10px/1.35 var(--font-mono, monospace); }
+.ops-report b { color:#4aff9d; font-size:9px; }
+.ops-report span { color:#c5d0d4; }
+.ops-mastery-row { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; }
+.ops-mastery { display:flex; flex-direction:column; gap:3px; padding:6px; border:1px solid rgba(74,158,255,.2); border-radius:4px; color:#9db7ca; font:9px var(--font-mono, monospace); }
+.ops-mastery i { color:#4aff9d; font-style:normal; letter-spacing:1px; }
+.ops-archive { margin-top:9px; padding-top:8px; border-top:1px solid rgba(255,255,255,.08); }
+.ops-subtitle span { float:right; color:#7c8d94; }
+.ops-codex-list { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+.ops-codex-item { padding:5px 6px; border-radius:4px; color:#b5c4ca; background:rgba(147,104,255,.1); font:9px var(--font-mono, monospace); }
+@media (max-width:768px) {
+  .ops-deck { margin:8px 0; padding:10px; }
+  .ops-contracts { grid-template-columns:1fr; }
+  .ops-contract { min-height:62px; }
+  .ops-subgrid { grid-template-columns:1fr; }
+  .ops-status-line { align-items:flex-start; flex-wrap:wrap; }
+  .ops-status-line > span { flex:1 0 100%; }
+  .ops-mini-btn { min-height:38px; padding:8px 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .ops-deck *, .ops-deck *::before, .ops-deck *::after { animation:none !important; transition:none !important; } }
+
+.ops-control { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:6px 0; padding:6px 8px; border-left:2px solid #9368ff; background:rgba(147,104,255,.07); color:#9babb4; font:9px var(--font-mono, monospace); }
+.ops-control b { color:#d4c7ff; font-weight:700; }
+.ops-report small { color:#82939a; font-size:9px; }
+@media (max-width:768px) { .ops-control { min-height:28px; } }

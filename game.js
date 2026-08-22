@@ -21,6 +21,7 @@ import {
     subscribeToNotifications,
 } from './multiplayer_combat.js';
 import { tradeModule } from './trade.js';
+import { operationsModule } from './operations-module.js';
 import { escapeHtml, normalizeNeuroConsciousness } from './utils.js';
 
 window.sendShipAction = sendShip;
@@ -3558,6 +3559,7 @@ async function initializeGame(existingSave = null) {
         designModule.updateComputationalPower(game.get_computational_power());
 
         spaceModule.init(game, currentUser);
+        operationsModule.init(game, currentUser?.id);
 
         if (_fleetUITimer) clearInterval(_fleetUITimer);
         _fleetUITimer = setInterval(() => {
