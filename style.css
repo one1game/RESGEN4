@@ -670,7 +670,9 @@ body {
 .blueprint-icon { font-size: 20px; margin-bottom: 6px; }
 .blueprint-info { margin-bottom: 8px; }
 .blueprint-name { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.blueprint-role { display: inline-block; margin: 3px 0 4px; padding: 1px 6px; border: 1px solid rgba(90,138,138,0.35); border-radius: 999px; color: var(--accent-cyan); font-size: 9px; letter-spacing: 1px; }
 .blueprint-desc { font-size: 10px; color: var(--text-muted); }
+.blueprint-tradeoff { margin-top: 5px; color: var(--accent-amber); font-size: 10px; line-height: 1.35; }
 .blueprint-cost { margin-bottom: 8px; }
 .cost-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
 .cost-value { display: flex; align-items: center; gap: 6px; font-size: 12px; }

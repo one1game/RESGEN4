@@ -9,9 +9,9 @@ export const designModule = {
     _userIdInitialized: false,
 
     blueprints: [
-        { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', designCost: 200, icon: '🚚', unlocked: false },
-        { id: 'scout', name: 'Разведывательный корабль', desc: 'Исследование новых территорий', designCost: 50, icon: '🔭', unlocked: false },
-        { id: 'combat', name: 'Боевой корабль', desc: 'Защита флота и атака угроз', designCost: 800, icon: '⚔️', unlocked: false }
+        { id: 'cargo', name: 'Грузовой корабль', desc: 'Перевозка ресурсов между колониями', role: 'ЭКОНОМИКА', tradeoff: 'Больше добычи в рейсах, но выше ценность цели для повстанцев.', designCost: 200, icon: '🚚', unlocked: false },
+        { id: 'scout', name: 'Разведывательный корабль', desc: 'Исследование новых территорий', role: 'РАЗВЕДКА', tradeoff: 'Открывает карту раньше и снижает риск неизвестности, но почти не приносит груз.', designCost: 50, icon: '🔭', unlocked: false },
+        { id: 'combat', name: 'Боевой корабль', desc: 'Защита флота и атака угроз', role: 'БЕЗОПАСНОСТЬ', tradeoff: 'Защищает операции и усиливает PvP, но требует самой дорогой вычислительной ветки.', designCost: 800, icon: '⚔️', unlocked: false }
     ],
 
     async initUserId() {
@@ -436,7 +436,9 @@ export const designModule = {
                 <div class="blueprint-icon">${blueprint.icon}</div>
                 <div class="blueprint-info">
                     <div class="blueprint-name">${blueprint.name}</div>
+                    <div class="blueprint-role">${blueprint.role || 'СИСТЕМА'}</div>
                     <div class="blueprint-desc">${blueprint.desc}</div>
+                    <div class="blueprint-tradeoff">↳ ${blueprint.tradeoff || 'Вклад в долгосрочную мощность флота.'}</div>
                 </div>
                 ${lockBadge}
                 <div class="blueprint-cost">
