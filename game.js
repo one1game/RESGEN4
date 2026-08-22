@@ -1656,6 +1656,40 @@ function updateCommandCenter(s) {
         if (el) el.style.width = Math.min(pct, 100) + '%';
     };
 
+    // ── OPERATIONS BRIEF: один ясный следующий приказ ──
+    const briefTitle = document.getElementById('cc-brief-title');
+    const briefBody = document.getElementById('cc-brief-body');
+    const briefAction = document.getElementById('cc-brief-action');
+    if (briefTitle && briefBody && briefAction) {
+        const coal = Number(s.coal_inventory ?? s.coal ?? 0);
+        const power = Number(s.computational_power ?? 0);
+        const mined = Number(s.total_mined ?? 0);
+        let brief = { title: 'Система стабильна', body: 'База работает. Выберите следующий вектор развития.', label: 'ОТКРЫТЬ КОМАНДНЫЙ ПУНКТ', tab: 'command' };
+        if (s.attack_warning || s.fleet_under_attack) {
+            brief = { title: 'Зафиксирована угроза', body: 'Проверьте защиту и активные маршруты, прежде чем отправлять новый корабль.', label: 'ПРОВЕРИТЬ ЗАЩИТУ', tab: 'command' };
+        } else if (mined < 100) {
+            brief = { title: 'Нарастить добычу', body: 'Соберите первые ресурсы и подготовьте базу к включению ТЭЦ.', label: 'ОТКРЫТЬ ИНВЕНТАРЬ', tab: 'inventory' };
+        } else if (!s.coal_enabled && coal > 0) {
+            brief = { title: 'Включить ТЭЦ', body: 'Уголь уже доступен. Включите энергоконтур, чтобы ускорить накопление мощности.', label: 'ОТКРЫТЬ КОМАНДНЫЙ ПУНКТ', tab: 'command' };
+        } else if (!s.blueprint_cargo_unlocked && power >= 50) {
+            brief = { title: 'Открыть первый blueprint', body: 'Вычислительной мощности достаточно для перехода от добычи к проектированию.', label: 'ОТКРЫТЬ РАЗРАБОТКУ', tab: 'design' };
+        } else if (s.blueprint_cargo_unlocked && !(window.fleetModule?.ships?.length)) {
+            brief = { title: 'Собрать первый корабль', body: 'Грузовой blueprint открыт. Создайте корабль и начните осваивать карту.', label: 'ОТКРЫТЬ КРАФТ', tab: 'craft' };
+        } else if (s.blueprint_cargo_unlocked) {
+            brief = { title: 'Расширить влияние', body: 'Флот готов. Исследуйте спиральную карту и выбирайте цель с учётом дистанции и риска.', label: 'ОТКРЫТЬ КАРТУ', tab: 'space' };
+        }
+        briefTitle.textContent = brief.title;
+        briefBody.textContent = brief.body;
+        briefAction.textContent = brief.label;
+        briefAction.dataset.tab = brief.tab;
+        if (!briefAction.dataset.bound) {
+            briefAction.dataset.bound = 'true';
+            briefAction.addEventListener('click', () => {
+                if (typeof switchMainTab === 'function') switchMainTab(briefAction.dataset.tab);
+            });
+        }
+    }
+
     // ── ШАПКА: день/ночь ──
     const isDay = !!s.is_day;
     const dayLabel = document.getElementById('cc-day-label');
