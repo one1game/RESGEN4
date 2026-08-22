@@ -25,8 +25,14 @@ function run() {
     for (let i = 0; i < COUNT; i++) {
     const id = `${PREFIX}${String(i + 1).padStart(4, '0')}`;
     const username = `SIM_${String(i + 1).padStart(4, '0')}`;
-    const x = 100 + (i % 50) * 96;
-    const y = 100 + Math.floor(i / 50) * 120;
+    const center = 2500;
+    const t = (i + 0.5) / COUNT;
+    const radius = 70 + 2280 * Math.pow(t, 1.28);
+    const arm = i % 5;
+    const jitter = Math.sin(i * 12.9898) * 0.16 + Math.cos(i * 78.233) * 0.08;
+    const angle = (arm / 5) * Math.PI * 2 + radius * 0.0038 + jitter;
+    const x = Math.max(40, Math.min(4960, center + Math.cos(angle) * radius));
+    const y = Math.max(40, Math.min(4960, center + Math.sin(angle) * radius * 0.72));
     const ore = 100 + (i % 17) * 25;
     const coal = 50 + (i % 13) * 10;
     const chips = 10 + (i % 9) * 3;
@@ -46,6 +52,6 @@ function run() {
 
 run();
 const count = db.prepare(`SELECT COUNT(*) AS n FROM game_saves WHERE user_id LIKE ?`).get(`${PREFIX}%`).n;
-console.log(JSON.stringify({ ok: count === COUNT, database: DB_FILE, syntheticPlayers: count, coordinateGrid: '50 x 40', prefix: PREFIX }, null, 2));
+console.log(JSON.stringify({ ok: count === COUNT, database: DB_FILE, syntheticPlayers: count, distribution: '5-arm spiral from center (2500,2500)', prefix: PREFIX }, null, 2));
 db.close();
 if (count !== COUNT) process.exitCode = 1;
