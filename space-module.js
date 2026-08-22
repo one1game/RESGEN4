@@ -1199,6 +1199,66 @@ export const spaceModule = {
         ctx.restore();
     },
 
+    _drawSectors(ctx) {
+        const cx = this._mapSize / 2;
+        const cy = this._mapSize / 2;
+        const center = this._worldToScreen(cx, cy);
+        const scale = this._canvasW * this._zoom / this._mapSize;
+        const sectors = [
+            { name: 'CORE // СТАНЦИИ', inner: 0, outer: 560, color: '#4aff9d', alpha: 0.12 },
+            { name: 'MINING BELT // ДОБЫЧА', inner: 560, outer: 1180, color: '#ffcc44', alpha: 0.08 },
+            { name: 'REBEL RIM // УГРОЗА', inner: 1180, outer: 1880, color: '#ff6644', alpha: 0.07 },
+            { name: 'DEEP VOID // РИСК', inner: 1880, outer: 2460, color: '#9b7cff', alpha: 0.05 }
+        ];
+        ctx.save();
+        for (const sector of sectors) {
+            const outer = sector.outer * scale;
+            const inner = sector.inner * scale;
+            ctx.beginPath();
+            ctx.arc(center.x, center.y, outer, 0, Math.PI * 2);
+            if (inner > 0) ctx.arc(center.x, center.y, inner, 0, Math.PI * 2, true);
+            else ctx.arc(center.x, center.y, 0, 0, Math.PI * 2, true);
+            ctx.fillStyle = `${sector.color}${Math.round(sector.alpha * 255).toString(16).padStart(2, '0')}`;
+            ctx.fill('evenodd');
+            ctx.setLineDash([5, 8]);
+            ctx.strokeStyle = `${sector.color}35`;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+            ctx.setLineDash([]);
+            const labelRadius = ((sector.inner + sector.outer) / 2) * scale;
+            const labelX = center.x + labelRadius * 0.72;
+            const labelY = center.y - labelRadius * 0.72;
+            if (labelX > -180 && labelX < this._canvasW + 180 && labelY > -30 && labelY < this._canvasH + 30) {
+                ctx.font = '8px monospace';
+                ctx.fillStyle = `${sector.color}99`;
+                ctx.fillText(sector.name, labelX, labelY);
+            }
+        }
+
+        // Горячие точки делают карту направленной: это не декоративные планеты,
+        // а понятные зоны для первых маршрутов и будущих событий.
+        const hotspots = [
+            { name: 'NEXUS', x: 2500, y: 2500, color: '#4aff9d' },
+            { name: 'SCRAPLINE', x: 3220, y: 2020, color: '#ffcc44' },
+            { name: 'RED VEIL', x: 1650, y: 3300, color: '#ff6644' },
+            { name: 'NULL GATE', x: 4080, y: 3650, color: '#9b7cff' }
+        ];
+        for (const hotspot of hotspots) {
+            const p = this._worldToScreen(hotspot.x, hotspot.y);
+            if (p.x < -30 || p.x > this._canvasW + 30 || p.y < -30 || p.y > this._canvasH + 30) continue;
+            const pulse = 2 + Math.sin(Date.now() / 900 + hotspot.x) * 0.7;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, (7 + pulse) * this._zoom, 0, Math.PI * 2);
+            ctx.strokeStyle = `${hotspot.color}55`;
+            ctx.lineWidth = 0.8;
+            ctx.stroke();
+            ctx.font = '8px monospace';
+            ctx.fillStyle = `${hotspot.color}bb`;
+            ctx.fillText(`◆ ${hotspot.name}`, p.x + 9, p.y + 3);
+        }
+        ctx.restore();
+    },
+
     _drawGrid(ctx) {
         const gridSizePx = this._gridSize / this._mapSize * this._canvasW * this._zoom;
         if (gridSizePx < 4) return;
@@ -2713,6 +2773,7 @@ export const spaceModule = {
 
         ctx.clearRect(0, 0, this._staticCanvas.width, this._staticCanvas.height);
         this._drawGrid(ctx);
+        this._drawSectors(ctx);
         this._drawInfluenceZone(ctx);
     },
 
