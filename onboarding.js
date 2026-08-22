@@ -7,10 +7,16 @@ function getOnboardingKey() {
 }
 
 function isGameVisible() {
+    const gameContent = document.getElementById('gameContent');
     const tabs = document.getElementById('tabs');
-    if (!tabs) return false;
-    const style = window.getComputedStyle(tabs);
-    return style.display !== 'none' && style.visibility !== 'hidden';
+    if (!gameContent || !tabs) return false;
+    const contentStyle = window.getComputedStyle(gameContent);
+    const overlay = document.getElementById('authOverlay');
+    const overlayStyle = overlay ? window.getComputedStyle(overlay) : null;
+    if (contentStyle.display === 'none' || contentStyle.visibility === 'hidden') return false;
+    if (overlayStyle && overlayStyle.display !== 'none' && overlayStyle.visibility !== 'hidden') return false;
+    const tabsStyle = window.getComputedStyle(tabs);
+    return tabsStyle.display !== 'none' && tabsStyle.visibility !== 'hidden';
 }
 
 function openTab(tabName) {
