@@ -890,6 +890,16 @@ body {
 .offline-popup .offline-close-button:hover {
   background: rgba(255,255,255,0.14); color: var(--text-primary);
 }
+.offline-incident { margin: 14px 0 10px; padding: 12px; border: 1px solid rgba(255, 153, 68, .55); border-left: 4px solid var(--accent-amber); background: rgba(255, 153, 68, .08); text-align: left; }
+.offline-incident__eyebrow { margin-bottom: 5px; color: var(--accent-amber); font-size: 10px; letter-spacing: 1px; }
+.offline-incident strong { display: block; color: var(--text-primary); font-size: 13px; letter-spacing: 1px; }
+.offline-incident p { margin: 6px 0 10px; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.offline-incident__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.offline-popup .offline-incident-choice { display: grid; gap: 3px; padding: 8px; background: rgba(51,255,255,.08); color: var(--text-primary); border: 1px solid rgba(51,255,255,.45); text-align: left; font-size: 11px; letter-spacing: 0; }
+.offline-popup .offline-incident-choice small { color: var(--accent-cyan); font-size: 10px; }
+.offline-popup .offline-incident-choice:hover:not(:disabled) { background: rgba(51,255,255,.18); }
+.offline-popup .offline-incident-choice:disabled { opacity: .4; cursor: not-allowed; filter: grayscale(.5); }
+@media (max-width: 560px) { .offline-incident__choices { grid-template-columns: 1fr; } }
 
 .custom-confirm-dialog {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;

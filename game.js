@@ -4188,6 +4188,58 @@ function calculateOfflineProgress(saved) {
     };
 }
 
+const AUTHORED_OFFLINE_INCIDENTS = [
+    {
+        id: 'ghost-packet', title: 'ПРИЗРАЧНЫЙ ПАКЕТ',
+        body: 'В ночном трафике найден зашифрованный пакет. Он может ускорить ядро или раскрыть резерв чипов.',
+        choices: [
+            { id: 'quarantine', label: 'Карантин', costText: '−8 чипов', effect: '＋25 мощности', can: s => (s.chips_inventory || 0) >= 8, apply: () => { game.subtract_resource('chips', 8); game.add_power(25); } },
+            { id: 'trace', label: 'Отследить источник', costText: '−10 мощности', effect: '＋10 чипов', can: s => (s.computational_power || 0) >= 10, apply: () => { game.add_power(-10); game.add_resource('chips', 10); } }
+        ]
+    },
+    {
+        id: 'thermal-whisper', title: 'ТЕПЛОВОЙ ШЁПОТ',
+        body: 'Сенсоры видят перегретый промышленный контур. Можно снять нагрузку или рискнуть ради дополнительной мощности.',
+        choices: [
+            { id: 'vent', label: 'Сбросить тепло', costText: '−6 угля', effect: '＋12 мощности', can: s => (s.coal_inventory || 0) >= 6, apply: () => { game.subtract_resource('coal', 6); game.add_power(12); } },
+            { id: 'overclock', label: 'Форсировать контур', costText: '−4 мусора', effect: '＋30 мощности', can: s => (s.trash_inventory || 0) >= 4, apply: () => { game.subtract_resource('trash', 4); game.add_power(30); } }
+        ]
+    },
+    {
+        id: 'rebel-decoy', title: 'ЛОЖНЫЙ СЛЕД',
+        body: 'Повстанцы ищут ваш грузовой маршрут. Можно купить тишину ресурсами или превратить погоню в вычислительный импульс.',
+        choices: [
+            { id: 'decoy', label: 'Сбросить приманку', costText: '−12 руды', effect: '＋18 мощности', can: s => (s.ore_inventory || 0) >= 12, apply: () => { game.subtract_resource('ore', 12); game.add_power(18); } },
+            { id: 'counterintel', label: 'Контрразведка', costText: '−15 мощности', effect: '＋8 чипов', can: s => (s.computational_power || 0) >= 15, apply: () => { game.add_power(-15); game.add_resource('chips', 8); } }
+        ]
+    }
+];
+
+function getOfflineIncident(p) {
+    if (!p || (p.cyclesPassed || 0) < 1 || !game) return null;
+    const stats = getCurrentRustStats() || {};
+    const seed = Math.max(0, Math.floor((stats.nights_survived || 0) + (p.cyclesPassed || 0)));
+    const incident = AUTHORED_OFFLINE_INCIDENTS[seed % AUTHORED_OFFLINE_INCIDENTS.length];
+    const key = USER_STORAGE_KEY(`corebox_incident_${incident.id}_${seed}`);
+    if (localStorage.getItem(key)) return null;
+    return { ...incident, key, stats };
+}
+
+function resolveOfflineIncident(incident, choiceId) {
+    const choice = incident?.choices?.find(item => item.id === choiceId);
+    if (!choice || !game) return false;
+    const stats = getCurrentRustStats() || {};
+    if (!choice.can(stats)) { showNotif?.('НЕДОСТАТОЧНО РЕСУРСОВ ДЛЯ ЭТОГО РЕШЕНИЯ', true); return false; }
+    choice.apply();
+    localStorage.setItem(incident.key, Date.now().toString());
+    addToLog(`🧩 ${incident.title}: ${choice.label} (${choice.effect})`, 'success');
+    showNotif?.(`${choice.label}: ${choice.effect}`, false);
+    const freshStats = getCurrentRustStats();
+    if (freshStats) { cachedRustStats = freshStats; updateInventoryDisplay(freshStats); updateStatsFromGame(freshStats); if (typeof updateCommandCenter === 'function') updateCommandCenter(freshStats); }
+    if (typeof scheduleCloudSave === 'function') scheduleCloudSave();
+    return true;
+}
+
 function showOfflineRewardPopup(p) {
     const mins = Math.floor(p.elapsedSeconds / 60);
     const timeStr = mins > 60 ? `${Math.floor(mins / 60)}ч ${mins % 60}м` : `${mins}м`;
@@ -4277,7 +4329,15 @@ function showOfflineRewardPopup(p) {
     if (p.chipsStolen > 0) lossesHtml += `<div>💸 -${p.chipsStolen}🎛️</div>`;
     if (p.plasmaStolen > 0) lossesHtml += `<div>💸 -${p.plasmaStolen}⚡</div>`;
 
+    const incident = getOfflineIncident(p);
     let eventsHtml = `<div class="offline-next-action">➡️ Следующий шаг: ${p.recommendedAction}</div>`;
+    if (incident) {
+        const choicesHtml = incident.choices.map(choice => {
+            const available = choice.can(incident.stats);
+            return `<button class="offline-incident-choice" data-incident-choice="${choice.id}" ${available ? '' : 'disabled'}><span>${choice.label}</span><small>${choice.costText} → ${choice.effect}</small></button>`;
+        }).join('');
+        eventsHtml += `<section class="offline-incident" aria-label="Инцидент возвращения"><div class="offline-incident__eyebrow">🧩 АВТОРСКИЙ ИНЦИДЕНТ</div><strong>${incident.title}</strong><p>${incident.body}</p><div class="offline-incident__choices">${choicesHtml}</div></section>`;
+    }
     if (p.attacksDuringOffline > 0) {
         eventsHtml += `<div>⚔️ Атак: ${p.attacksDuringOffline} (${p.successfulAttacks} успешно)</div>`;
     }
@@ -4307,6 +4367,15 @@ function showOfflineRewardPopup(p) {
     `;
 
     document.body.appendChild(popup);
+    if (incident) {
+        popup.querySelectorAll('[data-incident-choice]').forEach(button => {
+            button.addEventListener('click', () => {
+                if (resolveOfflineIncident(incident, button.dataset.incidentChoice)) {
+                    popup.querySelector('.offline-incident')?.remove();
+                }
+            });
+        });
+    }
 
     const closePopup = () => {
         if (popup.parentNode) popup.remove();
