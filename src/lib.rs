@@ -2531,4 +2531,75 @@ mod headless_simulation {
         );
         assert!(state.game_time >= 0);
     }
+
+    #[test]
+    fn simulate_1000_game_hours_balance_and_stability() {
+        let config = GameConfig::default();
+        let mut state = GameState::new(&config);
+        let mining = MiningSystem::new(config.mining_config.clone());
+        let neuro = NeuroEcosystem::new();
+        let total_ticks = 1000 * 60 * 60;
+        let ticks_per_hour = 60 * 60;
+        let mut day_starts = 0;
+        let mut night_starts = 0;
+        let mut max_ore = state.inventory.ore;
+        let mut max_coal = state.inventory.coal;
+        let mut min_power = state.computational_power;
+        let mut hourly_samples = 0;
+        let unlock_tick = 100 * ticks_per_hour;
+        let mut ore_at_unlock = 0;
+
+        state.coal_enabled = true;
+        state.computational_power = state.max_computational_power;
+
+        for tick in 0..total_ticks {
+            if tick == unlock_tick {
+                state.ore_unlocked = true;
+                ore_at_unlock = state.inventory.ore;
+            }
+            let was_day = state.is_day;
+            let events = state.update_time(1, &config);
+            let _ = mining.passive_mining(&mut state, &neuro);
+
+            if !was_day && state.is_day {
+                day_starts += 1;
+            }
+            if was_day && !state.is_day {
+                night_starts += 1;
+            }
+            max_ore = max_ore.max(state.inventory.ore);
+            max_coal = max_coal.max(state.inventory.coal);
+            min_power = min_power.min(state.computational_power);
+
+            assert!(state.inventory.coal <= u32::MAX);
+            assert!(state.inventory.ore <= u32::MAX);
+            assert!(state.inventory.plasma <= u32::MAX);
+            assert!(state.computational_power <= state.max_computational_power);
+            assert!(state.turbine_heat <= 100);
+            assert!(state.temporary_bonus_remaining >= 0);
+            assert_eq!(state.tick_count, (tick + 1) as i64);
+            if (tick + 1) % ticks_per_hour == 0 {
+                hourly_samples += 1;
+                let _ = events;
+            }
+        }
+
+        assert_eq!(state.tick_count, total_ticks as i64);
+        assert_eq!(hourly_samples, 1000);
+        assert!(day_starts > 0, "1000-hour run produced no day transitions");
+        assert!(
+            night_starts > 0,
+            "1000-hour run produced no night transitions"
+        );
+        assert!(state.game_time >= 0);
+        assert!(
+            state.ore_unlocked,
+            "ore should unlock during the mid-game scenario"
+        );
+        assert!(
+            state.inventory.ore > ore_at_unlock,
+            "ore economy did not progress after unlock"
+        );
+        println!("1000h economy: ore={}, coal={}, plasma={}, ore_at_unlock_h100={}, max_ore={}, max_coal={}, min_power={}, days={}, nights={}", state.inventory.ore, state.inventory.coal, state.inventory.plasma, ore_at_unlock, max_ore, max_coal, min_power, day_starts, night_starts);
+    }
 }
