@@ -12,6 +12,7 @@
     "seed:pvp": "node scripts/seed-pvp-test-accounts.mjs",
     "test:local-pvp": "npm run seed:pvp && node scripts/test-local-pvp.mjs",
     "test:headless": "node scripts/test-long-headless.mjs",
+    "test:retention-1000h": "node scripts/test-retention-1000h.mjs",
     "audit:static": "node scripts/corebox-static-audit.mjs",
     "seed:map-load": "node scripts/seed-map-load.mjs",
     "clean:map-load": "node scripts/clean-map-load.mjs",
