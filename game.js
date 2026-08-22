@@ -4105,6 +4105,28 @@ async function loadFromCloudAndMerge() {
     }
 }
 
+function readPendingOfflineEffects() {
+    try {
+        const raw = localStorage.getItem(USER_STORAGE_KEY('corebox_pending_offline_effects'));
+        const effects = raw ? JSON.parse(raw) : [];
+        return Array.isArray(effects) ? effects.filter(Boolean) : [];
+    } catch (error) {
+        return [];
+    }
+}
+
+function queueOfflineEffect(effect) {
+    const effects = readPendingOfflineEffects();
+    effects.push({ ...effect, queuedAt: Date.now() });
+    localStorage.setItem(USER_STORAGE_KEY('corebox_pending_offline_effects'), JSON.stringify(effects));
+}
+
+function consumePendingOfflineEffects() {
+    const effects = readPendingOfflineEffects();
+    localStorage.removeItem(USER_STORAGE_KEY('corebox_pending_offline_effects'));
+    return effects;
+}
+
 function calculateOfflineProgress(saved) {
     const lastShown = parseInt(localStorage.getItem(USER_STORAGE_KEY('corebox_offline_shown')) || '0');
     const savedTimestamp = saved?.timestamp || saved?._savedAt || Date.now();
@@ -4113,6 +4135,12 @@ function calculateOfflineProgress(saved) {
     if (elapsed < 10 || Date.now() - lastShown < 60000) return null;
 
     const ticks = elapsed;
+    const posture = window.fleetModule?.getOfflineDefenseModifiers?.() || { attackMultiplier: 1, successMultiplier: 1, fleetSaveActive: false, stance: 'guard' };
+    const offlineEffects = consumePendingOfflineEffects();
+    const effectValue = (key, fallback = 1) => offlineEffects.reduce((value, effect) => {
+        return effect[key] === undefined ? value : value * Number(effect[key]);
+    }, fallback);
+    const effectBonus = (key, fallback = 0) => offlineEffects.reduce((value, effect) => value + Number(effect[key] || 0), fallback);
     const miningLevel = saved?.mining_level || 0;
     const passive = saved?._passive_rates || {
         coal: (0.010 + miningLevel * 0.0006),
@@ -4127,7 +4155,7 @@ function calculateOfflineProgress(saved) {
 
     const avgNightCost = 2;
     const avgDayCost = 1;
-    const coalBurned = nightsElapsed * avgNightCost + cyclesElapsed * avgDayCost;
+    const coalBurned = Math.floor((nightsElapsed * avgNightCost + cyclesElapsed * avgDayCost) * effectValue('coalCostMultiplier'));
 
     const nightsRemaining = saved?.rebel_protection_nights || 0;
     const protectionActive = saved?.rebel_protection_active || false;
@@ -4149,14 +4177,14 @@ function calculateOfflineProgress(saved) {
     }
 
     const baseAttackChance = 0.03;
-    const attacksDuringOffline = Math.floor(nightsElapsed * baseAttackChance * 10);
+    const attacksDuringOffline = Math.floor(nightsElapsed * baseAttackChance * 10 * posture.attackMultiplier * effectValue('attackMultiplier'));
 
     let coalStolen = 0;
     let oreStolen = 0;
     let chipsStolen = 0;
     let plasmaStolen = 0;
 
-    const successfulAttacks = Math.floor(attacksDuringOffline * 0.5);
+    const successfulAttacks = Math.floor(attacksDuringOffline * 0.5 * posture.successMultiplier * effectValue('successMultiplier'));
 
     for (let i = 0; i < successfulAttacks; i++) {
         const coalInventory = saved?.inventory?.coal || 0;
@@ -4179,10 +4207,11 @@ function calculateOfflineProgress(saved) {
     const oreGained = Math.floor(ticks * passive.ore) - oreStolen;
     const chipsGained = -chipsStolen;
     const plasmaGained = -plasmaStolen;
-    const powerGained = Math.floor(ticks * passive.power);
+    const powerGained = Math.floor(ticks * passive.power * effectValue('powerMultiplier') + effectBonus('powerFlat'));
+    const chipsBonus = effectBonus('chipsFlat');
     const hasBlueprint = Array.isArray(saved?.blueprints)
         ? saved.blueprints.some(bp => bp?.unlocked === true)
-        : false;
+        : Object.values(saved?.blueprints || {}).some(value => value === true || value?.unlocked === true);
     const recommendation = successfulAttacks > 0
         ? { text: 'Проверь ФЛОТ и восстанови защиту после атаки.', tab: 'fleet', label: 'ОТКРЫТЬ ФЛОТ' }
         : !hasBlueprint && powerGained >= 200
@@ -4199,9 +4228,13 @@ function calculateOfflineProgress(saved) {
         coalGained: Math.max(0, coalGained),
         trashGained: Math.max(0, trashGained),
         oreGained: Math.max(0, oreGained),
-        chipsGained: Math.max(0, chipsGained),
+        chipsGained: Math.max(0, chipsGained + chipsBonus),
         plasmaGained: Math.max(0, plasmaGained),
         powerGained: Math.max(0, powerGained),
+        chipsBonus,
+        offlineEffectsApplied: offlineEffects.map(effect => effect.label || effect.id || 'операционный эффект'),
+        defenseStance: posture.stance,
+        fleetsaveActive: posture.fleetSaveActive,
 
         coalBurned: coalBurned,
 
@@ -4231,24 +4264,24 @@ const AUTHORED_OFFLINE_INCIDENTS = [
         id: 'ghost-packet', title: 'ПРИЗРАЧНЫЙ ПАКЕТ',
         body: 'В ночном трафике найден зашифрованный пакет. Он может ускорить ядро или раскрыть резерв чипов.',
         choices: [
-            { id: 'quarantine', label: 'Карантин', costText: '−8 чипов', effect: '＋25 мощности', can: s => (s.chips_inventory || 0) >= 8, apply: () => { game.subtract_resource('chips', 8); game.add_power(25); } },
-            { id: 'trace', label: 'Отследить источник', costText: '−10 мощности', effect: '＋10 чипов', can: s => (s.computational_power || 0) >= 10, apply: () => { game.add_power(-10); game.add_resource('chips', 10); } }
+            { id: 'quarantine', label: 'Карантин', costText: '−8 чипов', effect: '＋25 мощности · +25% мощности офлайн', can: s => (s.chips_inventory || 0) >= 8, apply: () => { game.subtract_resource('chips', 8); game.add_power(25); queueOfflineEffect({ id: 'kernel-buffer', label: 'KERNEL BUFFER', powerMultiplier: 1.25 }); } },
+            { id: 'trace', label: 'Отследить источник', costText: '−10 мощности', effect: '＋10 чипов · +6 чипов офлайн', can: s => (s.computational_power || 0) >= 10, apply: () => { game.add_power(-10); game.add_resource('chips', 10); queueOfflineEffect({ id: 'signal-cache', label: 'SIGNAL CACHE', chipsFlat: 6 }); } }
         ]
     },
     {
         id: 'thermal-whisper', title: 'ТЕПЛОВОЙ ШЁПОТ',
         body: 'Сенсоры видят перегретый промышленный контур. Можно снять нагрузку или рискнуть ради дополнительной мощности.',
         choices: [
-            { id: 'vent', label: 'Сбросить тепло', costText: '−6 угля', effect: '＋12 мощности', can: s => (s.coal_inventory || 0) >= 6, apply: () => { game.subtract_resource('coal', 6); game.add_power(12); } },
-            { id: 'overclock', label: 'Форсировать контур', costText: '−4 мусора', effect: '＋30 мощности', can: s => (s.trash_inventory || 0) >= 4, apply: () => { game.subtract_resource('trash', 4); game.add_power(30); } }
+            { id: 'vent', label: 'Сбросить тепло', costText: '−6 угля', effect: '＋12 мощности · −50% расхода угля офлайн', can: s => (s.coal_inventory || 0) >= 6, apply: () => { game.subtract_resource('coal', 6); game.add_power(12); queueOfflineEffect({ id: 'thermal-vent', label: 'THERMAL VENT', coalCostMultiplier: 0.5 }); } },
+            { id: 'overclock', label: 'Форсировать контур', costText: '−4 мусора', effect: '＋30 мощности · +35% мощности, +50% расхода угля', can: s => (s.trash_inventory || 0) >= 4, apply: () => { game.subtract_resource('trash', 4); game.add_power(30); queueOfflineEffect({ id: 'overclock', label: 'OVERCLOCK', powerMultiplier: 1.35, coalCostMultiplier: 1.5 }); } }
         ]
     },
     {
         id: 'rebel-decoy', title: 'ЛОЖНЫЙ СЛЕД',
         body: 'Повстанцы ищут ваш грузовой маршрут. Можно купить тишину ресурсами или превратить погоню в вычислительный импульс.',
         choices: [
-            { id: 'decoy', label: 'Сбросить приманку', costText: '−12 руды', effect: '＋18 мощности', can: s => (s.ore_inventory || 0) >= 12, apply: () => { game.subtract_resource('ore', 12); game.add_power(18); } },
-            { id: 'counterintel', label: 'Контрразведка', costText: '−15 мощности', effect: '＋8 чипов', can: s => (s.computational_power || 0) >= 15, apply: () => { game.add_power(-15); game.add_resource('chips', 8); } }
+            { id: 'decoy', label: 'Сбросить приманку', costText: '−12 руды', effect: '＋18 мощности · −50% атак офлайн', can: s => (s.ore_inventory || 0) >= 12, apply: () => { game.subtract_resource('ore', 12); game.add_power(18); queueOfflineEffect({ id: 'rebel-decoy', label: 'REBEL DECOY', attackMultiplier: 0.5 }); } },
+            { id: 'counterintel', label: 'Контрразведка', costText: '−15 мощности', effect: '＋8 чипов · −65% успешных атак офлайн', can: s => (s.computational_power || 0) >= 15, apply: () => { game.add_power(-15); game.add_resource('chips', 8); queueOfflineEffect({ id: 'counterintel', label: 'COUNTERINTEL', successMultiplier: 0.35 }); } }
         ]
     }
 ];
@@ -4324,6 +4357,16 @@ function showOfflineRewardPopup(p) {
         addToLog(`⚡ +${p.powerGained} вычислительной мощности (пассивная добыча)`);
         game.add_power(p.powerGained);
     }
+    if (p.chipsBonus > 0) {
+        addToLog(`🎛️ +${p.chipsBonus} чипов (операционный эффект)`);
+        game.add_resource('chips', p.chipsBonus);
+    }
+    if (p.offlineEffectsApplied?.length) {
+        addToLog(`🧩 Эффекты окна: ${p.offlineEffectsApplied.join(', ')}`, 'success');
+    }
+    if (p.defenseStance || p.fleetsaveActive) {
+        addToLog(`🛡️ Позиция офлайн: ${String(p.defenseStance || 'GUARD').toUpperCase()}${p.fleetsaveActive ? ' + FLEETSAVE' : ''}`);
+    }
 
     handleRebelAttackStolen({
         stolen: {
@@ -4384,6 +4427,12 @@ function showOfflineRewardPopup(p) {
     }
     if (p.fleetDamage > 0) {
         eventsHtml += `<div style="color:#ff6644">🚀 Урон флоту: ${p.fleetDamage}</div>`;
+    }
+    if (p.offlineEffectsApplied?.length) {
+        eventsHtml += `<div style="color:#4aff9d">🧩 Сработали эффекты: ${p.offlineEffectsApplied.join(', ')}</div>`;
+    }
+    if (p.defenseStance || p.fleetsaveActive) {
+        eventsHtml += `<div style="color:#4aff9d">🛡️ Позиция: ${String(p.defenseStance || 'guard').toUpperCase()}${p.fleetsaveActive ? ' + FLEETSAVE' : ''}</div>`;
     }
     if (p.tecSabotageCount > 0) {
         eventsHtml += `<div style="color:#ff6644">🔥 Саботаж ТЭЦ: ${p.tecSabotageCount}</div>`;

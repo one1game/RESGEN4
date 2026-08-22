@@ -14,6 +14,8 @@ export const fleetModule = {
 
     fleetLog: [],
     defenseShipId: null,
+    defenseStance: 'guard',
+    fleetsaveArmed: false,
     activePvpMissions: [],
     commandLog: [],
     _flightLineInterval: null,
@@ -63,6 +65,8 @@ export const fleetModule = {
         const key = this._getStorageKey();
         localStorage.removeItem(key);
         localStorage.removeItem(this._getDefenseStorageKey());
+        localStorage.removeItem(this._getStanceStorageKey());
+        localStorage.removeItem(this._getFleetsaveStorageKey());
         localStorage.removeItem(`corebox_fleet_log_${this.currentUserId || 'anon'}`);
         localStorage.removeItem(`corebox_pvp_missions_${this.currentUserId || 'anon'}`);
         localStorage.removeItem(this._getResultStorageKey('combat'));
@@ -77,6 +81,25 @@ export const fleetModule = {
 
     _getDefenseStorageKey() {
         return this.currentUserId ? `corebox_defense_ship_${this.currentUserId}` : 'corebox_defense_ship';
+    },
+
+    _getStanceStorageKey() {
+        return this.currentUserId ? `corebox_defense_stance_${this.currentUserId}` : 'corebox_defense_stance';
+    },
+
+    _getFleetsaveStorageKey() {
+        return this.currentUserId ? `corebox_fleetsave_${this.currentUserId}` : 'corebox_fleetsave';
+    },
+
+    _loadOperationsPosture() {
+        const savedStance = localStorage.getItem(this._getStanceStorageKey());
+        this.defenseStance = ['guard', 'intercept', 'evade'].includes(savedStance) ? savedStance : 'guard';
+        this.fleetsaveArmed = localStorage.getItem(this._getFleetsaveStorageKey()) === 'true';
+    },
+
+    _saveOperationsPosture() {
+        localStorage.setItem(this._getStanceStorageKey(), this.defenseStance);
+        localStorage.setItem(this._getFleetsaveStorageKey(), this.fleetsaveArmed ? 'true' : 'false');
     },
 
     _getResultStorageKey(kind) {
@@ -207,6 +230,7 @@ export const fleetModule = {
         // ✅ Сначала загружаем флот, потом восстанавливаем защитника (нужен список кораблей)
         this._loadFromLocalStorage();
         this._loadDefenseShip();
+        this._loadOperationsPosture();
         this._loadFleetLog();
 
         // ✅ Регистрируем глобальный обработчик для Rust-событий
@@ -685,6 +709,46 @@ export const fleetModule = {
     getDefenseShip() {
         if (!this.defenseShipId) return null;
         return this.ships.find(s => s.id === this.defenseShipId) || null;
+    },
+
+    getDefenseStanceConfig(stance = this.defenseStance) {
+        const configs = {
+            guard: { label: 'GUARD', defenseMultiplier: 1.0, attackMultiplier: 0.85, successMultiplier: 0.9, description: 'Сбалансированная защита базы.' },
+            intercept: { label: 'INTERCEPT', defenseMultiplier: 0.82, attackMultiplier: 1.12, successMultiplier: 0.55, description: 'Больше риска, но контратаки срывают налёты.' },
+            evade: { label: 'EVADE', defenseMultiplier: 0.68, attackMultiplier: 0.55, successMultiplier: 0.45, description: 'Минимум контактов, слабее щит на месте.' }
+        };
+        return configs[stance] || configs.guard;
+    },
+
+    getOfflineDefenseModifiers() {
+        const stance = this.getDefenseStanceConfig();
+        const fleetsave = this.fleetsaveArmed;
+        return {
+            attackMultiplier: stance.attackMultiplier * (fleetsave ? 0.35 : 1),
+            successMultiplier: stance.successMultiplier * (fleetsave ? 0.30 : 1),
+            fleetSaveActive: fleetsave,
+            stance: this.defenseStance
+        };
+    },
+
+    setDefenseStance(stance) {
+        if (!['guard', 'intercept', 'evade'].includes(stance)) return { success: false, error: 'Неизвестный режим' };
+        this.defenseStance = stance;
+        this._saveOperationsPosture();
+        const config = this.getDefenseStanceConfig();
+        this._addFleetLog(`🛡️ Режим защиты: ${config.label}`);
+        this._renderFleetTab();
+        window.showNotif?.(`🛡️ Режим ${config.label}: ${config.description}`, false);
+        return { success: true, stance };
+    },
+
+    toggleFleetsave() {
+        this.fleetsaveArmed = !this.fleetsaveArmed;
+        this._saveOperationsPosture();
+        this._addFleetLog(`🛰️ FLEETSAVE ${this.fleetsaveArmed ? 'включён — активы уходят из риска' : 'снят — флот снова доступен для операций'}`);
+        this._renderFleetTab();
+        window.showNotif?.(this.fleetsaveArmed ? '🛰️ FLEETSAVE включён на следующее offline-окно' : '🛰️ FLEETSAVE снят', false);
+        return { success: true, fleetsaveArmed: this.fleetsaveArmed };
     },
 
     _saveDefenseShip() {
@@ -1499,7 +1563,7 @@ export const fleetModule = {
         if (!defShip) return 0;
         const hpRatio = defShip.health / defShip.maxHealth;
         const lvlBonus = 1 + (defShip.level || 0) * 0.15;
-        const total = Math.floor(defShip.combat * perCombat * 100 * hpRatio * lvlBonus);
+        const total = Math.floor(defShip.combat * perCombat * 100 * hpRatio * lvlBonus * this.getDefenseStanceConfig().defenseMultiplier);
         return Math.min(total, maxBonus);
     },
 
@@ -1902,6 +1966,7 @@ export const fleetModule = {
 
         const defenseBonus = this.getFleetDefenseContribution(defenseDebuffRemaining);
         const reconBonus = this.getScoutReconBonus();
+        const stanceConfig = this.getDefenseStanceConfig();
         const cargoBonus = this.getCargoMiningBonus();
         const defenseShip = this.getDefenseShip();
 
@@ -1927,6 +1992,15 @@ export const fleetModule = {
                     <span>⛏️ +${cargoBonus} добыча</span>
                     ${this.alertMultiplier > 1 ? '<span class="alert-active" style="color:#ff9944">⚠️ ТРЕВОГА ×2</span>' : ''}
                     ${defenseShip ? `<span class="defense-active" style="color:#4aff9d">🛡️ ${escapeHtml(defenseShip.name)} ур.${defenseShip.level}</span>` : '<span style="color:#666">⚠️ Без защиты</span>'}
+                </div>
+
+                <div class="fleet-posture" style="border:1px solid rgba(74,255,157,0.18);background:rgba(8,18,22,0.5);padding:7px;margin-bottom:8px;border-radius:4px;">
+                    <div style="font-size:9px;letter-spacing:1px;color:#4aff9d;margin-bottom:5px;">ПОСТОЯНСТВО ОПЕРАЦИЙ // ${stanceConfig.label}</div>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                        ${[['guard','GUARD'],['intercept','INTERCEPT'],['evade','EVADE']].map(([id,label]) => `<button class="ship-btn ${this.defenseStance === id ? 'active' : ''}" data-action="stance" data-stance="${id}" title="${this.getDefenseStanceConfig(id)?.description || ''}">${label}</button>`).join('')}
+                        <button class="ship-btn ${this.fleetsaveArmed ? 'active' : ''}" data-action="fleetsave">${this.fleetsaveArmed ? 'FLEETSAVE: ON' : 'FLEETSAVE: OFF'}</button>
+                    </div>
+                    <div style="font-size:9px;color:#82939a;margin-top:5px;">${stanceConfig.description} ${this.fleetsaveArmed ? 'Fleetsave снизит риск offline, но активы не участвуют в перехвате.' : 'Fleetsave можно включить перед длинным отсутствием.'}</div>
                 </div>
 
                 <div style="display:flex;gap:6px;margin-bottom:8px;">
@@ -2137,6 +2211,12 @@ export const fleetModule = {
             let result = null;
 
             switch (action) {
+                case 'stance':
+                    result = this.setDefenseStance(btn.dataset.stance);
+                    break;
+                case 'fleetsave':
+                    result = this.toggleFleetsave();
+                    break;
                 case 'info':
                     const detail = btn.closest('.ship-card').querySelector('.ship-detail');
                     if (detail) {
