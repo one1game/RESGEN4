@@ -451,25 +451,51 @@ export const spaceModule = {
     },
 
     _renderMissionLine(ctx, from, to, shipX, shipY, color, isUrgent) {
+        const angle = Math.atan2(to.y - from.y, to.x - from.x);
+        const lineAlpha = isUrgent ? 'aa' : '66';
         ctx.save();
-        ctx.setLineDash(isUrgent ? [1, 2] : [3, 4]);
+        ctx.setLineDash(isUrgent ? [1, 2] : [4, 5]);
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
         ctx.lineTo(to.x, to.y);
-        ctx.strokeStyle = isUrgent ? `${color}aa` : `${color}66`;
-        ctx.lineWidth = isUrgent ? 1 : 0.7;
+        ctx.strokeStyle = `${color}${lineAlpha}`;
+        ctx.lineWidth = isUrgent ? 1.4 : 0.9;
         ctx.stroke();
-        ctx.restore();
+        ctx.setLineDash([]);
 
+        // Светящийся участок показывает направление и делает маршрут
+        // читаемым даже поверх плотного звёздного поля.
         ctx.beginPath();
-        ctx.arc(shipX, shipY, isUrgent ? 3 : 2, 0, Math.PI * 2);
+        ctx.moveTo(shipX, shipY);
+        ctx.lineTo(shipX - Math.cos(angle) * 18, shipY - Math.sin(angle) * 18);
+        ctx.strokeStyle = `${color}dd`;
+        ctx.lineWidth = isUrgent ? 2 : 1.3;
+        ctx.stroke();
+
+        // Наконечник-стрелка показывает направление полёта.
+        const head = isUrgent ? 5 : 4;
+        ctx.beginPath();
+        ctx.moveTo(shipX, shipY);
+        ctx.lineTo(shipX - Math.cos(angle - 0.55) * head, shipY - Math.sin(angle - 0.55) * head);
+        ctx.lineTo(shipX - Math.cos(angle + 0.55) * head, shipY - Math.sin(angle + 0.55) * head);
+        ctx.closePath();
         ctx.fillStyle = color;
         ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = isUrgent ? 10 : 6;
+        ctx.beginPath();
+        ctx.arc(shipX, shipY, isUrgent ? 3.5 : 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.restore();
 
         if (isUrgent) {
             ctx.beginPath();
-            ctx.arc(shipX, shipY, 5, 0, Math.PI * 2);
-            ctx.strokeStyle = `${color}88`;
+            ctx.arc(shipX, shipY, 6, 0, Math.PI * 2);
+            ctx.strokeStyle = `${color}99`;
             ctx.lineWidth = 1;
             ctx.stroke();
         }
@@ -491,6 +517,7 @@ export const spaceModule = {
             combat: cfg?.combat?.travel_time_sec ?? 45,
             cargo: cfg?.cargo?.travel_time_sec ?? 40
         };
+        const MISSION_COLORS = { scout: '#44aaff', combat: '#ff4444', cargo: '#ffcc33' };
 
         for (const mission of activeMissions) {
             const arrivesAt = normalizeTimestamp(mission.arrives_at);
@@ -520,7 +547,8 @@ export const spaceModule = {
             const shipX = from.x + (to.x - from.x) * progress;
             const shipY = from.y + (to.y - from.y) * progress;
 
-            this._renderMissionLine(ctx, from, to, shipX, shipY, '#fa0', false);
+            const isUrgent = (arrivesAt - now) < 60000;
+            this._renderMissionLine(ctx, from, to, shipX, shipY, MISSION_COLORS[shipType] || '#fa0', isUrgent);
         }
 
         this._renderIncomingMissions(ctx, now);
@@ -610,9 +638,7 @@ export const spaceModule = {
     // ✅ Публичный метод для принудительной перерисовки линий полётов
     renderFlightLines() {
         if (!this._ctx) return;
-        const now = Date.now();
         this._drawFlightLines(this._ctx);
-        this._renderOutgoingPvpMissions(this._ctx, now);
     },
 
     async tradeWithStation(station) {
