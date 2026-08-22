@@ -308,6 +308,9 @@ export async function processArrivedMissions(currentUserId) {
                             ? window.fleetModule._getResultStorageKey('combat')
                             : `corebox_last_combat_result_${mission.attacker_id || 'anon'}`;
                         localStorage.setItem(resultKey, JSON.stringify(window.fleetModule._lastCombatResult));
+                        const winsKey = `corebox_pvp_wins_${window.currentUser?.id || mission.attacker_id || 'anon'}`;
+                        const wins = Math.max(0, Number(localStorage.getItem(winsKey) || 0)) + 1;
+                        localStorage.setItem(winsKey, String(wins));
                     } catch(e) {}
                     console.log(`⚔️ _lastCombatResult установлен для боевого корабля, target=${mission.target_id}`);
                 }

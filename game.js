@@ -3190,7 +3190,11 @@ function gameLoopFrame(timestamp) {
                 blueprintCargoUnlocked: cachedRustStats.blueprint_cargo_unlocked === true,
                 blueprintScoutUnlocked: cachedRustStats.blueprint_scout_unlocked === true,
                 blueprintCombatUnlocked: cachedRustStats.blueprint_combat_unlocked === true,
-                pvpWins: cachedRustStats.pvp_wins ?? gameStats.pvpWins ?? 0,
+                pvpWins: Math.max(
+                    Number(cachedRustStats.pvp_wins || 0),
+                    Number(gameStats.pvpWins || 0),
+                    Number(localStorage.getItem(`corebox_pvp_wins_${window.currentUser?.id || 'anon'}`) || 0)
+                ),
             };
             import('./achievements.js').then(m => m.checkAchievements(achievementStats)).catch(() => {});
         }
