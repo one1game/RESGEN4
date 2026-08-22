@@ -684,16 +684,33 @@ impl CoreGame {
     }
 
     fn start_auto_clicking_internal(&mut self) -> Vec<GameEvent> {
-        if !self.state.auto_clicking && self.state.computational_power > 0 {
+        if !self.state.auto_clicking
+            && self.state.computational_power > 0
+            && self.state.is_ai_active()
+            && self.state.turbine_heat < 100
+        {
             self.state.auto_clicking = true;
+            self.state.auto_click_stop_reason.clear();
             self.state.last_auto_click_time = 0;
             vec![
                 GameEvent::AutoClickingStarted,
                 GameEvent::LogMessage("🤖 Автоклики активированы!".to_string()),
             ]
         } else if self.state.computational_power == 0 {
+            self.state.auto_click_stop_reason = "power_depleted".to_string();
             vec![GameEvent::LogMessage(
-                "❌ Недостаточно мощности".to_string(),
+                "❌ Недостаточно мощности — включите питание или выполните ручные клики"
+                    .to_string(),
+            )]
+        } else if !self.state.is_ai_active() {
+            self.state.auto_click_stop_reason = "outpost_unpowered".to_string();
+            vec![GameEvent::LogMessage(
+                "❌ Контур не запитан — включите ТЭЦ или дождитесь дня".to_string(),
+            )]
+        } else if self.state.turbine_heat >= 100 {
+            self.state.auto_click_stop_reason = "overheated".to_string();
+            vec![GameEvent::LogMessage(
+                "🌡️ Турбина перегрета — дождитесь охлаждения".to_string(),
             )]
         } else {
             vec![]
@@ -703,6 +720,7 @@ impl CoreGame {
     fn stop_auto_clicking_internal(&mut self) -> Vec<GameEvent> {
         if self.state.auto_clicking {
             self.state.auto_clicking = false;
+            self.state.auto_click_stop_reason = "manual".to_string();
             vec![
                 GameEvent::AutoClickingStopped,
                 GameEvent::LogMessage("⏹️ Автоклики остановлены".to_string()),
@@ -895,9 +913,19 @@ impl CoreGame {
         );
 
         if self.state.auto_clicking {
-            // ⚠️ Фикс: перегрев блокирует автодобычу
-            if self.state.turbine_heat >= 100 {
+            // Stop automation explicitly when its operating prerequisites disappear.
+            if !self.state.is_ai_active() {
                 self.state.auto_clicking = false;
+                self.state.auto_click_stop_reason = "outpost_unpowered".to_string();
+                events.push(GameEvent::AutoClickingStopped);
+                events.push(GameEvent::LogMessage(
+                    "⏹️ Автодобыча остановлена: контур не запитан — включите ТЭЦ или дождитесь дня"
+                        .to_string(),
+                ));
+            // ⚠️ Фикс: перегрев блокирует автодобычу
+            } else if self.state.turbine_heat >= 100 {
+                self.state.auto_clicking = false;
+                self.state.auto_click_stop_reason = "overheated".to_string();
                 events.push(GameEvent::AutoClickingStopped);
                 events.push(GameEvent::LogMessage(
                     "⏹️ Автодобыча остановлена: турбина перегрета".to_string(),
@@ -922,6 +950,7 @@ impl CoreGame {
                         );
                     } else {
                         self.state.auto_clicking = false;
+                        self.state.auto_click_stop_reason = "power_depleted".to_string();
                         events.push(GameEvent::ComputationalPowerDepleted);
                         events.push(GameEvent::LogMessage(
                             "❌ Недостаточно мощности! Автоклики отключены".to_string(),
@@ -1437,6 +1466,9 @@ impl CoreGame {
             "turbine_upgrade_level": self.state.turbine_upgrade_level,
             "computational_power": self.state.computational_power,
             "max_computational_power": self.state.max_computational_power,
+            "auto_click_stop_reason": self.state.auto_click_stop_reason,
+            "power_recovery_rate": if self.state.is_ai_active() && self.state.computational_power < self.state.max_computational_power { 0.1 } else { 0.0 },
+            "power_recovery_eta_seconds": if self.state.is_ai_active() && self.state.computational_power < self.state.max_computational_power { (((self.state.max_computational_power - self.state.computational_power) as f64) / 0.1).ceil() as u32 } else { 0 },
             "mining_level": self.state.upgrades.mining,
             "defense_active": self.state.upgrades.defense,
             "defense_level": self.state.upgrades.defense_level,

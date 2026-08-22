@@ -26,7 +26,11 @@ function mergeState(raw) { return { ...freshState(), ...raw, sectorHeat: { ...fr
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function fmtDuration(ms) { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 function getStats(game) {
-  try { return game?.get_statistics?.() || {}; } catch { return {}; }
+  try {
+    const raw = game?.get_statistics?.();
+    if (!raw) return {};
+    return typeof raw === 'string' ? JSON.parse(raw) : raw;
+  } catch { return {}; }
 }
 function addResource(game, resource, amount) { try { game?.add_resource?.(resource, Math.max(0, Math.floor(amount))); } catch {} }
 function addPower(game, amount) { try { game?.add_power?.(Math.max(0, Math.floor(amount))); } catch {} }

@@ -1535,3 +1535,9 @@ button:focus-visible, [role="button"]:focus-visible, .tab:focus-visible, .status
 .ops-control b { color:#d4c7ff; font-weight:700; }
 .ops-report small { color:#82939a; font-size:9px; }
 @media (max-width:768px) { .ops-control { min-height:28px; } }
+
+.power-recovery-status { margin-top:7px; padding:6px 8px; border-left:2px solid rgba(130,147,154,.45); color:#82939a; background:rgba(255,255,255,.025); font:10px/1.35 var(--font-mono, monospace); }
+.power-recovery-status.is-running { color:#4aff9d; border-left-color:#4aff9d; background:rgba(74,255,157,.06); }
+.power-recovery-status.is-recovering { color:#ffcc66; border-left-color:#ffcc66; background:rgba(255,204,102,.06); }
+.power-recovery-status.is-blocked { color:#ff8a78; border-left-color:#ff6644; background:rgba(255,68,68,.06); }
+@media (max-width:768px) { .power-recovery-status { min-height:30px; display:flex; align-items:center; } }

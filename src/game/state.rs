@@ -222,6 +222,8 @@ pub struct GameState {
     pub plasma_from_coal: u64,
 
     pub auto_clicking: bool,
+    #[serde(default)]
+    pub auto_click_stop_reason: String,
     pub computational_power: u32,
     pub max_computational_power: u32,
     pub last_auto_click_time: i32,
@@ -496,6 +498,17 @@ impl GameState {
         let was_day = self.is_day;
         self.time_changed = false;
         self.game_time -= delta;
+
+        // Transparent low-rate recovery: energy returns only while the outpost is powered.
+        // It is intentionally slower than automation drain, so recovery enables relaunches
+        // but never makes continuous automation free.
+        if self.is_ai_active()
+            && self.computational_power < self.max_computational_power
+            && self.tick_count % 10 == 0
+        {
+            self.computational_power =
+                (self.computational_power + 1).min(self.max_computational_power);
+        }
 
         if self.mining_debuff_remaining > 0 {
             self.mining_debuff_remaining -= 1;
@@ -871,6 +884,7 @@ impl Default for GameState {
             total_coal_burned: 0,
             plasma_from_coal: 0,
             auto_clicking: false,
+            auto_click_stop_reason: String::new(),
             computational_power: 0,
             max_computational_power: 1000,
             last_auto_click_time: 0,

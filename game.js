@@ -206,6 +206,38 @@ function onDayStarted() {
 window.rollNightDiscount = rollNightDiscount;
 window.onDayStarted = onDayStarted;
 
+function updatePowerRecoveryUI(stats) {
+    const el = document.getElementById('powerRecoveryStatus');
+    if (!el || !stats) return;
+    const power = Number(stats.computational_power || 0);
+    const max = Number(stats.max_computational_power || 1000);
+    const reason = stats.auto_click_stop_reason || '';
+    const eta = Number(stats.power_recovery_eta_seconds || 0);
+    const active = stats.is_day || (stats.coal_enabled && Number(stats.coal_inventory || 0) > 0);
+    const labels = {
+        power_depleted: 'мощность исчерпана',
+        overheated: 'турбина перегрета',
+        outpost_unpowered: 'контур не запитан',
+        manual: 'остановлено вручную'
+    };
+    const reasonText = labels[reason] || (stats.auto_clicking ? 'автоматизация активна' : 'готово к запуску');
+    if (stats.auto_clicking) {
+        el.textContent = `Питание: ${power}/${max} · ${reasonText}`;
+        el.className = 'power-recovery-status is-running';
+    } else if (power < max && active && eta > 0) {
+        const mins = Math.floor(eta / 60);
+        const secs = eta % 60;
+        el.textContent = `Восстановление: +1/10с · до полного ${mins ? `${mins}м ` : ''}${secs}с · ${reasonText}`;
+        el.className = 'power-recovery-status is-recovering';
+    } else if (!active) {
+        el.textContent = `Питание остановлено: ${reasonText}. Включите ТЭЦ или дождитесь дня.`;
+        el.className = 'power-recovery-status is-blocked';
+    } else {
+        el.textContent = `Питание: ${power}/${max} · ${reasonText}`;
+        el.className = 'power-recovery-status';
+    }
+}
+
 function updateTecUI() {
     const tecBtn = document.getElementById('tec-toggle-btn');
     const tecStatusSpan = document.getElementById('coalStatusDisplay');
@@ -1666,7 +1698,15 @@ function updateCommandCenter(s) {
         const power = Number(s.computational_power ?? 0);
         const mined = Number(s.total_mined ?? 0);
         let brief = { title: 'Система стабильна', body: 'База работает. Выберите следующий вектор развития.', label: 'ОТКРЫТЬ КОМАНДНЫЙ ПУНКТ', tab: 'command' };
-        if (s.attack_warning || s.fleet_under_attack) {
+        const powerStopReason = s.auto_click_stop_reason || '';
+        const powerRecoveryEta = Number(s.power_recovery_eta_seconds || 0);
+        if (powerStopReason === 'power_depleted') {
+            brief = { title: 'Восстановить питание', body: powerRecoveryEta > 0 ? `Автоматизация остановлена: мощности нет. Контур восстановит заряд примерно за ${Math.ceil(powerRecoveryEta / 60)} мин.` : 'Автоматизация остановлена: мощности нет. Выполните ручные клики или включите питание.', label: 'ОТКРЫТЬ ПИТАНИЕ', tab: 'command' };
+        } else if (powerStopReason === 'overheated') {
+            brief = { title: 'Охладить турбину', body: 'Автоматизация остановлена из-за перегрева. Дождитесь охлаждения, затем запустите её снова.', label: 'ПРОВЕРИТЬ ТЭЦ', tab: 'command' };
+        } else if (powerStopReason === 'outpost_unpowered') {
+            brief = { title: 'Запитать контур', body: 'Автоматизация остановлена: ТЭЦ выключена или закончился уголь. Включите энергоконтур либо дождитесь дня.', label: 'ВКЛЮЧИТЬ ТЭЦ', tab: 'command' };
+        } else if (s.attack_warning || s.fleet_under_attack) {
             brief = { title: 'Зафиксирована угроза', body: 'Проверьте защиту и активные маршруты, прежде чем отправлять новый корабль.', label: 'ПРОВЕРИТЬ ЗАЩИТУ', tab: 'command' };
         } else if (mined < 100) {
             brief = { title: 'Нарастить добычу', body: 'Соберите первые ресурсы и подготовьте базу к включению ТЭЦ.', label: 'ОТКРЫТЬ ИНВЕНТАРЬ', tab: 'inventory' };
@@ -3056,6 +3096,7 @@ function gameLoopFrame(timestamp) {
                 updateTurbineStatus(rustStats);
                 updateInventoryDisplay(rustStats);
                 updateTecUI();
+                updatePowerRecoveryUI(rustStats);
                 updateStatsFromGame(rustStats);
 
                 const power = game.get_computational_power();
