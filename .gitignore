@@ -1,3 +1,5 @@
 target/
 data/*.db
 img/code_analysis*.txt
+data/*.db-* 
+data/*.log 
