@@ -902,7 +902,12 @@ export const spaceModule = {
 
     const candidates = this.otherPlayers
         .map(p => {
-            const pos = this._playerPositions[p.user_id];
+            const stored = this._playerPositions[p.user_id];
+            const rawX = Number(p.map_x);
+            const rawY = Number(p.map_y);
+            const pos = stored || (Number.isFinite(rawX) && Number.isFinite(rawY)
+                ? { x: rawX, y: rawY }
+                : null);
             if (!pos) return null;
             const dx = pos.x - myPos.x;
             const dy = pos.y - myPos.y;
@@ -1787,17 +1792,17 @@ export const spaceModule = {
             this.otherPlayers = data.map(s => ({
                 ...s,
                 username: profileMap[s.user_id] ?? 'НЕИЗВЕСТНЫЙ',
-                map_x: s.map_x,
-                map_y: s.map_y
+                map_x: Number(s.map_x),
+                map_y: Number(s.map_y)
             }));
 
             let validCount = 0;
             for (const player of this.otherPlayers) {
                 if (player.map_x != null && player.map_y != null &&
-                    Number.isFinite(player.map_x) && Number.isFinite(player.map_y)) {
+                    Number.isFinite(Number(player.map_x)) && Number.isFinite(Number(player.map_y))) {
                     this._playerPositions[player.user_id] = {
-                        x: player.map_x,
-                        y: player.map_y,
+                        x: Number(player.map_x),
+                        y: Number(player.map_y),
                     };
                     validCount++;
                 }
