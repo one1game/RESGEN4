@@ -342,6 +342,39 @@ function sendJson(res, status, obj, extraHeaders = {}) {
 }
 
 // ---------- RPC ----------
+// Автоматические локальные PvP-стенды для тестового режима. Не трогают реальные аккаунты.
+const LOCAL_PVP_SEEDS = [
+  { email: 'pvp-test-01@corebox.local', username: 'NOVA_WARDEN', x: 650, y: 820, ore: 420, coal: 180, chips: 45, plasma: 8 },
+  { email: 'pvp-test-02@corebox.local', username: 'GHOST_RELAY', x: 1320, y: 1180, ore: 680, coal: 260, chips: 72, plasma: 14 },
+  { email: 'pvp-test-03@corebox.local', username: 'IRON_MOTH', x: 2080, y: 740, ore: 910, coal: 340, chips: 96, plasma: 18 },
+  { email: 'pvp-test-04@corebox.local', username: 'VOID_CARTEL', x: 2860, y: 1620, ore: 1240, coal: 460, chips: 120, plasma: 25 },
+  { email: 'pvp-test-05@corebox.local', username: 'NEON_ORACLE', x: 3740, y: 2480, ore: 1600, coal: 580, chips: 150, plasma: 32 },
+];
+const LOCAL_PVP_PASSWORD = 'CoreBox-PvP-2026!';
+
+function seedLocalPvpAccounts() {
+  for (const seed of LOCAL_PVP_SEEDS) {
+    let user = getUserByEmail(seed.email);
+    if (!user) {
+      const id = uuid();
+      insertRow('auth_users', { id, email: seed.email, password_hash: hashPassword(LOCAL_PVP_PASSWORD), username: seed.username, confirmed: true, created_at: nowTs(), last_login: null }, { emit: false });
+      user = getUserByEmail(seed.email);
+    }
+    if (!user) continue;
+    if (!db.prepare('SELECT id FROM profiles WHERE id = ?').get(user.id)) {
+      insertRow('profiles', { id: user.id, username: seed.username, map_x: seed.x, map_y: seed.y, last_login: nowTs() }, { emit: false });
+    }
+    if (!db.prepare('SELECT id FROM game_saves WHERE user_id = ?').get(user.id)) {
+      const now = nowTs();
+      insertRow('game_saves', { id: uuid(), user_id: user.id, ore: seed.ore, coal: seed.coal, trash: 80, chips: seed.chips, plasma: seed.plasma, total_mined: seed.ore + seed.coal + 80, computational_power: 220, max_computational_power: 1000, map_x: seed.x, map_y: seed.y, last_seen: now, updated_at: now, game_time: 6, blueprint_cargo_unlocked: true, blueprint_scout_unlocked: true, blueprint_combat_unlocked: true, full_state: { seededFor: 'local-pvp-test', seedVersion: 1 } }, { emit: false });
+    }
+    if (!db.prepare('SELECT user_id FROM player_public_stats WHERE user_id = ?').get(user.id)) {
+      const save = db.prepare('SELECT * FROM game_saves WHERE user_id = ?').get(user.id);
+      insertRow('player_public_stats', { user_id: user.id, username: seed.username, map_x: seed.x, map_y: seed.y, total_mined: save?.total_mined || 0, computational_power: save?.computational_power || 0, inventory_ore: save?.ore || 0, inventory_coal: save?.coal || 0, inventory_chips: save?.chips || 0, inventory_plasma: save?.plasma || 0, inventory_trash: save?.trash || 0, ore: save?.ore || 0, coal: save?.coal || 0, chips: save?.chips || 0, plasma: save?.plasma || 0, trash: save?.trash || 0, last_seen: nowTs(), updated_at: nowTs() }, { emit: false });
+    }
+  }
+}
+
 function getSaveOrError(userId) {
   const r = db.prepare(`SELECT * FROM game_saves WHERE user_id = ?`).get(userId);
   return r ? fromDb('game_saves', r) : null;
@@ -792,6 +825,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+seedLocalPvpAccounts();
 server.listen(PORT, HOST, () => {
   console.log('🟢 CoreBox локальная база запущена');
   console.log(`   Игра:  http://${HOST}:${PORT}/`);
