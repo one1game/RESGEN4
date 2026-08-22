@@ -4355,6 +4355,8 @@ function showAuthUI() {
     const overlay = document.getElementById('authOverlay');
     const gameContent = document.getElementById('gameContent');
     const userInfo = document.getElementById('userInfo');
+    document.body.classList.remove('corebox-ready');
+    document.getElementById('corebox-onboarding')?.remove();
     if (overlay) overlay.style.display = 'flex';
     if (gameContent) gameContent.style.display = 'none';
     if (userInfo) userInfo.style.display = 'none';
@@ -4367,6 +4369,7 @@ function showGameUI() {
     if (overlay) overlay.style.display = 'none';
     if (gameContent) gameContent.style.display = 'block';
     if (userInfo) userInfo.style.display = 'block';
+    document.body.classList.add('corebox-ready');
 }
 
 function updateUserDisplay(user) {
