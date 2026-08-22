@@ -1802,12 +1802,18 @@ export const spaceModule = {
             const uncachedIds = ids.filter(id => !profileMap[id]);
 
             if (uncachedIds.length > 0) {
-                const { data: profiles } = await supabase
-                    .from('profiles')
-                    .select('id, username')
-                    .in('id', uncachedIds);
-                (profiles ?? []).forEach(p => {
-                    profileMap[p.id] = p.username;
+                const PROFILE_BATCH_SIZE = 100;
+                const batches = [];
+                for (let i = 0; i < uncachedIds.length; i += PROFILE_BATCH_SIZE) {
+                    batches.push(uncachedIds.slice(i, i + PROFILE_BATCH_SIZE));
+                }
+                const profileResults = await Promise.all(batches.map(batch =>
+                    supabase.from('profiles').select('id, username').in('id', batch)
+                ));
+                profileResults.forEach(({ data: profiles }) => {
+                    (profiles ?? []).forEach(p => {
+                        profileMap[p.id] = p.username;
+                    });
                 });
                 this._profileCache = profileMap;
             }
