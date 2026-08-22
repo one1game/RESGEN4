@@ -67,7 +67,9 @@ function parseScalar(v) {
 
 // Разбор одного условия "col=op.value"
 function parseCondition(cond) {
-  const m = cond.match(/^([a-zA-Z_][a-zA-Z0-9_]*)=(eq|neq|gt|gte|lt|lte|in|is|like|ilike)\.(.+)$/);
+  const nullNot = cond.match(/^([a-zA-Z_][a-zA-Z0-9_]*)=not\.is\.null$/);
+  if (nullNot) return { col: nullNot[1], op: 'not.is', val: null };
+  const m = cond.match(/^([a-zA-Z_][a-zA-Z0-9_]*)=((?:not\.)?(?:eq|neq|gt|gte|lt|lte|in|is|like|ilike))\.(.+)$/);
   if (!m) return null;
   const [, col, op, raw] = m;
   let val = raw;
@@ -94,6 +96,11 @@ function condToSql(c) {
       if (c.val === false) return { sql: `${col} = 0`, params: [] };
       return { sql: `${col} IS NULL`, params: [] };
     }
+    case 'not.is': {
+      if (c.val === true) return { sql: `${col} != 1`, params: [] };
+      if (c.val === false) return { sql: `${col} != 0`, params: [] };
+      return { sql: `${col} IS NOT NULL`, params: [] };
+    }
     case 'in': return { sql: `${col} IN (${c.val.map(() => '?').join(',')})`, params: c.val };
     default: return null;
   }
@@ -107,6 +114,10 @@ function parseFilters(url) {
     if (k === 'or' || k.startsWith('or=')) {
       orGroups.push(v);
     } else if (!['select', 'order', 'limit', 'offset', 'on_conflict', 'head', 'columns'].includes(k)) {
+      if (v === 'not.is.null') {
+        filters.push({ col: k, op: 'not.is', val: null });
+        continue;
+      }
       const c = parseCondition(`${k}=${v}`);
       if (c) filters.push(c);
     }

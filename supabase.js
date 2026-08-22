@@ -112,6 +112,7 @@ class QueryBuilder {
     select(cols, opts) { this._select = cols || '*'; this._selectOpts = opts || {}; return this; }
     eq(c, v) { return this._push('eq', [c, v]); }
     neq(c, v) { return this._push('neq', [c, v]); }
+    not(c, op, v) { return this._push('not', [c, op, v]); }
     gt(c, v) { return this._push('gt', [c, v]); }
     gte(c, v) { return this._push('gte', [c, v]); }
     lt(c, v) { return this._push('lt', [c, v]); }
@@ -158,6 +159,7 @@ class QueryBuilder {
             switch (op) {
                 case 'eq': filters.push(`${c}=eq.${String(v)}`); break;
                 case 'neq': filters.push(`${c}=neq.${String(v)}`); break;
+                case 'not': filters.push(`${c}=not.${String(args[1])}.${args[2] === null ? 'null' : String(args[2])}`); break;
                 case 'gt': filters.push(`${c}=gt.${String(v)}`); break;
                 case 'gte': filters.push(`${c}=gte.${String(v)}`); break;
                 case 'lt': filters.push(`${c}=lt.${String(v)}`); break;
@@ -204,6 +206,7 @@ class QueryBuilder {
             switch (op) {
                 case 'eq': filters.push(`${c}=eq.${String(v)}`); break;
                 case 'neq': filters.push(`${c}=neq.${String(v)}`); break;
+                case 'not': filters.push(`${c}=not.${String(args[1])}.${args[2] === null ? 'null' : String(args[2])}`); break;
                 case 'gt': filters.push(`${c}=gt.${String(v)}`); break;
                 case 'gte': filters.push(`${c}=gte.${String(v)}`); break;
                 case 'lt': filters.push(`${c}=lt.${String(v)}`); break;
