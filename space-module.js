@@ -2735,11 +2735,20 @@ export const spaceModule = {
     _startRenderLoop() {
         if (this._animFrameId) return;
 
-        const loop = () => {
+        const isMobile = window.matchMedia?.('(max-width: 768px)').matches;
+        const frameBudget = isMobile ? 1000 / 30 : 1000 / 60;
+        let lastFrameAt = 0;
+
+        const loop = (now = performance.now()) => {
             if (!this.isTabActive) {
                 this._animFrameId = null;
                 return;
             }
+            if (document.hidden || now - lastFrameAt < frameBudget) {
+                this._animFrameId = requestAnimationFrame(loop);
+                return;
+            }
+            lastFrameAt = now;
             this._animationTime = Date.now();
             this._renderFrame();
             this._renderDirty = false;

@@ -1296,3 +1296,71 @@ html, body {
     padding-right: env(safe-area-inset-right, 0px);
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE UX/PERFORMANCE PASS 2
+   One-row command rail, predictable touch targets, fewer forced repaints.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  /* Nine destinations remain available, but no longer form a cramped two-row grid. */
+  .tabs {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    padding: 0 4px env(safe-area-inset-bottom, 0px) !important;
+    min-height: 62px;
+  }
+  .tab {
+    flex: 0 0 82px !important;
+    min-width: 82px !important;
+    min-height: 58px !important;
+    scroll-snap-align: center;
+    border-right: 1px solid rgba(84,214,208,.10) !important;
+    border-bottom: 0 !important;
+  }
+  .tab:nth-child(5n) { border-right: 1px solid rgba(84,214,208,.10) !important; }
+
+  /* 48px is reserved for primary actions; utility buttons stay compact but tappable. */
+  .log-btn, #refreshStatsBtn, #exportStatsBtn, #importStatsBtn, #resetStatsBtn {
+    min-height: 38px !important;
+    padding: 8px 10px !important;
+    font-size: 10px !important;
+  }
+  .log-controls { gap: 6px; }
+
+  /* Avoid a pseudo-element and filter repaint for every button press. */
+  button::after, .upgrade-btn::after, .craft-btn::after, .design-btn::after { display: none !important; }
+  button:active, .upgrade-btn:active, .craft-btn:active, .design-btn:active,
+  .ship-btn:active, .stat-btn:active, .log-btn:active, .auth-btn:active {
+    transform: scale(.98) !important;
+    filter: none !important;
+  }
+
+  /* Contain cards so updates do not invalidate the whole document. */
+  .panel, .upgrade-card, .trade-card, .quest-card, .recipe-card, .resource-item, .inventory-item {
+    contain: content;
+  }
+  .panel-content { overscroll-behavior: contain; }
+
+  /* Keep the primary mine action above the command rail, not over it. */
+  #floatingMineBtn {
+    bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+    transition: transform .12s ease, box-shadow .18s ease, border-color .18s ease !important;
+  }
+}
+
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .tab, button, .panel, .upgrade-card, .trade-card, .quest-card, .recipe-card { transition: none !important; }
+  #floatingMineBtn { animation: none !important; }
+}
+
+@media (max-width: 768px) and (orientation: landscape) {
+  .tabs { min-height: 54px; }
+  .tab { flex-basis: 74px !important; min-width: 74px !important; min-height: 50px !important; padding-top: 4px !important; padding-bottom: 4px !important; }
+  #floatingMineBtn { bottom: calc(64px + env(safe-area-inset-bottom)) !important; }
+}
