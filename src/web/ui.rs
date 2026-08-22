@@ -418,6 +418,22 @@ impl GameUI {
                     format!("Эволюция: {}/{}", state.neuro_evolution, q.target),
                     (state.neuro_evolution as f32 / q.target as f32 * 100.0).min(100.0) as u32,
                 ),
+                QuestType::BlueprintUnlocked => {
+                    let unlocked = state.blueprint_cargo_unlocked
+                        || state.blueprint_scout_unlocked
+                        || state.blueprint_combat_unlocked;
+                    (
+                        format!(
+                            "Чертёж: {}",
+                            if unlocked {
+                                "разработан"
+                            } else {
+                                "не разработан"
+                            }
+                        ),
+                        if unlocked { 100 } else { 0 },
+                    )
+                }
                 QuestType::CollectResource(r) => {
                     let count = match r.as_str() {
                         "coal" => state.total_coal_mined,

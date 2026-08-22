@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="low-perf.css">
     <link rel="stylesheet" href="mobile-patch.css">
+    <link rel="stylesheet" href="onboarding.css">
     <style>
 
     /* ============================================
@@ -334,7 +335,7 @@
             <div id="auth-message" class="auth-message"></div>
 
             <div class="auth-info">
-                <p>💡 <strong>Нейро-подсказка:</strong> Ваш прогресс синхронизируется через нейро-облако</p>
+                <p>💡 <strong>Нейро-подсказка:</strong> Ваш прогресс сохраняется локально на этом сервере</p>
                 <div class="additional-links">
                     <a href="faq.html" class="story-link">📖 FAQ</a>
                     <a href="history.html" class="story-link history-link">🎭 ИСТОРИЯ МИРА</a>
@@ -352,7 +353,7 @@
                 <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
             </div>
 
-            <button id="muteToggleBtn" class="mute-btn" title="Включить/выключить звук">🔊</button>
+            <button id="muteToggleBtn" class="mute-btn" title="Включить/выключить звук" aria-label="Включить или выключить звук">🔊</button>
 
             <div class="stats-container">
                 <div class="stat-card">
@@ -432,7 +433,7 @@
                             <span class="tec-dot online" id="tec-dot"></span>
                             <span class="tec-label">ТЭЦ</span>
                             <span class="tec-status" id="coalStatusDisplay">ОФФЛАЙН</span>
-                            <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal">🔄</button>
+                            <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal" aria-label="Включить или выключить ТЭЦ">⚡</button>
                             <span class="tec-info">Уголь: <b id="coalInventoryAmount">0</b> | Бонус: <b id="tecPowerBonus">+0</b>%</span>
                         </div>
                         <div id="tec-warning" class="tec-warning" style="display: none;"></div>
@@ -617,7 +618,7 @@
                     </div>
                     <div class="panel-content">
                         <div id="leaderboardContainer">
-                            <div class="leaderboard-loading">⏳ Загрузка данных из облака...</div>
+                            <div class="leaderboard-loading">⏳ Загрузка локального нейро-рейтинга...</div>
                         </div>
                         <button id="refreshLeaderboardBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
                     </div>
@@ -819,165 +820,7 @@
                         </div>
                     </div>
 
-                    <!-- УДАЛЕНО: Старая разметка секций -->
-                    <div style="display:none">
-                    <div class="cc-section">
-                        <div class="cc-sec-label">🧬 Нейро-сознание</div>
-                        <div class="cc-grid2">
-                            <div class="cc-stat">
-                                <div class="cc-stat-lbl">Уровень / Сознание</div>
-                                <div style="display:flex;align-items:baseline;gap:5px">
-                                    <div class="cc-stat-val good" id="cc-evol">—</div>
-                                    <div style="font-size:12px;color:#666">/ <span id="cc-consc">—</span>%</div>
-                                </div>
-                                <div class="cc-bar"><div class="cc-bar-fill cc-bar-teal" id="cc-bar-consc" style="width:0%"></div></div>
-                                <div class="cc-stat-sub" id="cc-aimode">—</div>
-                            </div>
-                            <div class="cc-stat">
-                                <div class="cc-stat-lbl">Очки эволюции</div>
-                                <div class="cc-stat-val" id="cc-score">—</div>
-                                <div class="cc-bar"><div class="cc-bar-fill cc-bar-purple" id="cc-bar-score" style="width:0%"></div></div>
-                                <div class="cc-stat-sub" id="cc-score-next">—</div>
-                                <div class="cc-stat-sub" style="margin-top:4px;">
-                                    <span>📊 Всего очков: <span id="cc-score-total">0</span></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;">
-                            <span style="color:#666">🛡️ Бонус защиты:</span>
-                            <span class="cc-stat-val good" id="cc-def-bonus" style="font-size:13px">—</span>
-                        </div>
-                    </div>
 
-                    <div class="cc-section">
-                        <div class="cc-sec-label">⚠️ Статус угрозы</div>
-                        <div class="cc-threat-row">
-                            <span class="cc-threat-label">Активность повстанцев</span>
-                            <div class="cc-bar cc-threat-bar"><div class="cc-bar-fill cc-bar-teal" id="cc-bar-rebel" style="width:0%"></div></div>
-                            <span class="cc-badge cc-badge-ok" id="cc-rebel-badge">0/15</span>
-                        </div>
-                        <div class="cc-threat-row">
-                            <span class="cc-threat-label">Уязвимость</span>
-                            <span class="cc-badge cc-badge-ok" id="cc-vuln">нет</span>
-                        </div>
-                        <div class="cc-threat-row">
-                            <span class="cc-threat-label">Защита ночей</span>
-                            <span class="cc-badge cc-badge-muted" id="cc-prot">нет</span>
-                            <span class="cc-badge cc-badge-muted" id="cc-prot-status">неактивна</span>
-                        </div>
-                        <div class="cc-threat-row cc-danger-row" id="cc-multiphase-row" style="display:none">
-                            <span class="cc-threat-label" style="color:#ff6644;font-weight:bold">⚡ МНОГОФАЗНАЯ АТАКА АКТИВНА!</span>
-                            <span class="cc-badge cc-badge-danger">КРИТ.</span>
-                        </div>
-                        <div id="cc-attack-warning" class="cc-threat-row cc-danger-row" style="display:none">
-                            <span class="cc-threat-label" style="color:#ff9944;font-weight:bold" id="cc-attack-warning-text">—</span>
-                        </div>
-
-                        <div class="cc-threat-row cc-danger-row" id="cc-blueprint-lock" style="display:none">
-                            <span class="cc-threat-label">📐 Чертеж украден</span>
-                            <span class="cc-badge cc-badge-danger">—</span>
-                        </div>
-                        <div class="cc-threat-row cc-danger-row" id="cc-tec-sabotage" style="display:none">
-                            <span class="cc-threat-label">🔥 ТЭЦ саботирована</span>
-                            <span class="cc-badge cc-badge-danger">—</span>
-                        </div>
-                        <div class="cc-threat-row" id="cc-fear-level" style="display:none">
-                            <span class="cc-threat-label">😨 Уровень страха</span>
-                            <span class="cc-badge">—</span>
-                        </div>
-                        <div class="cc-threat-row" id="cc-fleet-attack" style="display:none">
-                            <span class="cc-threat-label">🚀 Флот атакован</span>
-                            <span class="cc-badge">—</span>
-                        </div>
-
-                        <div class="cc-threat-row cc-danger-row" id="cc-breaches-row" style="display:none">
-                            <span class="cc-threat-label">💀 Прорывов защиты</span>
-                            <span class="cc-badge cc-badge-danger" id="cc-breaches">0</span>
-                        </div>
-                    </div>
-
-                    <div class="cc-section">
-                        <div class="cc-sec-label">📊 Статистика боёв</div>
-                        <div class="cc-grid2">
-                            <div class="cc-stat">
-                                <div class="cc-stat-lbl">Атак отражено</div>
-                                <div class="cc-stat-val good" id="cc-defended">—</div>
-                                <div class="cc-stat-sub">из <span id="cc-total-attacks">—</span> атак</div>
-                            </div>
-                            <div class="cc-stat">
-                                <div class="cc-stat-lbl">Ночей пережито</div>
-                                <div class="cc-stat-val" id="cc-nights">—</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="cc-section">
-                        <div class="cc-sec-label">🛡️ Защита от повстанцев</div>
-                        <div id="rebelProtectionPanel" class="protection-panel"></div>
-                    </div>
-
-                    <div class="cc-section">
-                        <div class="cc-sec-label">⚔️ Контр-операции <span id="cc-cd" style="margin-left:6px;font-size:10px;color:#4aff9d">—</span></div>
-                        <div class="cc-ops-grid">
-                            <button class="cc-op-btn" data-action="propaganda">
-                                <span class="cc-op-icon">📡</span>
-                                Пропаганда
-                                <span class="cc-op-cost">20 чипов</span>
-                            </button>
-                            <button class="cc-op-btn" data-action="fake_depot">
-                                <span class="cc-op-icon">💣</span>
-                                Ложный склад
-                                <span class="cc-op-cost">50 мусора</span>
-                            </button>
-                            <button class="cc-op-btn" data-action="close_vulnerability">
-                                <span class="cc-op-icon">🔒</span>
-                                Залатать
-                                <span class="cc-op-cost">15 чипов</span>
-                            </button>
-                            <button class="cc-op-btn" data-action="fleet_shield">
-                                <span class="cc-op-icon">🛡️</span>
-                                Защита флота
-                                <span class="cc-op-cost">25 чипов</span>
-                            </button>
-                            <button class="cc-op-btn" data-action="encrypt_blueprints">
-                                <span class="cc-op-icon">🔐</span>
-                                Шифр чертежей
-                                <span class="cc-op-cost">30 чипов</span>
-                            </button>
-                            <button class="cc-op-btn" data-action="fortify_planets">
-                                <span class="cc-op-icon">🏰</span>
-                                Укрепить планеты
-                                <span class="cc-op-cost">3 плазмы</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="cc-section">
-                        <div class="cc-sec-label">🔍 Досье фракций</div>
-                        <div id="cc-factions">
-                            <div class="cc-intercept-empty">Нет данных</div>
-                        </div>
-                    </div>
-
-                    <div class="cc-section">
-                        <div class="cc-sec-label">📡 Перехваченные сообщения</div>
-                        <div id="cc-intercepts" style="background:rgba(0,255,100,0.02);border:1px solid rgba(0,255,100,0.1);border-radius:6px;padding:6px;max-height:110px;overflow-y:auto;">
-                            <div class="cc-intercept-empty">Нет перехватов</div>
-                        </div>
-                    </div>
-
-                    <div class="cc-section">
-                        <div class="cc-sec-label">📋 История атак</div>
-                        <div id="attackHistory" class="attack-history"></div>
-                    </div>
-
-                    <div class="cc-section">
-                        <div class="cc-sec-label">🚀 ПВП / Корабли</div>
-                        <div id="commandCenterLog-old" class="pvp-log-container" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,74,74,0.15);border-radius:6px;padding:8px;max-height:180px;overflow-y:auto;font-size:11px;">
-                            <div style="color:#444">Ожидание данных...</div>
-                        </div>
-                    </div>
-                    </div><!-- /скрытый блок старой разметки -->
                 </div><!-- /cc-wrap -->
                     </div><!-- /panel-content -->
                 </div><!-- /panel -->
@@ -1072,8 +915,8 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./mobile-patch.js"></script>
+    <script src="./onboarding.js"></script>
     <script type="module" src="./game.js"></script>
 
     <audio id="bgMusic" autoplay loop preload="none" style="display: none;">

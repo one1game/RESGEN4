@@ -379,9 +379,14 @@ function renderQuestsTab() {
             case 'ActivateDefense': current = stats.upgrades?.defense ? 1 : 0; break;
             case 'SurviveAttack': current = stats.rebel_attacks_count || 0; break;
             case 'ReachEvolutionLevel': current = stats.neuro_evolution || 0; break;
+            case 'BlueprintUnlocked':
+                current = (stats.blueprint_cargo_unlocked || stats.blueprint_scout_unlocked || stats.blueprint_combat_unlocked) ? 1 : 0;
+                break;
             default:
                 if (q.quest_type === 'MineResource' && q.resource) {
                     current = stats[`total_${q.resource}_mined`] || 0;
+                } else if (q.quest_type === 'CollectResource' && q.resource) {
+                    current = stats.inventory?.[q.resource] || 0;
                 }
                 break;
         }
@@ -604,6 +609,25 @@ function getCurrentGameState() {
         }
     } catch(e) {}
     return null;
+}
+
+function loadEmergencySnapshot(userId) {
+    const key = `${SAVE_KEY(userId)}_emergency`;
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const snapshot = JSON.parse(raw);
+        if (!snapshot || typeof snapshot !== 'object') return null;
+        snapshot._isEmergencySnapshot = true;
+        return snapshot;
+    } catch (e) {
+        console.warn('Не удалось прочитать аварийный snapshot:', e);
+        return null;
+    }
+}
+
+function clearEmergencySnapshot(userId) {
+    try { localStorage.removeItem(`${SAVE_KEY(userId)}_emergency`); } catch (e) {}
 }
 
 function migrateLegacySaves(userId) {
@@ -1015,6 +1039,7 @@ function initializeAuth() {
             } catch(e) {}
 
             const migrated = migrateLegacySaves(user.id);
+            const emergencySnapshot = loadEmergencySnapshot(user.id);
 
             showGameUI();
             updateUserDisplay(user);
@@ -1023,21 +1048,28 @@ function initializeAuth() {
             await updateLastSeen();
             startLastSeenUpdater();
 
-            addToLog("🔄 Синхронизация с облаком...");
+            addToLog("🔄 Загрузка локального прогресса...");
 
             const cloudSave = await loadGameFromCloud(true);
+            const initialSave = cloudSave || migrated || emergencySnapshot;
 
             if (cloudSave) {
                 _lastCloudLoadTime = Date.now();
-                addToLog(`✅ Загружено облачное сохранение (уровень нейро: ${cloudSave.neuro?.evolution || 0})`);
+                addToLog(`✅ Загружен сохранённый прогресс (уровень нейро: ${cloudSave.neuro?.evolution || 0})`);
             } else if (migrated) {
                 addToLog(`✅ Загружено мигрированное сохранение`);
+            } else if (emergencySnapshot) {
+                addToLog('⚠️ Восстановлен аварийный локальный snapshot', 'warning');
             }
 
             if (!isGameInitialized) {
-                await initializeGame(cloudSave || migrated);
+                await initializeGame(initialSave);
             } else {
                 _initMultiplayer(user);
+            }
+
+            if (emergencySnapshot && initialSave === emergencySnapshot) {
+                clearEmergencySnapshot(user.id);
             }
 
             const myPos = await ensureMapPosition(user.id);
@@ -1277,12 +1309,17 @@ async function handleLogout() {
             saveCurrentUserStatistics();
         } catch (e) {
             console.error('Ошибка сохранения при logout:', e);
-            if (navigator.sendBeacon) {
-                const blob = new Blob(
-                    [JSON.stringify({ userId: currentUser.id, ts: Date.now() })],
-                    { type: 'application/json' }
-                );
-                navigator.sendBeacon('/api/emergency-save', blob);
+            try {
+                if (game && typeof game.get_universal_save === 'function') {
+                    const emergencyState = JSON.parse(game.get_universal_save());
+                    emergencyState.fleet = window.fleetModule?.ships || emergencyState.fleet || [];
+                    emergencyState.defense_ship_id = window.fleetModule?.defenseShipId || emergencyState.defense_ship_id || null;
+                    emergencyState._emergencySavedAt = Date.now();
+                    localStorage.setItem(`${SAVE_KEY(currentUser.id)}_emergency`, JSON.stringify(emergencyState));
+                    addToLog('⚠️ Аварийный локальный snapshot сохранён');
+                }
+            } catch (emergencyError) {
+                console.error('Ошибка аварийного локального snapshot:', emergencyError);
             }
         }
     }
@@ -3144,7 +3181,18 @@ function gameLoopFrame(timestamp) {
         window._achCounter = (window._achCounter || 0) + 1;
         if (window._achCounter >= 10) {
             window._achCounter = 0;
-            import('./achievements.js').then(m => m.checkAchievements(gameStats)).catch(() => {});
+            const achievementStats = {
+                ...gameStats,
+                nightsSurvived: cachedRustStats.nights_survived ?? gameStats.nightsSurvived ?? 0,
+                neuroEvolution: cachedRustStats.neuro_evolution ?? gameStats.neuroEvolution ?? 0,
+                plasma: cachedRustStats.inventory?.plasma ?? cachedRustStats.plasma_inventory ?? 0,
+                chips: cachedRustStats.inventory?.chips ?? cachedRustStats.chips_inventory ?? 0,
+                blueprintCargoUnlocked: cachedRustStats.blueprint_cargo_unlocked === true,
+                blueprintScoutUnlocked: cachedRustStats.blueprint_scout_unlocked === true,
+                blueprintCombatUnlocked: cachedRustStats.blueprint_combat_unlocked === true,
+                pvpWins: cachedRustStats.pvp_wins ?? gameStats.pvpWins ?? 0,
+            };
+            import('./achievements.js').then(m => m.checkAchievements(achievementStats)).catch(() => {});
         }
 
         if (cachedRustStats.nights_survived !== undefined && cachedRustStats.is_day !== undefined) {
@@ -4094,6 +4142,16 @@ function calculateOfflineProgress(saved) {
     const chipsGained = -chipsStolen;
     const plasmaGained = -plasmaStolen;
     const powerGained = Math.floor(ticks * passive.power);
+    const hasBlueprint = Array.isArray(saved?.blueprints)
+        ? saved.blueprints.some(bp => bp?.unlocked === true)
+        : false;
+    const recommendedAction = successfulAttacks > 0
+        ? 'Проверь ФЛОТ и восстанови защиту после атаки.'
+        : !hasBlueprint && powerGained >= 200
+            ? 'Открой РАЗРАБОТКУ: мощности достаточно для первого чертежа.'
+            : powerGained > 0
+                ? 'Проверь МОДУЛИ и вложи вычислительную мощность в следующий upgrade.'
+                : 'Собери ресурсы и выбери ближайшее задание.';
 
     return {
         elapsedSeconds: elapsed,
@@ -4124,6 +4182,7 @@ function calculateOfflineProgress(saved) {
         fleetDamage: fleetDamage,
         tecSabotageCount: tecSabotageCount,
         blueprintTheftCount: blueprintTheftCount,
+        recommendedAction: recommendedAction,
     };
 }
 
@@ -4167,6 +4226,7 @@ function showOfflineRewardPopup(p) {
         if (p.oreStolen > 0) game.subtract_resource('ore', p.oreStolen);
         if (p.chipsStolen > 0) game.subtract_resource('chips', p.chipsStolen);
         if (p.plasmaStolen > 0) game.subtract_resource('plasma', p.plasmaStolen);
+    }
 
     if (p.powerGained > 0) {
         addToLog(`⚡ +${p.powerGained} вычислительной мощности (пассивная добыча)`);
@@ -4174,14 +4234,13 @@ function showOfflineRewardPopup(p) {
     }
 
     handleRebelAttackStolen({
-            stolen: {
-                coal: p.coalStolen || 0,
-                ore: p.oreStolen || 0,
-                chips: p.chipsStolen || 0,
-                plasma: p.plasmaStolen || 0,
-            }
-        });
-    }
+        stolen: {
+            coal: p.coalStolen || 0,
+            ore: p.oreStolen || 0,
+            chips: p.chipsStolen || 0,
+            plasma: p.plasmaStolen || 0,
+        }
+    });
 
     if (p.protectionBreaches > 0) {
         addToLog(`💀 Защита пробита ${p.protectionBreaches} раз!`);
@@ -4216,7 +4275,7 @@ function showOfflineRewardPopup(p) {
     if (p.chipsStolen > 0) lossesHtml += `<div>💸 -${p.chipsStolen}🎛️</div>`;
     if (p.plasmaStolen > 0) lossesHtml += `<div>💸 -${p.plasmaStolen}⚡</div>`;
 
-    let eventsHtml = '';
+    let eventsHtml = `<div class="offline-next-action">➡️ Следующий шаг: ${p.recommendedAction}</div>`;
     if (p.attacksDuringOffline > 0) {
         eventsHtml += `<div>⚔️ Атак: ${p.attacksDuringOffline} (${p.successfulAttacks} успешно)</div>`;
     }

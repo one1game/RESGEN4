@@ -1120,6 +1120,7 @@ export const fleetModule = {
                 combatShip.targetUserId = null;
                 this.saveFleet();
                 this._addFleetLog(`⚔️ Боевой корабль ${combatShip.name} вернулся. Победа! Можно отправить грузовой.`);
+                window.showNotif?.(`✅ Победа подтверждена: ${combatShip.name} вернулся. Теперь доступен грузовой рейд.`, false);
 
                 this._lastCombatResult = {
                     targetUserId,
@@ -1139,6 +1140,7 @@ export const fleetModule = {
             });
 
             this._addFleetLog(`⚔️ Победа в бою! Боевой корабль возвращается.`);
+            window.showNotif?.(`✅ Победа в бою! ${combatShip.name} возвращается через ${travelSec} сек.`, false);
         }
 
         await supabase

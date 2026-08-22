@@ -185,6 +185,7 @@ pub enum QuestType {
     ActivateDefense,
     SurviveAttack,
     ReachEvolutionLevel,
+    BlueprintUnlocked,
     CollectResource(String),
 }
 
@@ -437,6 +438,7 @@ impl GameState {
                 "ActivateDefense" => QuestType::ActivateDefense,
                 "SurviveAttack" => QuestType::SurviveAttack,
                 "ReachEvolutionLevel" => QuestType::ReachEvolutionLevel,
+                "BlueprintUnlocked" => QuestType::BlueprintUnlocked,
                 t if t.starts_with("Collect") => QuestType::CollectResource(t[7..].to_lowercase()),
                 t if t.starts_with("Mine") => QuestType::MineResource(t[4..].to_lowercase()),
                 _ => QuestType::MineAny,
@@ -826,6 +828,11 @@ impl Quest {
             QuestType::ActivateDefense => state.upgrades.defense,
             QuestType::SurviveAttack => state.rebel_attacks_count >= self.target,
             QuestType::ReachEvolutionLevel => state.neuro_evolution >= self.target,
+            QuestType::BlueprintUnlocked => {
+                state.blueprint_cargo_unlocked
+                    || state.blueprint_scout_unlocked
+                    || state.blueprint_combat_unlocked
+            }
             QuestType::CollectResource(r) => match r.as_str() {
                 "coal" => state.inventory.coal >= self.target,
                 "ore" => state.inventory.ore >= self.target,
@@ -980,7 +987,29 @@ impl Default for GameState {
 
 #[cfg(test)]
 mod tests {
-    use super::FleetShip;
+    use super::{FleetShip, GameState, Quest, QuestType};
+
+    #[test]
+    fn blueprint_quest_requires_an_unlocked_blueprint() {
+        let mut state = GameState::default();
+        state.inventory.ore = 1000;
+        let quest = Quest {
+            id: "quest_fleet_blueprint".to_string(),
+            title: "Первый чертёж".to_string(),
+            description: String::new(),
+            quest_type: QuestType::BlueprintUnlocked,
+            target: 1,
+            reward: 0,
+            enabled: true,
+            order: 7,
+            completed: false,
+            unlocks: Vec::new(),
+        };
+
+        assert!(!quest.check_completion(&state));
+        state.blueprint_cargo_unlocked = true;
+        assert!(quest.check_completion(&state));
+    }
 
     #[test]
     fn fleet_ship_accepts_js_camel_case_dto() {

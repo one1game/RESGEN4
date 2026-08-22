@@ -43,7 +43,7 @@
 
   "upgrade_config": {
     "mining_base_cost": 8,
-    "mining_cost_multiplier": 2.5,
+    "mining_cost_multiplier": 1.55,
     "mining_max_level": 15,
     "defense_activation_cost": 1,
     "defense_max_level": 8
@@ -171,6 +171,59 @@
       "enabled": true,
       "order": 5,
       "unlocks": ["ore"]
+    },
+    {
+      "id": "quest_neuro_tactician",
+      "title": "Нейро-тактик",
+      "description": "Накопи 5 чипов, чтобы открыть продвинутые операции в Командном пункте.",
+      "quest_type": "CollectResource",
+      "target": 5,
+      "reward": 0,
+      "enabled": true,
+      "order": 6,
+      "unlocks": []
+    },
+    {
+      "id": "quest_fleet_blueprint",
+      "title": "Первый чертёж",
+      "description": "Разработай чертёж любого корабля во вкладке РАЗРАБОТКА.",
+      "quest_type": "BlueprintUnlocked",
+      "target": 1,
+      "reward": 0,
+      "enabled": true,
+      "order": 7,
+      "unlocks": []
+    },
+    {
+      "id": "quest_neuro_frontier",
+      "title": "Граница сознания",
+      "description": "Доведи нейро-эволюцию до уровня 8.",
+      "quest_type": "ReachEvolutionLevel",
+      "target": 8,
+      "reward": 0,
+      "enabled": true,
+      "order": 8,
+      "unlocks": []
+    },
+    {
+      "id": "quest_plasma_reserve",
+      "title": "Глубокий резерв",
+      "description": "Накопи 10 единиц плазмы для дальних экспедиций.",
+      "quest_type": "CollectResource",
+      "target": 10,
+      "enabled": true,
+      "order": 9,
+      "unlocks": []
+    },
+    {
+      "id": "quest_supply_network",
+      "title": "Сеть снабжения",
+      "description": "Накопи 25 чипов для командных операций.",
+      "quest_type": "CollectResource",
+      "target": 25,
+      "enabled": true,
+      "order": 10,
+      "unlocks": []
     }
   ],
 
@@ -214,6 +267,13 @@
     "base_mining_bonus": 3,
     "coal_mining_bonus": 2,
     "ore_mining_bonus": 2
+  },
+
+  "debug_config": {
+    "enable_debug_commands": false,
+    "log_level": "warn",
+    "show_fps": false,
+    "enable_cheats": false
   },
 
   "fleet_config": {

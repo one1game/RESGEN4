@@ -349,8 +349,13 @@ export const designModule = {
                     if (currentBtn) {
                         currentBtn.disabled = false;
                         currentBtn.classList.remove('processing');
+                        const currentBlueprint = this.blueprints.find(bp => bp.id === blueprintId);
                         const canDesignNow = this.canDesign(blueprintId);
-                        currentBtn.innerHTML = canDesignNow ? '📐 СОЗДАТЬ ЧЕРТЕЖ' : '❌ НЕДОСТАТОЧНО МОЩНОСТИ';
+                        currentBtn.innerHTML = currentBlueprint?.unlocked
+                            ? '✅ ЧЕРТЁЖ СОЗДАН'
+                            : canDesignNow
+                                ? '📐 СОЗДАТЬ ЧЕРТЕЖ'
+                                : '❌ НЕДОСТАТОЧНО МОЩНОСТИ';
                     }
                     this.refreshUI(container);
                 }

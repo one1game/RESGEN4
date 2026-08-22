@@ -264,7 +264,7 @@ impl Default for GameConfig {
             },
             upgrade_config: UpgradeConfig {
                 mining_base_cost: 8,
-                mining_cost_multiplier: 2.5,
+                mining_cost_multiplier: 1.55,
                 mining_max_level: 15,
                 defense_activation_cost: 1,
                 defense_max_level: 8,

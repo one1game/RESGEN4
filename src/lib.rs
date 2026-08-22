@@ -2483,3 +2483,52 @@ pub fn start_game() -> CoreGame {
     game.init();
     game
 }
+
+#[cfg(test)]
+mod headless_simulation {
+    use super::*;
+
+    #[test]
+    fn simulate_168_game_hours_without_state_corruption() {
+        let config = GameConfig::default();
+        let mut state = GameState::new(&config);
+        let mining = MiningSystem::new(config.mining_config.clone());
+        let neuro = NeuroEcosystem::new();
+        let total_ticks = 168 * 60 * 60;
+        let mut day_starts = 0;
+        let mut night_starts = 0;
+
+        state.coal_enabled = true;
+        state.computational_power = state.max_computational_power;
+
+        for tick in 0..total_ticks {
+            let was_day = state.is_day;
+            let events = state.update_time(1, &config);
+            let _ = mining.passive_mining(&mut state, &neuro);
+
+            if !was_day && state.is_day {
+                day_starts += 1;
+            }
+            if was_day && !state.is_day {
+                night_starts += 1;
+            }
+
+            assert!(state.inventory.coal <= u32::MAX);
+            assert!(state.inventory.ore <= u32::MAX);
+            assert!(state.inventory.plasma <= u32::MAX);
+            assert!(state.computational_power <= state.max_computational_power);
+            assert!(state.turbine_heat <= 100);
+            assert!(state.temporary_bonus_remaining >= 0);
+            assert_eq!(state.tick_count, (tick + 1) as i64);
+            let _ = events;
+        }
+
+        assert_eq!(state.tick_count, total_ticks as i64);
+        assert!(day_starts > 0, "168-hour run produced no day transitions");
+        assert!(
+            night_starts > 0,
+            "168-hour run produced no night transitions"
+        );
+        assert!(state.game_time >= 0);
+    }
+}
