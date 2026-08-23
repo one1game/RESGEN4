@@ -1,5 +1,9 @@
-target/
-data/*.db
-img/code_analysis*.txt
-data/*.db-* 
-data/*.log 
+# Never publish the commercial package or local runtime data
+COREBOX_SELL_PACKAGE.zip
+/data/
+/target/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+Thumbs.db
