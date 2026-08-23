@@ -14,7 +14,7 @@
     <style>
 
     /* ============================================
-       ТОЛЬКО УНИКАЛЬНЫЕ СТИЛИ (чего нет в style.css)
+       ТОЛЬКО УНИКАЛЬНЫЕ СТИЛИ (чего none в style.css)
        ============================================ */
 
     /* ── Анимации для кораблей ── */
@@ -50,7 +50,7 @@
         50% { opacity: 0.7; background: hsl(0, 80%, 30%); }
     }
 
-    /* ── Материализация планеты ── */
+    /* ── Материализация плаnoneы ── */
     .planet-new {
         animation: planet-materialize 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
     }
@@ -99,7 +99,7 @@
         background: rgba(74,255,157,0.05) !important;
     }
 
-    /* ── Командный пункт v2 (cc-*) ── */
+    /* ── Command Center v2 (cc-*) ── */
     .cc-wrap { font-family: monospace; font-size: 12px; color: #ccc; }
     .cc-header {
         display: flex; align-items: center; gap: 8px;
@@ -428,7 +428,7 @@
                             <span class="tec-dot online" id="tec-dot"></span>
                             <span class="tec-label">POWER PLANT</span>
                             <span class="tec-status" id="coalStatusDisplay">OFFLINE</span>
-                            <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal" aria-label="Enable или выключить POWER PLANT">⚡</button>
+                            <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal" aria-label="Enable or disable POWER PLANT">⚡</button>
                             <span class="tec-info">Coal: <b id="coalInventoryAmount">0</b> | Bonus: <b id="tecPowerBonus">+0</b>%</span>
                             <span id="coalNightsHint" class="coal-info" aria-live="polite"></span>
                         </div>
@@ -573,35 +573,35 @@
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">🔥 ПОТЕРИ И ПРОГРЕСС</div>
+        <div class="stat-title">🔥 LOSSES & PROGRESS</div>
         <div class="stat-line">
-            <span class="stat-label">Угля сожжено:</span>
+            <span class="stat-label">Coal consumed:</span>
             <span class="stat-value" id="coalBurned">0</span>
             <span class="stat-delta" id="coalBurnedDelta"></span>
         </div>
         <div class="stat-line">
-            <span class="stat-label">Украдено угля:</span>
+            <span class="stat-label">Coal stolen:</span>
             <span class="stat-value" id="coalStolen">0</span>
             <span class="stat-delta" id="coalStolenDelta"></span>
         </div>
-        <div class="stat-line"><span class="stat-label">Время игры:</span><span class="stat-value" id="playTime">0 сек</span></div>
-        <div class="stat-line"><span class="stat-label">Сессий:</span><span class="stat-value" id="sessionsCount">1</span></div>
+        <div class="stat-line"><span class="stat-label">Play time:</span><span class="stat-value" id="playTime">0 сек</span></div>
+        <div class="stat-line"><span class="stat-label">Sessions:</span><span class="stat-value" id="sessionsCount">1</span></div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">🚀 ФЛОТ И РАЗРАБОТКИ</div>
+        <div class="stat-title">🚀 FLEET & DEVELOPMENT</div>
         <div class="stat-line"><span class="stat-label">🚀 Ships:</span><span class="stat-value" id="fleetShips">0/20</span></div>
         <div class="stat-line"><span class="stat-label">⚔️ Fleet power:</span><span class="stat-value" id="fleetCombatPower">0</span></div>
         <div class="stat-line"><span class="stat-label">📐 Blueprints:</span><span class="stat-value" id="blueprintsUnlocked">0/3</span></div>
-        <div class="stat-line"><span class="stat-label">🔧 Ур. добычи:</span><span class="stat-value" id="miningLevel">0</span></div>
+        <div class="stat-line"><span class="stat-label">🔧 Mining level:</span><span class="stat-value" id="miningLevel">0</span></div>
     </div>
 </div>
 
                         <div class="statistics-controls">
     <button id="refreshStatsBtn" class="stat-btn">🔄 REFRESH</button>
-    <button id="exportStatsBtn" class="stat-btn">📤 ЭКСПОРТ</button>
+    <button id="exportStatsBtn" class="stat-btn">📤 EXPORT</button>
     <button id="importStatsBtn" class="stat-btn">📥 IMPORT</button>
-    <button id="resetStatsBtn" class="stat-btn danger">🗑️ СБРОСИТЬ СТАТИСТИКУ</button>
+    <button id="resetStatsBtn" class="stat-btn danger">🗑️ RESET STATISTICS</button>
 </div>
                     </div>
                 </div>
@@ -610,12 +610,12 @@
             <div id="leaderboard-section" class="status-section" style="display: none;">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🏆 ТАБЛИЦА ЛИДЕРОВ (Нейро-рейтинг)</span>
+                        <span>🏆 LEADERBOARD (Neural rating)</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
                         <div id="leaderboardContainer">
-                            <div class="leaderboard-loading">⏳ Загрузка локального нейро-рейтинга...</div>
+                            <div class="leaderboard-loading">⏳ Loading local neural rating...</div>
                         </div>
                         <button id="refreshLeaderboardBtn" class="stat-btn">🔄 REFRESH</button>
                     </div>
@@ -649,7 +649,7 @@
             <div class="tab-content" id="upgrades-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🔧 МОДУЛИ УЛУЧШЕНИЙ</span>
+                        <span>🔧 UPGRADE MODULES</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -661,7 +661,7 @@
             <div class="tab-content" id="trade-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>💱 P2P ТОРГОВЛЯ</span>
+                        <span>💱 P2P TRADE</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -673,7 +673,7 @@
             <div class="tab-content" id="quests-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>📋 СИСТЕМНЫЕ OBJECTIVES</span>
+                        <span>📋 SYSTEM OBJECTIVES</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -692,8 +692,8 @@
                 <div class="cc-wrap">
                     <div class="cc-header">
                         <div class="cc-dot" id="cc-status-dot"></div>
-                        <span class="cc-title-text">Командный пункт</span>
-                        <span class="cc-day-label" id="cc-day-label">ДЕНЬ</span>
+                        <span class="cc-title-text">Command Center</span>
+                        <span class="cc-day-label" id="cc-day-label">DAY</span>
                         <span class="cc-clock" id="cc-clock">--:--:--</span>
                     </div>
 
@@ -701,12 +701,12 @@
                     <div class="cc-dashboard">
                         <div class="cc-dash-row">
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Эволюция</span>
+                                <span class="cc-dash-lbl">Evolution</span>
                                 <span class="cc-dash-val cc-color-teal" id="cc-evol">—</span>
                                 <span style="font-size:9px;color:#555">→ <span id="cc-consc">—</span>%</span>
                             </div>
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Очки</span>
+                                <span class="cc-dash-lbl">Points</span>
                                 <span class="cc-dash-val cc-color-purple" id="cc-score">—</span>
                                 <span style="font-size:9px;color:#555"><span id="cc-score-next">—</span></span>
                             </div>
@@ -718,26 +718,26 @@
                         </div>
                         <div class="cc-dash-row">
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Activeсть</span>
+                                <span class="cc-dash-lbl">Activity</span>
                                 <div class="cc-bar" style="flex:1;min-width:40px"><div class="cc-bar-fill" id="cc-bar-rebel" style="width:0%"></div></div>
                                 <span class="cc-badge" id="cc-rebel-badge">0/15</span>
                             </div>
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Уязвимость</span>
-                                <span class="cc-badge" id="cc-vuln">нет</span>
+                                <span class="cc-dash-lbl">Vulnerability</span>
+                                <span class="cc-badge" id="cc-vuln">none</span>
                             </div>
                             <div class="cc-dash-item">
                                 <span class="cc-dash-lbl">Defense</span>
-                                <span class="cc-badge" id="cc-prot-status">неактивна</span>
+                                <span class="cc-badge" id="cc-prot-status">inactive</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- ── OPERATIONS BRIEF ── -->
                     <section class="cc-brief" id="cc-operations-brief" aria-live="polite">
-                        <div class="cc-brief-kicker">ОПЕРАЦИОННЫЙ BRIEF</div>
-                        <div class="cc-brief-title" id="cc-brief-title">Ожидание данных ядра</div>
-                        <div class="cc-brief-body" id="cc-brief-body">Синхронизируйте базу, чтобы получить следующий приказ.</div>
+                        <div class="cc-brief-kicker">OPERATIONS BRIEF</div>
+                        <div class="cc-brief-title" id="cc-brief-title">Waiting for core data</div>
+                        <div class="cc-brief-body" id="cc-brief-body">Synchronize the node to receive the next order.</div>
                         <button class="cc-brief-action" id="cc-brief-action" type="button" data-tab="inventory">OPEN INVENTORY</button>
                     </section>
                     <div id="corebox-ops-deck-host"></div>
