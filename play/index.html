@@ -1001,5 +1001,30 @@
 
         window.Sounds = Sounds;
     </script>
+    <script>
+        // Демо-автовход: подставляем демо-учётку и нажимаем «Войти», чтобы экран входа не висел
+        (function() {
+            var tries = 0;
+            var timer = setInterval(function() {
+                tries++;
+                var email = document.getElementById('auth-email');
+                var btn = document.getElementById('btn-login');
+                var overlay = document.getElementById('authOverlay');
+                var visible = overlay && (overlay.style.display !== 'none') &&
+                    window.getComputedStyle(overlay).display !== 'none';
+                if (btn && email && visible) {
+                    email.value = 'demo@corebox.local';
+                    var pass = document.getElementById('auth-password');
+                    var user = document.getElementById('auth-username');
+                    if (pass) pass.value = 'demo123';
+                    if (user) user.value = 'Пилот';
+                    btn.click();
+                } else {
+                    clearInterval(timer);
+                }
+                if (tries > 40) clearInterval(timer);
+            }, 300);
+        })();
+    </script>
 </body>
 </html>
