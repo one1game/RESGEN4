@@ -1,9 +1,9 @@
-# Never publish the commercial package or local runtime data
-COREBOX_SELL_PACKAGE.zip
-/data/
-/target/
+# Локальные данные и сервер
+data/
 *.db
-*.db-shm
-*.db-wal
+*.sqlite
+
+# Системное
+node_modules/
 .DS_Store
 Thumbs.db

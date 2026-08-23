@@ -1,20 +1,19 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>CoreBox 5.0 - Neural Cyberpunk Incremental</title>
+    <title>CoreBox 5.0 DEMO - Neural Cyberpunk Incremental</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="background.css">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="low-perf.css">
     <link rel="stylesheet" href="mobile-patch.css">
     <link rel="stylesheet" href="onboarding.css">
-    <link rel="stylesheet" href="legacy-demo.css">
     <style>
 
     /* ============================================
-       ТОЛЬКО УНИКАЛЬНЫЕ СТИЛИ (чего none в style.css)
+       ТОЛЬКО УНИКАЛЬНЫЕ СТИЛИ (чего нет в style.css)
        ============================================ */
 
     /* ── Анимации для кораблей ── */
@@ -50,7 +49,7 @@
         50% { opacity: 0.7; background: hsl(0, 80%, 30%); }
     }
 
-    /* ── Материализация плаnoneы ── */
+    /* ── Материализация планеты ── */
     .planet-new {
         animation: planet-materialize 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
     }
@@ -99,7 +98,7 @@
         background: rgba(74,255,157,0.05) !important;
     }
 
-    /* ── Command Center v2 (cc-*) ── */
+    /* ── Командный пункт v2 (cc-*) ── */
     .cc-wrap { font-family: monospace; font-size: 12px; color: #ccc; }
     .cc-header {
         display: flex; align-items: center; gap: 8px;
@@ -211,7 +210,7 @@
     .cc-op-icon { font-size: 16px; margin-bottom: 3px; display: block; }
     .cc-op-cost { font-size: 9px; color: #555; margin-top: 2px; display: block; }
 
-    /* ── Compact summary ── */
+    /* ── Компактная сводка ── */
     .cc-dashboard {
         background: rgba(255,255,255,0.02);
         border: 1px solid rgba(255,255,255,0.06);
@@ -237,11 +236,11 @@
     .cc-color-teal { color: #4aff9d; }
     .cc-color-purple { color: #9d7fff; }
 
-    /* ── Alert panel ── */
+    /* ── Панель тревог ── */
     .cc-alerts { margin-bottom: 8px; }
     .cc-alerts .cc-threat-row { margin-bottom: 2px; }
 
-    /* ── Collapsible panels ── */
+    /* ── Сворачиваемые панели ── */
     .cc-panel {
         border: 1px solid rgba(255,255,255,0.06);
         border-radius: 5px; margin-bottom: 6px;
@@ -260,7 +259,7 @@
     .cc-panel.open .cc-panel-arrow { transform: rotate(90deg); }
     .cc-panel-body { padding: 6px 8px; }
 
-    /* ── Coordinate indicator ── */
+    /* ── Индикатор координат ── */
     #space-coordinates {
         position: absolute;
         bottom: 4px;
@@ -291,7 +290,7 @@
     .cc-brief-action { width:100%; padding:7px 10px; border:1px solid #4aff9d; border-radius:4px; color:#071014; background:#4aff9d; font:700 11px monospace; cursor:pointer; }
     .cc-brief-action:hover { filter:brightness(1.15); box-shadow:0 0 10px rgba(74,255,157,0.35); }
 
-    /* ── Mobile fixes ── */
+    /* ── Мобильные фиксы ── */
     @media (max-width: 768px) {
         #space-action-panel {
             bottom: 100px !important;
@@ -313,62 +312,87 @@
 </style>
 </head>
 <body>
+    <div id="demoWatermark" style="position:fixed;top:6px;right:10px;z-index:99999;background:rgba(255,80,60,0.15);border:1px solid rgba(255,80,60,0.6);color:#ff503c;font:700 11px monospace;letter-spacing:2px;padding:3px 10px;border-radius:4px;pointer-events:none;user-select:none;">DEMO</div>
     <div class="language-switcher" aria-label="Language"><button type="button" data-i18n-locale="en" class="is-active">EN</button><button type="button" data-i18n-locale="ru">RU</button></div>
     <div class="scanline"></div>
     <div class="vignette"></div>
 
-    <div id="demoGate" class="auth-overlay" aria-labelledby="demo-gate-title">
-        <div class="auth-container demo-gate-container">
+    <div id="authOverlay" class="auth-overlay">
+        <div class="auth-container">
             <div class="auth-header">
-                <h2 id="demo-gate-title">◆ CoreBox 5.0</h2>
-                <p>PUBLIC PLAYABLE DEMO // LOCAL SAFE MODE</p>
+                <h2>⚙️ CoreBox 5.0</h2>
+                <p>Нейро-сеть требует авторизации</p>
             </div>
-            <form id="demoGateForm" class="auth-form">
+
+            <div class="auth-form">
                 <div class="input-group">
-                    <label for="demoCallsign">🎮 Choose your callsign</label>
-                    <input type="text" id="demoCallsign" maxlength="20" minlength="2" placeholder="e.g. Nightwatch" autocomplete="nickname" required>
+                    <label for="auth-email">📧 Нейро-интерфейс (Email):</label>
+                    <input type="email" id="auth-email" placeholder="your@email.com" required>
                 </div>
-                <button id="demoStartBtn" class="auth-btn primary" type="submit">ENTER DEMO ↗</button>
-                <div class="demo-gate-note">No account. No password. Progress is saved only in this browser.</div>
-            </form>
+
+                <div class="input-group">
+                    <label for="auth-password">🔒 Квантовый ключ (Пароль):</label>
+                    <input type="password" id="auth-password" placeholder="минимум 6 символов" required>
+                </div>
+
+                <div class="input-group" id="username-group" style="display: none;">
+                    <label for="auth-username">🎮 Позывной (Имя):</label>
+                    <input type="text" id="auth-username" placeholder="Как вас называть?">
+                </div>
+
+                <div class="auth-buttons">
+                    <button id="btn-login" class="auth-btn primary">🔑 Войти в систему</button>
+                    <button id="btn-register" class="auth-btn secondary">📝 Регистрация</button>
+                </div>
+
+                <div class="auth-toggle">
+                    <button id="btn-toggle-mode" class="toggle-btn">✨ Нет аккаунта? Зарегистрироваться</button>
+                </div>
+            </div>
+
+            <div id="auth-message" class="auth-message"></div>
+
             <div class="auth-info">
-                <p><strong>Showcase build:</strong> the same compact command UI as the full CoreBox prototype.</p>
-                <div class="additional-links"><span class="story-link">LOCAL-FIRST</span><span class="story-link">RU / EN UI</span></div>
+                <p>💡 <strong>Нейро-подсказка:</strong> Ваш прогресс сохраняется локально на этом сервере</p>
+                <div class="additional-links">
+                    <a href="faq.html" class="story-link">📖 FAQ</a>
+                    <a href="history.html" class="story-link history-link">🎭 ИСТОРИЯ МИРА</a>
+                </div>
             </div>
         </div>
     </div>
 
     <div id="gameContent" style="display: none;">
         <div class="header">
-            <h1>⚙️ CoreBox 5.0 <span style="font-size: 14px;">| Neural Evolution</span></h1>
+            <h1>⚙️ CoreBox 5.0 <span style="font-size: 14px;">| Нейро-эволюция</span></h1>
 
             <div class="user-info" id="userInfo" style="display: none;">
                 <span id="usernameDisplay"></span>
-                <span id="saveIndicator" aria-live="polite">SAVED</span>
-                <button id="logoutBtn" class="logout-btn">🚪 Log Out</button>
+                <span id="saveIndicator" aria-live="polite">СОХРАНЕНО</span>
+                <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
             </div>
 
-            <button id="muteToggleBtn" class="mute-btn" title="Enable or disable sound" aria-label="Enable or disable sound">🔊</button>
+            <button id="muteToggleBtn" class="mute-btn" title="Включить/выключить звук" aria-label="Включить или выключить звук">🔊</button>
 
             <div class="stats-container">
                 <div class="stat-card">
-                    <div>🕐 SYSTEM CYCLE</div>
-                    <div id="timeDisplay" class="stat-value">DAY 08:00</div>
+                    <div>🕐 ЦИКЛ СИСТЕМЫ</div>
+                    <div id="timeDisplay" class="stat-value">ДЕНЬ 08:00</div>
                 </div>
             </div>
         </div>
 
         <div class="main">
             <div class="status-tabs">
-                <div class="status-tab active" id="system-status-tab">🖥️ SYSTEM STATUS</div>
-                <div class="status-tab" id="statistics-tab">📊 STATISTICS</div>
-                <div class="status-tab" id="leaderboard-tab">🏆 LEADERBOARD</div>
+                <div class="status-tab active" id="system-status-tab">🖥️ СИСТЕМНЫЙ СТАТУС</div>
+                <div class="status-tab" id="statistics-tab">📊 СТАТИСТИКА</div>
+                <div class="status-tab" id="leaderboard-tab">🏆 ЛИДЕРЫ</div>
             </div>
 
             <div id="system-status-section" class="status-section">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🖥️ CORE DIAGNOSTICS</span>
+                        <span>🖥️ ДИАГНОСТИКА ЯДРА</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -376,23 +400,23 @@
                             <div class="sys-grid">
                                 <div class="sys-row">
                                     <span class="sys-dot online" id="coal-dot"></span>
-                                    <span class="sys-key">POWER PLANT</span>
-                                    <span class="sys-val" id="coalStatus">OFFLINE</span>
+                                    <span class="sys-key">ТЭЦ</span>
+                                    <span class="sys-val" id="coalStatus">ОФФЛАЙН</span>
                                 </div>
                                 <div class="sys-row">
                                     <span class="sys-dot online" id="ai-dot"></span>
-                                    <span class="sys-key">AI</span>
-                                    <span class="sys-val" id="aiStatusText">INACTIVE</span>
+                                    <span class="sys-key">ИИ</span>
+                                    <span class="sys-val" id="aiStatusText">НЕАКТИВЕН</span>
                                 </div>
                                 <div class="sys-row">
                                     <span class="sys-dot online" id="defense-dot"></span>
-                                    <span class="sys-key">Defense</span>
-                                    <span class="sys-val" id="defenseStatusText">INACTIVE</span>
+                                    <span class="sys-key">Защита</span>
+                                    <span class="sys-val" id="defenseStatusText">НЕАКТИВНА</span>
                                 </div>
                                 <div class="sys-row">
                                     <span class="sys-dot danger" id="rebel-dot"></span>
-                                    <span class="sys-key">Rebels</span>
-                                    <span class="sys-val" id="rebelStatus">LOW LEVEL</span>
+                                    <span class="sys-key">Повстанцы</span>
+                                    <span class="sys-val" id="rebelStatus">НИЗКИЙ УРОВЕНЬ</span>
                                 </div>
                             </div>
 
@@ -402,12 +426,12 @@
                             </div>
 
                             <div class="sys-compact-row">
-                                <span>🧬 <span id="neuroStatusShort">0% (LV.0)</span></span>
+                                <span>🧬 <span id="neuroStatusShort">0% (Ур.0)</span></span>
                                 <div class="neuro-level"><div class="neuro-progress" id="neuroProgress"></div></div>
                             </div>
 
                             <div class="sys-compact-row">
-                                <span>🤖 <span id="aiMode">⚙️ Balanced</span></span>
+                                <span>🤖 <span id="aiMode">⚙️ Обычный</span></span>
                             </div>
 
                             <div id="attackWarning" class="attack-warning" style="display: none;"></div>
@@ -420,16 +444,16 @@
 
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🔥 POWER PLANT CONTROL</span>
+                        <span>🔥 УПРАВЛЕНИЕ ТЭЦ</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content" style="padding:8px 14px;">
                         <div class="tec-compact">
                             <span class="tec-dot online" id="tec-dot"></span>
-                            <span class="tec-label">POWER PLANT</span>
-                            <span class="tec-status" id="coalStatusDisplay">OFFLINE</span>
-                            <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal" aria-label="Enable or disable POWER PLANT">⚡</button>
-                            <span class="tec-info">Coal: <b id="coalInventoryAmount">0</b> | Bonus: <b id="tecPowerBonus">+0</b>%</span>
+                            <span class="tec-label">ТЭЦ</span>
+                            <span class="tec-status" id="coalStatusDisplay">ОФФЛАЙН</span>
+                            <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal" aria-label="Включить или выключить ТЭЦ">⚡</button>
+                            <span class="tec-info">Уголь: <b id="coalInventoryAmount">0</b> | Бонус: <b id="tecPowerBonus">+0</b>%</span>
                             <span id="coalNightsHint" class="coal-info" aria-live="polite"></span>
                         </div>
                         <div id="tec-warning" class="tec-warning" style="display: none;"></div>
@@ -438,13 +462,13 @@
 
                 <div class="panel">
                     <div class="panel-title">
-                        <span>📜 SYSTEM LOG</span>
+                        <span>📜 СИСТЕМНЫЙ ЖУРНАЛ (Лог)</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
                         <div class="log-controls">
-                            <button id="clearLogBtn" class="log-btn">🗑️ CLEAR LOG</button>
-                            <button id="autoScrollBtn" class="log-btn">📜 AUTO-SCROLL</button>
+                            <button id="clearLogBtn" class="log-btn">🗑️ ОЧИСТИТЬ ЖУРНАЛ</button>
+                            <button id="autoScrollBtn" class="log-btn">📜 АВТОСКРОЛЛ</button>
                         </div>
                         <div id="logBox" style="height: 200px; overflow-y: auto; background: #000; color: #0f0; font-family: monospace; padding: 8px;"></div>
                     </div>
@@ -452,7 +476,7 @@
 
                 <div class="panel">
                     <div class="panel-title">
-                        <span>⚡ COMPUTATIONAL POWER</span>
+                        <span>⚡ ВЫЧИСЛИТЕЛЬНАЯ МОЩНОСТЬ</span>
                         <span id="powerText" class="panel-title-value">0/1000</span>
                     </div>
                     <div class="panel-content">
@@ -460,16 +484,16 @@
                             <div class="progress-fill" id="powerFill" style="width: 0%"></div>
                         </div>
                         <div class="power-tier-info">
-                            <span>📈 POWER TIER:</span>
-                            <span id="powerTier">Tier 0 | +1 power/click</span>
+                            <span>📈 ТИР МОЩНОСТИ:</span>
+                            <span id="powerTier">Тир 0 | +1 мощности/клик</span>
                         </div>
-                        <div id="powerRecoveryStatus" class="power-recovery-status" aria-live="polite">Power: waiting for data</div>
+                        <div id="powerRecoveryStatus" class="power-recovery-status" aria-live="polite">Питание: ожидание данных</div>
                     </div>
                 </div>
 
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🔄 SYNC PROGRESS</span>
+                        <span>🔄 ПРОГРЕСС СИНХРОНИЗАЦИИ</span>
                         <span id="clickProgressText" class="panel-title-value">0/10</span>
                     </div>
                     <div class="panel-content">
@@ -481,31 +505,31 @@
 
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🤖 AUTOMATED MINING</span>
-                        <span id="autoClickStatus" style="font-size:11px;font-weight:700;color:var(--text-dim);">DISABLED</span>
+                        <span>🤖 АВТОМАТИЧЕСКАЯ ДОБЫЧА</span>
+                        <span id="autoClickStatus" style="font-size:11px;font-weight:700;color:var(--text-dim);">ОТКЛЮЧЕНА</span>
                     </div>
                     <div class="panel-content">
                         <div class="auto-click-settings">
                             <span class="setting-icon">⚡</span>
-                            <span class="setting-label">POWER/CYCLE:</span>
+                            <span class="setting-label">МОЩНОСТЬ/ЦИКЛ:</span>
                             <span id="powerPerClick" class="setting-value">1</span>
 
                             <span class="setting-separator">|</span>
 
                             <span class="setting-icon">⏱️</span>
-                            <span class="setting-label">INTERVAL:</span>
+                            <span class="setting-label">ИНТЕРВАЛ:</span>
                             <span id="autoClickInterval" class="setting-value">5</span>
-                            <span class="setting-unit">SEC</span>
+                            <span class="setting-unit">СЕК</span>
 
                             <span class="setting-separator">|</span>
 
                             <span class="setting-icon">💎</span>
-                            <span class="setting-label">COST:</span>
+                            <span class="setting-label">СТОИМОСТЬ:</span>
                             <span id="autoClickCost" class="setting-value">1</span>
-                            <span class="setting-unit">POWER</span>
+                            <span class="setting-unit">МОЩН</span>
                         </div>
                         <div class="auto-click-info">
-                            💡 HOLD THE FLOATING BUTTON TO ACTIVATE AUTOMATED MINING
+                            💡 УДЕРЖИВАЙТЕ ПЛАВАЮЩУЮ КНОПКУ ДЛЯ АКТИВАЦИИ АВТОМАТИЧЕСКОЙ ДОБЫЧИ
                         </div>
                     </div>
                 </div>
@@ -514,94 +538,94 @@
             <div id="statistics-section" class="status-section" style="display: none;">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>📊 OPERATOR STATISTICS</span>
+                        <span>📊 СТАТИСТИКА ОПЕРАТОРА</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
                         <div class="statistics-grid">
     <div class="stat-card-large">
-        <div class="stat-title">🕹️ CORE METRICS</div>
-        <div class="stat-line"><span class="stat-label">Total clicks:</span><span class="stat-value" id="totalClicks">0</span></div>
-        <div class="stat-line"><span class="stat-label">Max power:</span><span class="stat-value" id="maxPowerReached">0</span></div>
-        <div class="stat-line"><span class="stat-label">Nights survived:</span><span class="stat-value" id="nightsSurvived">0</span></div>
+        <div class="stat-title">🕹️ ОСНОВНОЕ</div>
+        <div class="stat-line"><span class="stat-label">Всего кликов:</span><span class="stat-value" id="totalClicks">0</span></div>
+        <div class="stat-line"><span class="stat-label">Макс. мощность:</span><span class="stat-value" id="maxPowerReached">0</span></div>
+        <div class="stat-line"><span class="stat-label">Ночей пережито:</span><span class="stat-value" id="nightsSurvived">0</span></div>
         <div class="stat-line">
-            <span class="stat-label">Total mined:</span>
+            <span class="stat-label">Всего добыто:</span>
             <span class="stat-value" id="totalMined">0</span>
             <span class="stat-delta" id="totalMinedDelta"></span>
         </div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">🧠 NEURAL EVOLUTION</div>
-        <div class="stat-line"><span class="stat-label">🧬 Evolution level:</span><span class="stat-value" id="neuroEvolution">0</span></div>
-        <div class="stat-line"><span class="stat-label">🧠 Neural consciousness:</span><span class="stat-value" id="neuroConsciousness">0%</span></div>
-        <div class="stat-line"><span class="stat-label">🎯 Evolution points:</span><span class="stat-value" id="neuroScore">0</span></div>
-        <div class="stat-line"><span class="stat-label">🤖 Current AI mode:</span><span class="stat-value" id="currentAiMode">Balanced</span></div>
+        <div class="stat-title">🧠 НЕЙРО-ЭВОЛЮЦИЯ</div>
+        <div class="stat-line"><span class="stat-label">🧬 Ур. эволюции:</span><span class="stat-value" id="neuroEvolution">0</span></div>
+        <div class="stat-line"><span class="stat-label">🧠 Нейро-сознание:</span><span class="stat-value" id="neuroConsciousness">0%</span></div>
+        <div class="stat-line"><span class="stat-label">🎯 Очки эволюции:</span><span class="stat-value" id="neuroScore">0</span></div>
+        <div class="stat-line"><span class="stat-label">🤖 Текущий режим ИИ:</span><span class="stat-value" id="currentAiMode">Обычный</span></div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">🛡️ SECURITY</div>
-        <div class="stat-line"><span class="stat-label">Rebel attacks:</span><span class="stat-value" id="rebelAttacks">0</span></div>
-        <div class="stat-line"><span class="stat-label">Attacks defended:</span><span class="stat-value" id="attacksDefended">0</span></div>
-        <div class="stat-line"><span class="stat-label">Current activity:</span><span class="stat-value" id="rebelActivity">0</span></div>
-        <div class="stat-line"><span class="stat-label">Visibility:</span><span class="stat-value" id="visibility">0%</span></div>
-        <div class="stat-line"><span class="stat-label">Consecutive defenses:</span><span class="stat-value" id="consecutiveDefenses">0</span></div>
+        <div class="stat-title">🛡️ БЕЗОПАСНОСТЬ</div>
+        <div class="stat-line"><span class="stat-label">Атак повстанцев:</span><span class="stat-value" id="rebelAttacks">0</span></div>
+        <div class="stat-line"><span class="stat-label">Отражено атак:</span><span class="stat-value" id="attacksDefended">0</span></div>
+        <div class="stat-line"><span class="stat-label">Текущ. активность:</span><span class="stat-value" id="rebelActivity">0</span></div>
+        <div class="stat-line"><span class="stat-label">Заметность:</span><span class="stat-value" id="visibility">0%</span></div>
+        <div class="stat-line"><span class="stat-label">Подряд защит:</span><span class="stat-value" id="consecutiveDefenses">0</span></div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">⛏️ RESOURCES (MINED)</div>
+        <div class="stat-title">⛏️ РЕСУРСЫ (Добыто)</div>
         <div class="stat-line">
-            <span class="stat-label">Coal mined:</span>
+            <span class="stat-label">Угля добыто:</span>
             <span class="stat-value" id="coalMined">0</span>
             <span class="stat-delta" id="coalMinedDelta"></span>
         </div>
         <div class="stat-line">
-            <span class="stat-label">Scrap recovered:</span>
+            <span class="stat-label">Мусора найдено:</span>
             <span class="stat-value" id="trashMined">0</span>
             <span class="stat-delta" id="trashMinedDelta"></span>
         </div>
         <div class="stat-line">
-            <span class="stat-label">Plasma mined:</span>
+            <span class="stat-label">Плазмы добыто:</span>
             <span class="stat-value" id="plasmaMined">0</span>
             <span class="stat-delta" id="plasmaMinedDelta"></span>
         </div>
         <div class="stat-line">
-            <span class="stat-label">Ore mined:</span>
+            <span class="stat-label">Руды добыто:</span>
             <span class="stat-value" id="oreMined">0</span>
             <span class="stat-delta" id="oreMinedDelta"></span>
         </div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">🔥 LOSSES & PROGRESS</div>
+        <div class="stat-title">🔥 ПОТЕРИ И ПРОГРЕСС</div>
         <div class="stat-line">
-            <span class="stat-label">Coal consumed:</span>
+            <span class="stat-label">Угля сожжено:</span>
             <span class="stat-value" id="coalBurned">0</span>
             <span class="stat-delta" id="coalBurnedDelta"></span>
         </div>
         <div class="stat-line">
-            <span class="stat-label">Coal stolen:</span>
+            <span class="stat-label">Украдено угля:</span>
             <span class="stat-value" id="coalStolen">0</span>
             <span class="stat-delta" id="coalStolenDelta"></span>
         </div>
-        <div class="stat-line"><span class="stat-label">Play time:</span><span class="stat-value" id="playTime">0 сек</span></div>
-        <div class="stat-line"><span class="stat-label">Sessions:</span><span class="stat-value" id="sessionsCount">1</span></div>
+        <div class="stat-line"><span class="stat-label">Время игры:</span><span class="stat-value" id="playTime">0 сек</span></div>
+        <div class="stat-line"><span class="stat-label">Сессий:</span><span class="stat-value" id="sessionsCount">1</span></div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">🚀 FLEET & DEVELOPMENT</div>
-        <div class="stat-line"><span class="stat-label">🚀 Ships:</span><span class="stat-value" id="fleetShips">0/20</span></div>
-        <div class="stat-line"><span class="stat-label">⚔️ Fleet power:</span><span class="stat-value" id="fleetCombatPower">0</span></div>
-        <div class="stat-line"><span class="stat-label">📐 Blueprints:</span><span class="stat-value" id="blueprintsUnlocked">0/3</span></div>
-        <div class="stat-line"><span class="stat-label">🔧 Mining level:</span><span class="stat-value" id="miningLevel">0</span></div>
+        <div class="stat-title">🚀 ФЛОТ И РАЗРАБОТКИ</div>
+        <div class="stat-line"><span class="stat-label">🚀 Кораблей:</span><span class="stat-value" id="fleetShips">0/20</span></div>
+        <div class="stat-line"><span class="stat-label">⚔️ Мощь флота:</span><span class="stat-value" id="fleetCombatPower">0</span></div>
+        <div class="stat-line"><span class="stat-label">📐 Чертежей:</span><span class="stat-value" id="blueprintsUnlocked">0/3</span></div>
+        <div class="stat-line"><span class="stat-label">🔧 Ур. добычи:</span><span class="stat-value" id="miningLevel">0</span></div>
     </div>
 </div>
 
                         <div class="statistics-controls">
-    <button id="refreshStatsBtn" class="stat-btn">🔄 REFRESH</button>
-    <button id="exportStatsBtn" class="stat-btn">📤 EXPORT</button>
-    <button id="importStatsBtn" class="stat-btn">📥 IMPORT</button>
-    <button id="resetStatsBtn" class="stat-btn danger">🗑️ RESET STATISTICS</button>
+    <button id="refreshStatsBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
+    <button id="exportStatsBtn" class="stat-btn">📤 ЭКСПОРТ</button>
+    <button id="importStatsBtn" class="stat-btn">📥 ИМПОРТ</button>
+    <button id="resetStatsBtn" class="stat-btn danger">🗑️ СБРОСИТЬ СТАТИСТИКУ</button>
 </div>
                     </div>
                 </div>
@@ -610,14 +634,14 @@
             <div id="leaderboard-section" class="status-section" style="display: none;">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🏆 LEADERBOARD (Neural rating)</span>
+                        <span>🏆 ТАБЛИЦА ЛИДЕРОВ (Нейро-рейтинг)</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
                         <div id="leaderboardContainer">
-                            <div class="leaderboard-loading">⏳ Loading local neural rating...</div>
+                            <div class="leaderboard-loading">⏳ Загрузка локального нейро-рейтинга...</div>
                         </div>
-                        <button id="refreshLeaderboardBtn" class="stat-btn">🔄 REFRESH</button>
+                        <button id="refreshLeaderboardBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
                     </div>
                 </div>
             </div>
@@ -637,7 +661,7 @@
             <div class="tab-content active" id="inventory-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>📦 SYSTEM RESOURCES</span>
+                        <span>📦 СИСТЕМНЫЕ РЕСУРСЫ</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -649,7 +673,7 @@
             <div class="tab-content" id="upgrades-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🔧 UPGRADE MODULES</span>
+                        <span>🔧 МОДУЛИ УЛУЧШЕНИЙ</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -661,7 +685,7 @@
             <div class="tab-content" id="trade-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>💱 P2P TRADE</span>
+                        <span>💱 P2P ТОРГОВЛЯ</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -673,7 +697,7 @@
             <div class="tab-content" id="quests-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>📋 SYSTEM OBJECTIVES</span>
+                        <span>📋 СИСТЕМНЫЕ ЗАДАЧИ</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -692,8 +716,8 @@
                 <div class="cc-wrap">
                     <div class="cc-header">
                         <div class="cc-dot" id="cc-status-dot"></div>
-                        <span class="cc-title-text">Command Center</span>
-                        <span class="cc-day-label" id="cc-day-label">DAY</span>
+                        <span class="cc-title-text">Командный пункт</span>
+                        <span class="cc-day-label" id="cc-day-label">ДЕНЬ</span>
                         <span class="cc-clock" id="cc-clock">--:--:--</span>
                     </div>
 
@@ -701,48 +725,48 @@
                     <div class="cc-dashboard">
                         <div class="cc-dash-row">
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Evolution</span>
+                                <span class="cc-dash-lbl">Эволюция</span>
                                 <span class="cc-dash-val cc-color-teal" id="cc-evol">—</span>
                                 <span style="font-size:9px;color:#555">→ <span id="cc-consc">—</span>%</span>
                             </div>
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Points</span>
+                                <span class="cc-dash-lbl">Очки</span>
                                 <span class="cc-dash-val cc-color-purple" id="cc-score">—</span>
                                 <span style="font-size:9px;color:#555"><span id="cc-score-next">—</span></span>
                             </div>
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Defense</span>
+                                <span class="cc-dash-lbl">Защита</span>
                                 <span class="cc-dash-val cc-color-teal" id="cc-def-bonus">—</span>
                                 <span style="font-size:9px;color:#555" id="cc-aimode">—</span>
                             </div>
                         </div>
                         <div class="cc-dash-row">
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Activity</span>
+                                <span class="cc-dash-lbl">Активность</span>
                                 <div class="cc-bar" style="flex:1;min-width:40px"><div class="cc-bar-fill" id="cc-bar-rebel" style="width:0%"></div></div>
                                 <span class="cc-badge" id="cc-rebel-badge">0/15</span>
                             </div>
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Vulnerability</span>
-                                <span class="cc-badge" id="cc-vuln">none</span>
+                                <span class="cc-dash-lbl">Уязвимость</span>
+                                <span class="cc-badge" id="cc-vuln">нет</span>
                             </div>
                             <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Defense</span>
-                                <span class="cc-badge" id="cc-prot-status">inactive</span>
+                                <span class="cc-dash-lbl">Защита</span>
+                                <span class="cc-badge" id="cc-prot-status">неактивна</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- ── OPERATIONS BRIEF ── -->
                     <section class="cc-brief" id="cc-operations-brief" aria-live="polite">
-                        <div class="cc-brief-kicker">OPERATIONS BRIEF</div>
-                        <div class="cc-brief-title" id="cc-brief-title">Waiting for core data</div>
-                        <div class="cc-brief-body" id="cc-brief-body">Synchronize the node to receive the next order.</div>
-                        <button class="cc-brief-action" id="cc-brief-action" type="button" data-tab="inventory">OPEN INVENTORY</button>
+                        <div class="cc-brief-kicker">ОПЕРАЦИОННЫЙ BRIEF</div>
+                        <div class="cc-brief-title" id="cc-brief-title">Ожидание данных ядра</div>
+                        <div class="cc-brief-body" id="cc-brief-body">Синхронизируйте базу, чтобы получить следующий приказ.</div>
+                        <button class="cc-brief-action" id="cc-brief-action" type="button" data-tab="inventory">ОТКРЫТЬ ИНВЕНТАРЬ</button>
                     </section>
                     <div id="corebox-ops-deck-host"></div>
 
-                    <!-- ── ACTIVE ТРЕВОГИ ── -->
+                    <!-- ── АКТИВНЫЕ ТРЕВОГИ ── -->
                     <div class="cc-alerts" id="cc-alerts">
                         <div class="cc-threat-row cc-danger-row" id="cc-multiphase-row" style="display:none"></div>
                         <div class="cc-threat-row cc-danger-row" id="cc-attack-warning" style="display:none">
@@ -758,7 +782,7 @@
                         </div>
                     </div>
 
-                    <!-- ── COUNTER-ОПЕРАЦAI ── -->
+                    <!-- ── КОНТР-ОПЕРАЦИИ ── -->
                     <div class="cc-section">
                         <div class="cc-sec-label">⚔️ Контр-операции <span id="cc-cd" style="margin-left:6px;font-size:10px;color:#4aff9d">—</span></div>
                         <div class="cc-ops-grid"></div>
@@ -772,7 +796,7 @@
                         </div>
                         <div class="cc-panel-body" style="display:none">
                             <div style="margin-bottom:6px">
-                                <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Dossier фракций</div>
+                                <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Досье фракций</div>
                                 <div id="cc-factions"><div class="cc-intercept-empty">Нет данных</div></div>
                             </div>
                             <div>
@@ -806,7 +830,7 @@
                                     <div class="cc-stat-val" id="cc-score-total">0</div>
                                 </div>
                             </div>
-                            <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Defense от повстанцев</div>
+                            <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Защита от повстанцев</div>
                             <div id="rebelProtectionPanel" class="protection-panel"></div>
                             <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px;margin-top:6px">История атак</div>
                             <div id="attackHistory" class="attack-history"></div>
@@ -871,7 +895,7 @@
             <div class="tab-content" id="space-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🌌 SPACE КАРТА</span>
+                        <span>🌌 КОСМИЧЕСКАЯ КАРТА</span>
                         <span id="space-online-count" style="font-size:10px;opacity:0.7;margin-left:auto;">0 онлайн</span>
                         <span class="collapse-icon">▼</span>
                     </div>
@@ -906,7 +930,7 @@
                         </div>
 
                         <div style="padding:0 12px 12px;">
-                            <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 OTHER PLAYERS</div>
+                            <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
                             <div id="space-players-list" style="max-height:200px;overflow-y:auto;"></div>
                         </div>
                     </div>
@@ -920,13 +944,62 @@
                 <circle class="ring-fill" cx="50" cy="50" r="45" fill="none" stroke-width="2" />
             </svg>
             <span class="btn-icon">⚙️</span>
-            <span class="btn-text">MINING</span>
+            <span class="btn-text">ДОБЫЧА</span>
             <span id="miningBonusFloat" class="mining-bonus">+0%</span>
             <span id="clickComboIndicator" class="click-combo-indicator" style="display:none;"></span>
         </div>
     </div>
 
     <script src="./i18n.js"></script>
-    <script src="./demo-legacy.js"></script>
+    <script src="./mobile-patch.js"></script>
+    <script src="./onboarding.js"></script>
+    <script src="./db-adapter.js"></script>
+    <script type="module" src="./game.js"></script>
+
+    <audio id="bgMusic" autoplay loop preload="none" style="display: none;">
+        <source src="music/game-music.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+    (function() {
+        window.onload = function() {
+            const bgMusic = document.getElementById('bgMusic');
+            if (bgMusic) {
+                bgMusic.volume = 0.025;
+
+                // ✅ ПРОВЕРКА СОХРАНЁННОГО СОСТОЯНИЯ MUTE
+                const isMuted = localStorage.getItem('corebox_sound_muted') === 'true';
+
+                function forcePlay() {
+                    document.addEventListener('click', function playOnce() {
+                        // ✅ НЕ ЗАПУСКАЕМ музыку, если пользователь её выключил
+                        if (!isMuted) {
+                            bgMusic.play().catch(() => {});
+                        }
+                        document.removeEventListener('click', playOnce);
+                    }, { once: true });
+                }
+                forcePlay();
+            }
+
+            window.showNotif = function(msg, isError = false) {
+                const div = document.createElement('div');
+                div.className = `notification ${isError ? 'error' : 'success'}`;
+                div.textContent = msg;
+                document.body.appendChild(div);
+                setTimeout(() => div.remove(), 2500);
+            };
+        };
+    })();
+    </script>
+    <script type="module">
+        import { initButtonSounds, Sounds } from './sounds-handler.js';
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initButtonSounds();
+        });
+
+        window.Sounds = Sounds;
+    </script>
 </body>
 </html>

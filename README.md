@@ -1,19 +1,39 @@
-# CoreBox — Public Demo
+# CoreBox 5.0 — Public Demo
 
-CoreBox is a cyberpunk command simulator prototype. This repository contains **only the public playable demo** for review and does not contain the commercial source package, production database, credentials, or private deployment configuration.
+Ознакомительная демо-версия Cyberpunk Incremental-игры для покупателя. Работает на чистой статике — без сервера и без аккаунта.
 
-## Run locally
+## Ссылка
 
-Serve this folder with any static web server, then open `index.html` through the server. For example:
+Играть: https://one1game.github.io/RESGEN4/
+
+## Что это
+
+- Самодостаточный статический сайт (GitHub Pages).
+- Прогресс хранится в `localStorage` браузера посетителя.
+- Демо-лимит: **3 пережитые ночи** — после чего ядро блокирует добычу и прокачку с сообщением «ДЕМО-РЕЖИМ ЗАВЕРШЁН».
+- Контент урезан: доступны первые 5 заданий, эндгейм-набор недоступен.
+
+## Локальный запуск
 
 ```bash
 python3 -m http.server 8080
+# или любой другой статический сервер
 ```
 
-The demo has no account system and no external API calls. A visitor enters a callsign and plays a self-contained local simulation. Progress is stored in the visitor's own browser using `localStorage`.
+Затем открыть `http://localhost:8080/`.
 
-## Demo systems
+## Защита от копирования
 
-The public build showcases outpost resources, power and heat management, operational stances, expedition contracts, fleet launch flow, local activity, milestones, and a spiral sector map with an active flight trace.
+- Вся клиентская логика минифицирована.
+- Ядро симуляции — скомпилированный WASM (Rust) с жёстко вшитым демо-лимитом 3 ночи. Исходники Rust, полный баланс и полная сборка в демо не входят.
+- Полная коммерческая версия передаётся отдельно по договору покупки.
 
-The full commercial package is distributed separately under a private purchase agreement.
+## Структура
+
+- `index.html`, `*.css`, `*.js` — клиент (минифицированная сборка)
+- `db-adapter.js` — локальное хранилище (localStorage), заменяет серверную БД
+- `pkg/` — WASM-ядро (Rust)
+- `config.json` — баланс и демо-набор заданий
+- `img/`, `music/` — ресурсы
+
+Данный репозиторий содержит **только публичное демо** и не включает коммерческий исходный пакет, исходники ядра, базу данных или приватную конфигурацию.
