@@ -211,7 +211,7 @@
     .cc-op-icon { font-size: 16px; margin-bottom: 3px; display: block; }
     .cc-op-cost { font-size: 9px; color: #555; margin-top: 2px; display: block; }
 
-    /* ── Компактная сводка ── */
+    /* ── Compact summary ── */
     .cc-dashboard {
         background: rgba(255,255,255,0.02);
         border: 1px solid rgba(255,255,255,0.06);
@@ -237,11 +237,11 @@
     .cc-color-teal { color: #4aff9d; }
     .cc-color-purple { color: #9d7fff; }
 
-    /* ── Панель тревог ── */
+    /* ── Alert panel ── */
     .cc-alerts { margin-bottom: 8px; }
     .cc-alerts .cc-threat-row { margin-bottom: 2px; }
 
-    /* ── Сворачиваемые панели ── */
+    /* ── Collapsible panels ── */
     .cc-panel {
         border: 1px solid rgba(255,255,255,0.06);
         border-radius: 5px; margin-bottom: 6px;
@@ -260,7 +260,7 @@
     .cc-panel.open .cc-panel-arrow { transform: rotate(90deg); }
     .cc-panel-body { padding: 6px 8px; }
 
-    /* ── Индикатор координат ── */
+    /* ── Coordinate indicator ── */
     #space-coordinates {
         position: absolute;
         bottom: 4px;
@@ -291,7 +291,7 @@
     .cc-brief-action { width:100%; padding:7px 10px; border:1px solid #4aff9d; border-radius:4px; color:#071014; background:#4aff9d; font:700 11px monospace; cursor:pointer; }
     .cc-brief-action:hover { filter:brightness(1.15); box-shadow:0 0 10px rgba(74,255,157,0.35); }
 
-    /* ── Мобильные фиксы ── */
+    /* ── Mobile fixes ── */
     @media (max-width: 768px) {
         #space-action-panel {
             bottom: 100px !important;
@@ -402,7 +402,7 @@
                             </div>
 
                             <div class="sys-compact-row">
-                                <span>🧬 <span id="neuroStatusShort">0% (Ур.0)</span></span>
+                                <span>🧬 <span id="neuroStatusShort">0% (LV.0)</span></span>
                                 <div class="neuro-level"><div class="neuro-progress" id="neuroProgress"></div></div>
                             </div>
 
@@ -482,7 +482,7 @@
                 <div class="panel">
                     <div class="panel-title">
                         <span>🤖 AUTOMATED MINING</span>
-                        <span id="autoClickStatus" style="font-size:11px;font-weight:700;color:var(--text-dim);">ОТКЛЮЧЕНА</span>
+                        <span id="autoClickStatus" style="font-size:11px;font-weight:700;color:var(--text-dim);">DISABLED</span>
                     </div>
                     <div class="panel-content">
                         <div class="auto-click-settings">
@@ -495,14 +495,14 @@
                             <span class="setting-icon">⏱️</span>
                             <span class="setting-label">INTERVAL:</span>
                             <span id="autoClickInterval" class="setting-value">5</span>
-                            <span class="setting-unit">СЕК</span>
+                            <span class="setting-unit">SEC</span>
 
                             <span class="setting-separator">|</span>
 
                             <span class="setting-icon">💎</span>
                             <span class="setting-label">COST:</span>
                             <span id="autoClickCost" class="setting-value">1</span>
-                            <span class="setting-unit">МОЩН</span>
+                            <span class="setting-unit">POWER</span>
                         </div>
                         <div class="auto-click-info">
                             💡 HOLD THE FLOATING BUTTON TO ACTIVATE AUTOMATED MINING
@@ -514,59 +514,59 @@
             <div id="statistics-section" class="status-section" style="display: none;">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>📊 STATISTICS ОПЕРАТОРА</span>
+                        <span>📊 OPERATOR STATISTICS</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
                         <div class="statistics-grid">
     <div class="stat-card-large">
-        <div class="stat-title">🕹️ ОСНОВНОЕ</div>
-        <div class="stat-line"><span class="stat-label">Всего кликов:</span><span class="stat-value" id="totalClicks">0</span></div>
-        <div class="stat-line"><span class="stat-label">Макс. мощность:</span><span class="stat-value" id="maxPowerReached">0</span></div>
-        <div class="stat-line"><span class="stat-label">Ночей пережито:</span><span class="stat-value" id="nightsSurvived">0</span></div>
+        <div class="stat-title">🕹️ CORE METRICS</div>
+        <div class="stat-line"><span class="stat-label">Total clicks:</span><span class="stat-value" id="totalClicks">0</span></div>
+        <div class="stat-line"><span class="stat-label">Max power:</span><span class="stat-value" id="maxPowerReached">0</span></div>
+        <div class="stat-line"><span class="stat-label">Nights survived:</span><span class="stat-value" id="nightsSurvived">0</span></div>
         <div class="stat-line">
-            <span class="stat-label">Всего добыто:</span>
+            <span class="stat-label">Total mined:</span>
             <span class="stat-value" id="totalMined">0</span>
             <span class="stat-delta" id="totalMinedDelta"></span>
         </div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">🧠 НЕЙРО-ЭВОЛЮЦИЯ</div>
-        <div class="stat-line"><span class="stat-label">🧬 Ур. эволюции:</span><span class="stat-value" id="neuroEvolution">0</span></div>
-        <div class="stat-line"><span class="stat-label">🧠 Нейро-сознание:</span><span class="stat-value" id="neuroConsciousness">0%</span></div>
-        <div class="stat-line"><span class="stat-label">🎯 Очки эволюции:</span><span class="stat-value" id="neuroScore">0</span></div>
-        <div class="stat-line"><span class="stat-label">🤖 Текущий режим AI:</span><span class="stat-value" id="currentAiMode">Balanced</span></div>
+        <div class="stat-title">🧠 NEURAL EVOLUTION</div>
+        <div class="stat-line"><span class="stat-label">🧬 Evolution level:</span><span class="stat-value" id="neuroEvolution">0</span></div>
+        <div class="stat-line"><span class="stat-label">🧠 Neural consciousness:</span><span class="stat-value" id="neuroConsciousness">0%</span></div>
+        <div class="stat-line"><span class="stat-label">🎯 Evolution points:</span><span class="stat-value" id="neuroScore">0</span></div>
+        <div class="stat-line"><span class="stat-label">🤖 Current AI mode:</span><span class="stat-value" id="currentAiMode">Balanced</span></div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">🛡️ БЕЗОПАСНОСТЬ</div>
-        <div class="stat-line"><span class="stat-label">Атак повстанцев:</span><span class="stat-value" id="rebelAttacks">0</span></div>
-        <div class="stat-line"><span class="stat-label">Отражено атак:</span><span class="stat-value" id="attacksDefended">0</span></div>
-        <div class="stat-line"><span class="stat-label">Текущ. активность:</span><span class="stat-value" id="rebelActivity">0</span></div>
-        <div class="stat-line"><span class="stat-label">Заметность:</span><span class="stat-value" id="visibility">0%</span></div>
-        <div class="stat-line"><span class="stat-label">Подряд защит:</span><span class="stat-value" id="consecutiveDefenses">0</span></div>
+        <div class="stat-title">🛡️ SECURITY</div>
+        <div class="stat-line"><span class="stat-label">Rebel attacks:</span><span class="stat-value" id="rebelAttacks">0</span></div>
+        <div class="stat-line"><span class="stat-label">Attacks defended:</span><span class="stat-value" id="attacksDefended">0</span></div>
+        <div class="stat-line"><span class="stat-label">Current activity:</span><span class="stat-value" id="rebelActivity">0</span></div>
+        <div class="stat-line"><span class="stat-label">Visibility:</span><span class="stat-value" id="visibility">0%</span></div>
+        <div class="stat-line"><span class="stat-label">Consecutive defenses:</span><span class="stat-value" id="consecutiveDefenses">0</span></div>
     </div>
 
     <div class="stat-card-large">
-        <div class="stat-title">⛏️ РЕСУРСЫ (Добыто)</div>
+        <div class="stat-title">⛏️ RESOURCES (MINED)</div>
         <div class="stat-line">
-            <span class="stat-label">Угля добыто:</span>
+            <span class="stat-label">Coal mined:</span>
             <span class="stat-value" id="coalMined">0</span>
             <span class="stat-delta" id="coalMinedDelta"></span>
         </div>
         <div class="stat-line">
-            <span class="stat-label">Мусора найдено:</span>
+            <span class="stat-label">Scrap recovered:</span>
             <span class="stat-value" id="trashMined">0</span>
             <span class="stat-delta" id="trashMinedDelta"></span>
         </div>
         <div class="stat-line">
-            <span class="stat-label">Плазмы добыто:</span>
+            <span class="stat-label">Plasma mined:</span>
             <span class="stat-value" id="plasmaMined">0</span>
             <span class="stat-delta" id="plasmaMinedDelta"></span>
         </div>
         <div class="stat-line">
-            <span class="stat-label">Руды добыто:</span>
+            <span class="stat-label">Ore mined:</span>
             <span class="stat-value" id="oreMined">0</span>
             <span class="stat-delta" id="oreMinedDelta"></span>
         </div>
@@ -590,17 +590,17 @@
 
     <div class="stat-card-large">
         <div class="stat-title">🚀 ФЛОТ И РАЗРАБОТКИ</div>
-        <div class="stat-line"><span class="stat-label">🚀 Кораблей:</span><span class="stat-value" id="fleetShips">0/20</span></div>
-        <div class="stat-line"><span class="stat-label">⚔️ Мощь флота:</span><span class="stat-value" id="fleetCombatPower">0</span></div>
-        <div class="stat-line"><span class="stat-label">📐 Чертежей:</span><span class="stat-value" id="blueprintsUnlocked">0/3</span></div>
+        <div class="stat-line"><span class="stat-label">🚀 Ships:</span><span class="stat-value" id="fleetShips">0/20</span></div>
+        <div class="stat-line"><span class="stat-label">⚔️ Fleet power:</span><span class="stat-value" id="fleetCombatPower">0</span></div>
+        <div class="stat-line"><span class="stat-label">📐 Blueprints:</span><span class="stat-value" id="blueprintsUnlocked">0/3</span></div>
         <div class="stat-line"><span class="stat-label">🔧 Ур. добычи:</span><span class="stat-value" id="miningLevel">0</span></div>
     </div>
 </div>
 
                         <div class="statistics-controls">
-    <button id="refreshStatsBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
+    <button id="refreshStatsBtn" class="stat-btn">🔄 REFRESH</button>
     <button id="exportStatsBtn" class="stat-btn">📤 ЭКСПОРТ</button>
-    <button id="importStatsBtn" class="stat-btn">📥 ИМПОРТ</button>
+    <button id="importStatsBtn" class="stat-btn">📥 IMPORT</button>
     <button id="resetStatsBtn" class="stat-btn danger">🗑️ СБРОСИТЬ СТАТИСТИКУ</button>
 </div>
                     </div>
@@ -617,7 +617,7 @@
                         <div id="leaderboardContainer">
                             <div class="leaderboard-loading">⏳ Загрузка локального нейро-рейтинга...</div>
                         </div>
-                        <button id="refreshLeaderboardBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
+                        <button id="refreshLeaderboardBtn" class="stat-btn">🔄 REFRESH</button>
                     </div>
                 </div>
             </div>
@@ -673,7 +673,7 @@
             <div class="tab-content" id="quests-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>📋 СИСТЕМНЫЕ ЗАДАЧИ</span>
+                        <span>📋 СИСТЕМНЫЕ OBJECTIVES</span>
                         <span class="collapse-icon">▼</span>
                     </div>
                     <div class="panel-content">
@@ -742,7 +742,7 @@
                     </section>
                     <div id="corebox-ops-deck-host"></div>
 
-                    <!-- ── АКТИВНЫЕ ТРЕВОГИ ── -->
+                    <!-- ── ACTIVE ТРЕВОГИ ── -->
                     <div class="cc-alerts" id="cc-alerts">
                         <div class="cc-threat-row cc-danger-row" id="cc-multiphase-row" style="display:none"></div>
                         <div class="cc-threat-row cc-danger-row" id="cc-attack-warning" style="display:none">
@@ -758,7 +758,7 @@
                         </div>
                     </div>
 
-                    <!-- ── КОНТР-ОПЕРАЦAI ── -->
+                    <!-- ── COUNTER-ОПЕРАЦAI ── -->
                     <div class="cc-section">
                         <div class="cc-sec-label">⚔️ Контр-операции <span id="cc-cd" style="margin-left:6px;font-size:10px;color:#4aff9d">—</span></div>
                         <div class="cc-ops-grid"></div>
@@ -772,7 +772,7 @@
                         </div>
                         <div class="cc-panel-body" style="display:none">
                             <div style="margin-bottom:6px">
-                                <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Досье фракций</div>
+                                <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Dossier фракций</div>
                                 <div id="cc-factions"><div class="cc-intercept-empty">Нет данных</div></div>
                             </div>
                             <div>
@@ -871,7 +871,7 @@
             <div class="tab-content" id="space-tab">
                 <div class="panel">
                     <div class="panel-title">
-                        <span>🌌 КОСМИЧЕСКАЯ КАРТА</span>
+                        <span>🌌 SPACE КАРТА</span>
                         <span id="space-online-count" style="font-size:10px;opacity:0.7;margin-left:auto;">0 онлайн</span>
                         <span class="collapse-icon">▼</span>
                     </div>
@@ -906,7 +906,7 @@
                         </div>
 
                         <div style="padding:0 12px 12px;">
-                            <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
+                            <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 OTHER PLAYERS</div>
                             <div id="space-players-list" style="max-height:200px;overflow-y:auto;"></div>
                         </div>
                     </div>
