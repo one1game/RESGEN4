@@ -7,3 +7,6 @@ data/
 node_modules/
 .DS_Store
 Thumbs.db
+
+# Внутренний анализ (не публиковать)
+img/code_analysis*.txt
