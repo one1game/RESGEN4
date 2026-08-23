@@ -82,6 +82,11 @@
   .shot img{width:100%;display:block;aspect-ratio:16/9;object-fit:cover;filter:saturate(1.1)}
   .shot figcaption{padding:14px 18px;font-size:.85rem;color:var(--muted)}
 
+  /* PLAY FRAME */
+  .play-frame{position:relative;border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#000;box-shadow:0 20px 60px rgba(0,229,255,.12)}
+  .play-frame iframe{width:100%;height:78vh;min-height:560px;display:block;border:0;background:#000}
+  @media(max-width:760px){.play-frame iframe{height:70vh;min-height:460px}}
+
   /* LICENSE */
   .license{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:34px;max-width:760px}
   .license h3{color:#fff;margin:18px 0 8px;font-size:1rem}
@@ -137,6 +142,16 @@
     </div>
   </div>
 </header>
+
+<section id="play" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="sec-title">Попробовать <b>прямо сейчас</b></h2>
+    <p class="sec-sub">Интерактивное демо: играбельная сборка с WASM-ядром. Прогресс хранится в вашем браузере, демо-лимит — 3 пережитые ночи.</p>
+    <div class="play-frame">
+      <iframe src="play/" title="CoreBox 5.0 — играбельное демо" loading="lazy"></iframe>
+    </div>
+  </div>
+</section>
 
 <section id="features">
   <div class="wrap">

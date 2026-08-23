@@ -1,0 +1,4 @@
+# Локальные данные и внутреннее
+data/
+*.db
+img/code_analysis*.txt
