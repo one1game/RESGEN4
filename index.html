@@ -1,1005 +1,272 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>CoreBox 5.0 DEMO - Neural Cyberpunk Incremental</title>
-    <link rel="icon" type="image/svg+xml" href="favicon.svg">
-    <link rel="stylesheet" href="background.css">
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="low-perf.css">
-    <link rel="stylesheet" href="mobile-patch.css">
-    <link rel="stylesheet" href="onboarding.css">
-    <style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CoreBox 5.0 — Cyberpunk Incremental | Демо для разработчиков</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+<style>
+  :root{
+    --bg:#0a0e17; --bg2:#0e1524; --card:#111a2c; --line:#1e2c47;
+    --neon:#00e5ff; --neon2:#ff2d78; --gold:#ffd166; --text:#c9d6ea; --muted:#7d8db0;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;line-height:1.6;overflow-x:hidden}
+  ::selection{background:var(--neon);color:#000}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+  a{color:var(--neon);text-decoration:none}
+  a:hover{text-decoration:underline}
 
-    /* ============================================
-       ТОЛЬКО УНИКАЛЬНЫЕ СТИЛИ (чего нет в style.css)
-       ============================================ */
+  /* ---------- NAV ---------- */
+  nav{position:fixed;top:0;left:0;right:0;z-index:50;background:rgba(10,14,23,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .logo{font-weight:700;color:#fff;letter-spacing:1px;font-size:1.1rem}
+  .logo b{color:var(--neon)}
+  .nav-links{display:flex;gap:26px;font-size:.9rem}
+  .nav-links a{color:var(--muted);transition:color .2s}
+  .nav-links a:hover{color:var(--neon);text-decoration:none}
+  @media(max-width:760px){.nav-links{display:none}}
 
-    /* ── Анимации для кораблей ── */
-    .ship-card.on-mission .ship-icon {
-        animation: fly 1.5s ease-in-out infinite alternate;
-    }
-    @keyframes fly {
-        from { transform: translateX(-4px); }
-        to { transform: translateX(4px); }
-    }
-    .ship-card.returning .ship-icon {
-        animation: fly-return 1.2s ease-in-out infinite alternate;
-        transform: scaleX(-1);
-    }
-    @keyframes fly-return {
-        from { transform: translateX(4px) scaleX(-1); }
-        to { transform: translateX(-4px) scaleX(-1); }
-    }
-    .ship-card.defense-mode .ship-icon {
-        animation: shield-glow 1s ease-in-out infinite alternate;
-    }
-    @keyframes shield-glow {
-        from { filter: drop-shadow(0 0 4px #4af); }
-        to { filter: drop-shadow(0 0 12px #4af); }
-    }
+  /* ---------- HERO ---------- */
+  header{position:relative;min-height:100vh;display:flex;align-items:center;background:
+    linear-gradient(180deg,rgba(10,14,23,.75),rgba(10,14,23,.92)),
+    url('https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=dark%20futuristic%20cyberpunk%20city%20skyline%20at%20night%2C%20neon%20purple%20and%20cyan%20lights%2C%20holographic%20interfaces%20in%20the%20air%2C%20resource%20management%20game%20atmosphere%2C%20cinematic%20wide%20shot%2C%20high%20detail%20digital%20art&image_size=landscape_16_9') center/cover no-repeat}
+  .hero-tag{display:inline-block;padding:6px 14px;border:1px solid var(--neon2);color:var(--neon2);border-radius:100px;font-size:.75rem;letter-spacing:2px;text-transform:uppercase;margin-bottom:20px}
+  h1{font-size:clamp(2rem,6vw,3.6rem);color:#fff;font-weight:800;line-height:1.15}
+  h1 span{background:linear-gradient(90deg,var(--neon),var(--neon2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero-sub{max-width:640px;margin:22px 0 34px;color:var(--muted);font-size:1.08rem}
+  .btn{display:inline-block;padding:14px 28px;border-radius:10px;font-weight:700;font-size:1rem;transition:.2s;border:none;cursor:pointer}
+  .btn-primary{background:linear-gradient(90deg,var(--neon),#0090ff);color:#00121a}
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,229,255,.35)}
+  .btn-ghost{border:1px solid var(--line);color:var(--text);margin-left:14px}
+  .btn-ghost:hover{background:var(--card)}
+  .hero-stats{display:flex;gap:44px;margin-top:56px;flex-wrap:wrap}
+  .hstat b{display:block;font-size:1.6rem;color:#fff}
+  .hstat span{color:var(--muted);font-size:.85rem;letter-spacing:1px;text-transform:uppercase}
 
-    /* ── Перегрев кнопки ── */
-    #floatingMineBtn.overheated {
-        animation: overheated-pulse 0.5s infinite;
-    }
-    @keyframes overheated-pulse {
-        0%, 100% { opacity: 1; background: hsl(0, 80%, 20%); }
-        50% { opacity: 0.7; background: hsl(0, 80%, 30%); }
-    }
+  /* ---------- SECTIONS ---------- */
+  section{padding:90px 0}
+  .sec-title{font-size:clamp(1.5rem,3.5vw,2.2rem);color:#fff;margin-bottom:10px}
+  .sec-title b{color:var(--neon)}
+  .sec-sub{color:var(--muted);max-width:640px;margin-bottom:44px}
 
-    /* ── Материализация планеты ── */
-    .planet-new {
-        animation: planet-materialize 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-    }
-    @keyframes planet-materialize {
-        0% { transform: translate(-50%, -50%) scale(0) rotate(-180deg); opacity: 0; filter: brightness(3); }
-        60% { transform: translate(-50%, -50%) scale(1.2) rotate(10deg); opacity: 1; filter: brightness(1.5); }
-        100% { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; filter: brightness(1); }
-    }
+  /* FEATURES */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px;transition:.25s}
+  .card:hover{transform:translateY(-4px);border-color:var(--neon);box-shadow:0 12px 40px rgba(0,229,255,.12)}
+  .card .ico{font-size:1.7rem;margin-bottom:14px}
+  .card h3{color:#fff;font-size:1.05rem;margin-bottom:8px}
+  .card p{color:var(--muted);font-size:.92rem}
 
-    /* ── Слои звёзд (генерируются JS) ── */
-    .stars-layer-slow, .stars-layer-medium, .stars-layer-fast {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        pointer-events: none;
-        transition: transform 0.1s ease-out;
-    }
+  /* TECH */
+  .tech-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:22px}
+  .tech{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:20px}
+  .tech .t-ico{font-size:1.5rem}
+  .tech h4{color:#fff;margin:10px 0 6px;font-size:.98rem}
+  .tech p{color:var(--muted);font-size:.85rem}
 
-    /* ── Canvas карты (НЕ перехватывает клики) ── */
-    #space-main-canvas {
-        position: absolute;
-        top: 0; left: 0;
-        width: 100%; height: 100%;
-        pointer-events: none;
-        z-index: 20;
-    }
+  /* PACKAGE (deliverables) */
+  .pack{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:22px}
+  .pack-item{background:linear-gradient(160deg,var(--card),var(--bg2));border:1px solid var(--line);border-radius:14px;padding:24px}
+  .pack-item.flag{border-color:var(--gold);box-shadow:0 0 30px rgba(255,209,102,.08)}
+  .pack-item h3{color:#fff;display:flex;align-items:center;gap:10px;font-size:1rem;margin-bottom:12px}
+  .pack-item ul{list-style:none}
+  .pack-item li{color:var(--muted);font-size:.9rem;padding:6px 0 6px 24px;position:relative}
+  .pack-item li::before{content:'▸';position:absolute;left:0;color:var(--neon)}
+  .badge{display:inline-block;background:var(--gold);color:#3a2b00;font-size:.68rem;font-weight:800;padding:3px 10px;border-radius:100px;letter-spacing:1px;text-transform:uppercase}
 
-    /* ── Viewport карты (без CSS-трансформации) ── */
-    .map-viewport {
-        position: absolute;
-        width: 100%;
-        height: 100%;
-        z-index: 2;
-    }
+  /* SHOTS */
+  .shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:22px}
+  .shot{border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--card)}
+  .shot img{width:100%;display:block;aspect-ratio:16/9;object-fit:cover;filter:saturate(1.1)}
+  .shot figcaption{padding:14px 18px;font-size:.85rem;color:var(--muted)}
 
-    /* ── Hover для игроков на карте ── */
-    .other-player-marker:hover {
-        filter: brightness(1.4);
-        z-index: 10 !important;
-    }
-    .space-player-row:hover {
-        background: rgba(255,255,255,0.05) !important;
-    }
-    .space-player-row:active {
-        background: rgba(74,255,157,0.05) !important;
-    }
+  /* LICENSE */
+  .license{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:34px;max-width:760px}
+  .license h3{color:#fff;margin:18px 0 8px;font-size:1rem}
+  .license p, .license li{color:var(--muted);font-size:.92rem}
+  .license ul{padding-left:20px}
+  .license li{padding:4px 0}
 
-    /* ── Командный пункт v2 (cc-*) ── */
-    .cc-wrap { font-family: monospace; font-size: 12px; color: #ccc; }
-    .cc-header {
-        display: flex; align-items: center; gap: 8px;
-        padding: 10px 12px;
-        border-bottom: 1px solid rgba(74,255,157,0.15);
-        margin-bottom: 10px;
-    }
-    .cc-dot {
-        width: 8px; height: 8px; border-radius: 50%;
-        background: #4aff9d;
-        animation: cc-pulse 2s ease-in-out infinite;
-        flex-shrink: 0;
-    }
-    .cc-title-text {
-        font-size: 11px; letter-spacing: 0.12em;
-        color: #4aff9d; text-transform: uppercase;
-    }
-    .cc-day-label {
-        font-size: 10px; padding: 1px 7px; border-radius: 10px;
-        background: rgba(74,255,157,0.12); color: #4aff9d;
-    }
-    .cc-clock {
-        margin-left: auto; font-size: 11px; color: #555;
-        font-variant-numeric: tabular-nums;
-    }
-    .cc-section { margin-bottom: 12px; }
-    .cc-sec-label {
-        font-size: 10px; color: #555; letter-spacing: 0.1em;
-        text-transform: uppercase; margin-bottom: 6px;
-        display: flex; align-items: center; gap: 6px;
-    }
-    .cc-sec-label::after {
-        content: ''; flex: 1; height: 1px;
-        background: rgba(255,255,255,0.06);
-    }
-    .cc-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-    .cc-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-    .cc-stat {
-        background: rgba(255,255,255,0.03);
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 6px; padding: 8px 10px;
-    }
-    .cc-stat-lbl {
-        font-size: 9px; color: #555; letter-spacing: 0.08em;
-        text-transform: uppercase; margin-bottom: 3px;
-    }
-    .cc-stat-val {
-        font-size: 18px; font-weight: bold; color: #eee;
-        font-variant-numeric: tabular-nums; line-height: 1;
-    }
-    .cc-stat-val.good { color: #4aff9d; }
-    .cc-stat-val.warn { color: #ffcc44; }
-    .cc-stat-val.danger { color: #ff6644; }
-    .cc-stat-sub { font-size: 10px; color: #555; margin-top: 3px; }
-    .cc-bar {
-        background: rgba(255,255,255,0.06); border-radius: 3px;
-        height: 3px; margin-top: 5px; overflow: hidden;
-    }
-    .cc-bar-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
-    .cc-bar-teal { background: #4aff9d; }
-    .cc-bar-amber { background: #ffcc44; }
-    .cc-bar-red { background: linear-gradient(90deg, #ff4444, #ff6644); }
-    .cc-bar-blue { background: #4a9eff; }
-    .cc-bar-purple { background: #9d7fff; }
-    .cc-threat-row {
-        display: flex; align-items: center; gap: 8px;
-        padding: 5px 8px; border-radius: 5px;
-        background: rgba(255,255,255,0.02);
-        border: 1px solid rgba(255,255,255,0.05);
-        margin-bottom: 4px;
-    }
-    .cc-threat-label { flex: 1; font-size: 11px; color: #aaa; }
-    .cc-threat-bar { flex: 1; }
-    .cc-threat-row.cc-danger-row {
-        border-color: rgba(255,80,80,0.3);
-        background: rgba(255,50,50,0.05);
-        animation: cc-pulse 1s infinite;
-    }
-    .cc-badge {
-        font-size: 10px; padding: 2px 7px; border-radius: 10px;
-        font-weight: bold; white-space: nowrap; flex-shrink: 0;
-    }
-    .cc-badge-ok { background: rgba(74,255,157,0.12); color: #4aff9d; }
-    .cc-badge-warn { background: rgba(255,200,68,0.12); color: #ffcc44; }
-    .cc-badge-danger { background: rgba(255,80,50,0.12); color: #ff6644; }
-    .cc-badge-muted { background: rgba(255,255,255,0.05); color: #555; }
-    .cc-badge-purple { background: rgba(157,127,255,0.12); color: #9d7fff; }
-    .cc-op-btn {
-        background: rgba(255,255,255,0.03);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 6px; padding: 8px 4px;
-        cursor: pointer; text-align: center;
-        color: #ccc; font-family: monospace; font-size: 10px;
-        transition: background 0.15s, border-color 0.15s;
-    }
-    .cc-op-btn:hover {
-        background: rgba(255,255,255,0.07);
-        border-color: rgba(255,255,255,0.15);
-    }
-    .cc-op-btn:active { transform: scale(0.97); }
-    .cc-op-btn.cc-op-active {
-        border-color: rgba(74,255,157,0.5);
-        background: rgba(74,255,157,0.08);
-        color: #4aff9d;
-    }
-    .cc-op-btn:disabled {
-        opacity: 0.45; cursor: not-allowed; pointer-events: none;
-    }
-    .cc-op-icon { font-size: 16px; margin-bottom: 3px; display: block; }
-    .cc-op-cost { font-size: 9px; color: #555; margin-top: 2px; display: block; }
+  /* CTA / FORM */
+  .cta{background:linear-gradient(120deg,#0e1524,#101b33);border:1px solid var(--line);border-radius:20px;padding:44px;text-align:center}
+  .cta h2{color:#fff;font-size:clamp(1.4rem,3vw,2rem);margin-bottom:12px}
+  .cta p{color:var(--muted);margin-bottom:26px}
+  .form{display:flex;gap:14px;max-width:560px;margin:0 auto;flex-wrap:wrap;justify-content:center}
+  .form input,.form textarea{flex:1;min-width:220px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:13px 16px;color:#fff;font-size:.95rem;outline:none}
+  .form textarea{min-height:90px;width:100%;flex-basis:100%}
+  .form input:focus,.form textarea:focus{border-color:var(--neon)}
+  .hint{font-size:.78rem;color:var(--muted);margin-top:16px}
 
-    /* ── Компактная сводка ── */
-    .cc-dashboard {
-        background: rgba(255,255,255,0.02);
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 6px; padding: 6px 10px; margin-bottom: 8px;
-    }
-    .cc-dash-row {
-        display: flex; align-items: center; gap: 6px;
-        padding: 3px 0;
-    }
-    .cc-dash-row:first-child { border-bottom: 1px solid rgba(255,255,255,0.04); padding-bottom: 5px; }
-    .cc-dash-row:last-child { padding-top: 5px; }
-    .cc-dash-item {
-        flex: 1; display: flex; align-items: center; gap: 5px;
-        min-width: 0;
-    }
-    .cc-dash-lbl {
-        font-size: 9px; color: #555; text-transform: uppercase;
-        letter-spacing: 0.05em; flex-shrink: 0;
-    }
-    .cc-dash-val {
-        font-size: 14px; font-weight: bold; font-variant-numeric: tabular-nums;
-    }
-    .cc-color-teal { color: #4aff9d; }
-    .cc-color-purple { color: #9d7fff; }
-
-    /* ── Панель тревог ── */
-    .cc-alerts { margin-bottom: 8px; }
-    .cc-alerts .cc-threat-row { margin-bottom: 2px; }
-
-    /* ── Сворачиваемые панели ── */
-    .cc-panel {
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 5px; margin-bottom: 6px;
-        background: rgba(255,255,255,0.015);
-    }
-    .cc-panel-hdr {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 5px 8px; cursor: pointer; font-size: 10px;
-        color: #888; letter-spacing: 0.06em; text-transform: uppercase;
-        transition: color 0.15s;
-        user-select: none;
-    }
-    .cc-panel-hdr:hover { color: #ccc; background: rgba(255,255,255,0.03); }
-    .cc-panel.open .cc-panel-hdr { color: #4aff9d; }
-    .cc-panel-arrow { font-size: 8px; transition: transform 0.2s; }
-    .cc-panel.open .cc-panel-arrow { transform: rotate(90deg); }
-    .cc-panel-body { padding: 6px 8px; }
-
-    /* ── Индикатор координат ── */
-    #space-coordinates {
-        position: absolute;
-        bottom: 4px;
-        left: 4px;
-        font-size: 8px;
-        color: rgba(0, 170, 136, 0.5);
-        background: rgba(0, 0, 0, 0.35);
-        padding: 2px 6px;
-        border-radius: 2px;
-        z-index: 100;
-        font-family: monospace;
-        pointer-events: none;
-        backdrop-filter: blur(2px);
-    }
-
-    .cc-brief {
-        margin: 10px 0;
-        padding: 10px 12px;
-        border: 1px solid rgba(74,255,157,0.35);
-        border-left: 3px solid #4aff9d;
-        border-radius: 5px;
-        background: linear-gradient(105deg, rgba(74,255,157,0.10), rgba(21,30,38,0.72));
-        box-shadow: inset 0 0 18px rgba(74,255,157,0.04), 0 0 12px rgba(74,255,157,0.06);
-    }
-    .cc-brief-kicker { color:#4aff9d; font-size:9px; letter-spacing:1.3px; font-weight:700; }
-    .cc-brief-title { color:#fff; font-size:14px; font-weight:700; margin-top:4px; }
-    .cc-brief-body { color:#aeb9bf; font-size:11px; line-height:1.45; margin:4px 0 8px; }
-    .cc-brief-action { width:100%; padding:7px 10px; border:1px solid #4aff9d; border-radius:4px; color:#071014; background:#4aff9d; font:700 11px monospace; cursor:pointer; }
-    .cc-brief-action:hover { filter:brightness(1.15); box-shadow:0 0 10px rgba(74,255,157,0.35); }
-
-    /* ── Мобильные фиксы ── */
-    @media (max-width: 768px) {
-        #space-action-panel {
-            bottom: 100px !important;
-            left: 8px !important;
-            right: 8px !important;
-            transform: none !important;
-            max-width: none !important;
-        }
-        .space-attack-btn {
-            padding: 12px 4px !important;
-            font-size: 11px !important;
-        }
-        #space-coordinates {
-            font-size: 7px;
-            bottom: 2px;
-            left: 2px;
-        }
-    }
+  footer{border-top:1px solid var(--line);padding:30px 0;color:var(--muted);font-size:.85rem;text-align:center}
 </style>
 </head>
 <body>
-    <div id="demoWatermark" style="position:fixed;top:6px;right:10px;z-index:99999;background:rgba(255,80,60,0.15);border:1px solid rgba(255,80,60,0.6);color:#ff503c;font:700 11px monospace;letter-spacing:2px;padding:3px 10px;border-radius:4px;pointer-events:none;user-select:none;">DEMO</div>
-    <div class="language-switcher" aria-label="Language"><button type="button" data-i18n-locale="en" class="is-active">EN</button><button type="button" data-i18n-locale="ru">RU</button></div>
-    <div class="scanline"></div>
-    <div class="vignette"></div>
 
-    <div id="authOverlay" class="auth-overlay">
-        <div class="auth-container">
-            <div class="auth-header">
-                <h2>⚙️ CoreBox 5.0</h2>
-                <p>Нейро-сеть требует авторизации</p>
-            </div>
-
-            <div class="auth-form">
-                <div class="input-group">
-                    <label for="auth-email">📧 Нейро-интерфейс (Email):</label>
-                    <input type="email" id="auth-email" placeholder="your@email.com" required>
-                </div>
-
-                <div class="input-group">
-                    <label for="auth-password">🔒 Квантовый ключ (Пароль):</label>
-                    <input type="password" id="auth-password" placeholder="минимум 6 символов" required>
-                </div>
-
-                <div class="input-group" id="username-group" style="display: none;">
-                    <label for="auth-username">🎮 Позывной (Имя):</label>
-                    <input type="text" id="auth-username" placeholder="Как вас называть?">
-                </div>
-
-                <div class="auth-buttons">
-                    <button id="btn-login" class="auth-btn primary">🔑 Войти в систему</button>
-                    <button id="btn-register" class="auth-btn secondary">📝 Регистрация</button>
-                </div>
-
-                <div class="auth-toggle">
-                    <button id="btn-toggle-mode" class="toggle-btn">✨ Нет аккаунта? Зарегистрироваться</button>
-                </div>
-            </div>
-
-            <div id="auth-message" class="auth-message"></div>
-
-            <div class="auth-info">
-                <p>💡 <strong>Нейро-подсказка:</strong> Ваш прогресс сохраняется локально на этом сервере</p>
-                <div class="additional-links">
-                    <a href="faq.html" class="story-link">📖 FAQ</a>
-                    <a href="history.html" class="story-link history-link">🎭 ИСТОРИЯ МИРА</a>
-                </div>
-            </div>
-        </div>
+<nav>
+  <div class="wrap nav-in">
+    <div class="logo">CORE<b>BOX</b> 5.0</div>
+    <div class="nav-links">
+      <a href="#features">Возможности</a>
+      <a href="#tech">Технологии</a>
+      <a href="#package">Состав поставки</a>
+      <a href="#shots">Скриншоты</a>
+      <a href="#license">Лицензия</a>
+      <a href="#contact">Связаться</a>
     </div>
+  </div>
+</nav>
 
-    <div id="gameContent" style="display: none;">
-        <div class="header">
-            <h1>⚙️ CoreBox 5.0 <span style="font-size: 14px;">| Нейро-эволюция</span></h1>
-
-            <div class="user-info" id="userInfo" style="display: none;">
-                <span id="usernameDisplay"></span>
-                <span id="saveIndicator" aria-live="polite">СОХРАНЕНО</span>
-                <button id="logoutBtn" class="logout-btn">🚪 Выйти</button>
-            </div>
-
-            <button id="muteToggleBtn" class="mute-btn" title="Включить/выключить звук" aria-label="Включить или выключить звук">🔊</button>
-
-            <div class="stats-container">
-                <div class="stat-card">
-                    <div>🕐 ЦИКЛ СИСТЕМЫ</div>
-                    <div id="timeDisplay" class="stat-value">ДЕНЬ 08:00</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="main">
-            <div class="status-tabs">
-                <div class="status-tab active" id="system-status-tab">🖥️ СИСТЕМНЫЙ СТАТУС</div>
-                <div class="status-tab" id="statistics-tab">📊 СТАТИСТИКА</div>
-                <div class="status-tab" id="leaderboard-tab">🏆 ЛИДЕРЫ</div>
-            </div>
-
-            <div id="system-status-section" class="status-section">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🖥️ ДИАГНОСТИКА ЯДРА</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="system-status">
-                            <div class="sys-grid">
-                                <div class="sys-row">
-                                    <span class="sys-dot online" id="coal-dot"></span>
-                                    <span class="sys-key">ТЭЦ</span>
-                                    <span class="sys-val" id="coalStatus">ОФФЛАЙН</span>
-                                </div>
-                                <div class="sys-row">
-                                    <span class="sys-dot online" id="ai-dot"></span>
-                                    <span class="sys-key">ИИ</span>
-                                    <span class="sys-val" id="aiStatusText">НЕАКТИВЕН</span>
-                                </div>
-                                <div class="sys-row">
-                                    <span class="sys-dot online" id="defense-dot"></span>
-                                    <span class="sys-key">Защита</span>
-                                    <span class="sys-val" id="defenseStatusText">НЕАКТИВНА</span>
-                                </div>
-                                <div class="sys-row">
-                                    <span class="sys-dot danger" id="rebel-dot"></span>
-                                    <span class="sys-key">Повстанцы</span>
-                                    <span class="sys-val" id="rebelStatus">НИЗКИЙ УРОВЕНЬ</span>
-                                </div>
-                            </div>
-
-                            <div class="sys-compact-row">
-                                <span>🌡️ <span id="turbineHeatLabel">0%</span></span>
-                                <div class="turbine-bar"><div class="turbine-fill turbine-cool" id="turbineHeatBar" style="width:0%"></div></div>
-                            </div>
-
-                            <div class="sys-compact-row">
-                                <span>🧬 <span id="neuroStatusShort">0% (Ур.0)</span></span>
-                                <div class="neuro-level"><div class="neuro-progress" id="neuroProgress"></div></div>
-                            </div>
-
-                            <div class="sys-compact-row">
-                                <span>🤖 <span id="aiMode">⚙️ Обычный</span></span>
-                            </div>
-
-                            <div id="attackWarning" class="attack-warning" style="display: none;"></div>
-                            <div id="miningDebuff" class="debuff-indicator mining-debuff" style="display: none;"></div>
-                            <div id="autoclickDebuff" class="debuff-indicator autoclick-debuff" style="display: none;"></div>
-                            <div id="defenseDebuff" class="debuff-indicator defense-debuff" style="display: none;"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🔥 УПРАВЛЕНИЕ ТЭЦ</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content" style="padding:8px 14px;">
-                        <div class="tec-compact">
-                            <span class="tec-dot online" id="tec-dot"></span>
-                            <span class="tec-label">ТЭЦ</span>
-                            <span class="tec-status" id="coalStatusDisplay">ОФФЛАЙН</span>
-                            <button id="tec-toggle-btn" class="tec-btn" data-action="toggle-coal" aria-label="Включить или выключить ТЭЦ">⚡</button>
-                            <span class="tec-info">Уголь: <b id="coalInventoryAmount">0</b> | Бонус: <b id="tecPowerBonus">+0</b>%</span>
-                            <span id="coalNightsHint" class="coal-info" aria-live="polite"></span>
-                        </div>
-                        <div id="tec-warning" class="tec-warning" style="display: none;"></div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>📜 СИСТЕМНЫЙ ЖУРНАЛ (Лог)</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="log-controls">
-                            <button id="clearLogBtn" class="log-btn">🗑️ ОЧИСТИТЬ ЖУРНАЛ</button>
-                            <button id="autoScrollBtn" class="log-btn">📜 АВТОСКРОЛЛ</button>
-                        </div>
-                        <div id="logBox" style="height: 200px; overflow-y: auto; background: #000; color: #0f0; font-family: monospace; padding: 8px;"></div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>⚡ ВЫЧИСЛИТЕЛЬНАЯ МОЩНОСТЬ</span>
-                        <span id="powerText" class="panel-title-value">0/1000</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="progress-container">
-                            <div class="progress-fill" id="powerFill" style="width: 0%"></div>
-                        </div>
-                        <div class="power-tier-info">
-                            <span>📈 ТИР МОЩНОСТИ:</span>
-                            <span id="powerTier">Тир 0 | +1 мощности/клик</span>
-                        </div>
-                        <div id="powerRecoveryStatus" class="power-recovery-status" aria-live="polite">Питание: ожидание данных</div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🔄 ПРОГРЕСС СИНХРОНИЗАЦИИ</span>
-                        <span id="clickProgressText" class="panel-title-value">0/10</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="progress-container">
-                            <div class="progress-fill click-progress" id="clickProgress" style="width: 0%"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🤖 АВТОМАТИЧЕСКАЯ ДОБЫЧА</span>
-                        <span id="autoClickStatus" style="font-size:11px;font-weight:700;color:var(--text-dim);">ОТКЛЮЧЕНА</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="auto-click-settings">
-                            <span class="setting-icon">⚡</span>
-                            <span class="setting-label">МОЩНОСТЬ/ЦИКЛ:</span>
-                            <span id="powerPerClick" class="setting-value">1</span>
-
-                            <span class="setting-separator">|</span>
-
-                            <span class="setting-icon">⏱️</span>
-                            <span class="setting-label">ИНТЕРВАЛ:</span>
-                            <span id="autoClickInterval" class="setting-value">5</span>
-                            <span class="setting-unit">СЕК</span>
-
-                            <span class="setting-separator">|</span>
-
-                            <span class="setting-icon">💎</span>
-                            <span class="setting-label">СТОИМОСТЬ:</span>
-                            <span id="autoClickCost" class="setting-value">1</span>
-                            <span class="setting-unit">МОЩН</span>
-                        </div>
-                        <div class="auto-click-info">
-                            💡 УДЕРЖИВАЙТЕ ПЛАВАЮЩУЮ КНОПКУ ДЛЯ АКТИВАЦИИ АВТОМАТИЧЕСКОЙ ДОБЫЧИ
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="statistics-section" class="status-section" style="display: none;">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>📊 СТАТИСТИКА ОПЕРАТОРА</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="statistics-grid">
-    <div class="stat-card-large">
-        <div class="stat-title">🕹️ ОСНОВНОЕ</div>
-        <div class="stat-line"><span class="stat-label">Всего кликов:</span><span class="stat-value" id="totalClicks">0</span></div>
-        <div class="stat-line"><span class="stat-label">Макс. мощность:</span><span class="stat-value" id="maxPowerReached">0</span></div>
-        <div class="stat-line"><span class="stat-label">Ночей пережито:</span><span class="stat-value" id="nightsSurvived">0</span></div>
-        <div class="stat-line">
-            <span class="stat-label">Всего добыто:</span>
-            <span class="stat-value" id="totalMined">0</span>
-            <span class="stat-delta" id="totalMinedDelta"></span>
-        </div>
+<header>
+  <div class="wrap">
+    <span class="hero-tag">Demo build для разработчиков и покупателей</span>
+    <h1>CoreBox <span>5.0</span> — готовая Cyberpunk Incremental игра</h1>
+    <p class="hero-sub">
+      Полный коммерческий продукт: ядро симуляции на Rust (WASM), богатый клиент на HTML5/JS,
+      прогрессия, мультиплеер-модуль и админ-панель. Покупаете — получаете исходники и право
+      запускать и монетизировать без ограничений.
+    </p>
+    <a href="#package" class="btn btn-primary">Состав поставки</a>
+    <a href="#contact" class="btn btn-ghost">Запросить полную версию</a>
+    <div class="hero-stats">
+      <div class="hstat"><b>1</b><span>WASM-ядро</span></div>
+      <div class="hstat"><b>20+</b><span>игровых систем</span></div>
+      <div class="hstat"><b>25</b><span>файлов клиента</span></div>
+      <div class="hstat"><b>100%</b><span>исходников в пакете</span></div>
     </div>
+  </div>
+</header>
 
-    <div class="stat-card-large">
-        <div class="stat-title">🧠 НЕЙРО-ЭВОЛЮЦИЯ</div>
-        <div class="stat-line"><span class="stat-label">🧬 Ур. эволюции:</span><span class="stat-value" id="neuroEvolution">0</span></div>
-        <div class="stat-line"><span class="stat-label">🧠 Нейро-сознание:</span><span class="stat-value" id="neuroConsciousness">0%</span></div>
-        <div class="stat-line"><span class="stat-label">🎯 Очки эволюции:</span><span class="stat-value" id="neuroScore">0</span></div>
-        <div class="stat-line"><span class="stat-label">🤖 Текущий режим ИИ:</span><span class="stat-value" id="currentAiMode">Обычный</span></div>
+<section id="features">
+  <div class="wrap">
+    <h2 class="sec-title">Возможности <b>продукта</b></h2>
+    <p class="sec-sub">Готовая игра, а не прототип: симуляция, прогрессия, экономика, мультиплеер и монетизация уже реализованы.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">🏭</div><h3>Симуляция добычи</h3><p>Добыча ресурсов, улучшение станции и апгрейды корпуса на основе честной игровой модели, а не «рандомных чисел».</p></div>
+      <div class="card"><div class="ico">📈</div><h3>Прогрессия и престиж</h3><p>Эндгейм-набор, перерождения и долгосрочная мотивация — игрок остаётся неделями и месяцами.</p></div>
+      <div class="card"><div class="ico">🌌</div><h3>Космический модуль</h3><p>Экспедиции, открытие систем и новые ресурсы — расширяет вертикаль прогрессии.</p></div>
+      <div class="card"><div class="ico">⚔️</div><h3>Мультиплеер-модуль</h3><p>PvP-схватки и кооператив через отдельный боевой модуль на JS.</p></div>
+      <div class="card"><div class="ico">🎨</div><h3>Дизайн и UX</h3><p>Готовый визуальный стиль, адаптивность и мобильные жесты «из коробки».</p></div>
+      <div class="card"><div class="ico">🔊</div><h3>Звук и музыка</h3><p>Встроенный звуковой менеджер и музыкальное сопровождение, управление через настройки.</p></div>
+      <div class="card"><div class="ico">🌍</div><h3>Локализация</h3><p>Система i18n с переключением языков в один клик.</p></div>
+      <div class="card"><div class="ico">📊</div><h3>Статистика</h3><p>Сбор метрик прогресса игрока — база для геймификации и удержания.</p></div>
+      <div class="card"><div class="ico">🔐</div><h3>Авторизация</h3><p>Аутентификация и сохранения на выбор: localStorage или серверная БД (Supabase).</p></div>
     </div>
+  </div>
+</section>
 
-    <div class="stat-card-large">
-        <div class="stat-title">🛡️ БЕЗОПАСНОСТЬ</div>
-        <div class="stat-line"><span class="stat-label">Атак повстанцев:</span><span class="stat-value" id="rebelAttacks">0</span></div>
-        <div class="stat-line"><span class="stat-label">Отражено атак:</span><span class="stat-value" id="attacksDefended">0</span></div>
-        <div class="stat-line"><span class="stat-label">Текущ. активность:</span><span class="stat-value" id="rebelActivity">0</span></div>
-        <div class="stat-line"><span class="stat-label">Заметность:</span><span class="stat-value" id="visibility">0%</span></div>
-        <div class="stat-line"><span class="stat-label">Подряд защит:</span><span class="stat-value" id="consecutiveDefenses">0</span></div>
+<section id="tech" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="sec-title">Технологический <b>стек</b></h2>
+    <p class="sec-sub">Архитектура, которую легко читать, поддерживать и расширять — всё поставляется с исходниками.</p>
+    <div class="tech-row">
+      <div class="tech"><div class="t-ico">🦀</div><h4>Rust → WebAssembly</h4><p>Ядро симуляции и баланса скомпилировано в WASM: быстрые расчёты, тяжёлая логика защищена от простого копирования.</p></div>
+      <div class="tech"><div class="t-ico">📄</div><h4>HTML5 / JS (ES Modules)</h4><p>Клиент разбит на 25 модулей по системам: квесты, крафт, торговля, флот, звук, онбординг и др.</p></div>
+      <div class="tech"><div class="t-ico">🗄️</div><h4>localStorage / Supabase</h4><p>Два режима хранения: автономный (без сервера) и серверный с авторизацией и общей БД.</p></div>
+      <div class="tech"><div class="t-ico">⚙️</div><h4>Модульность и миграции</h4><p>Схема БД управляется миграциями, баланс — отдельным JSON-конфигом, игры и квесты вынесены в данные.</p></div>
     </div>
+  </div>
+</section>
 
-    <div class="stat-card-large">
-        <div class="stat-title">⛏️ РЕСУРСЫ (Добыто)</div>
-        <div class="stat-line">
-            <span class="stat-label">Угля добыто:</span>
-            <span class="stat-value" id="coalMined">0</span>
-            <span class="stat-delta" id="coalMinedDelta"></span>
-        </div>
-        <div class="stat-line">
-            <span class="stat-label">Мусора найдено:</span>
-            <span class="stat-value" id="trashMined">0</span>
-            <span class="stat-delta" id="trashMinedDelta"></span>
-        </div>
-        <div class="stat-line">
-            <span class="stat-label">Плазмы добыто:</span>
-            <span class="stat-value" id="plasmaMined">0</span>
-            <span class="stat-delta" id="plasmaMinedDelta"></span>
-        </div>
-        <div class="stat-line">
-            <span class="stat-label">Руды добыто:</span>
-            <span class="stat-value" id="oreMined">0</span>
-            <span class="stat-delta" id="oreMinedDelta"></span>
-        </div>
+<section id="package">
+  <div class="wrap">
+    <h2 class="sec-title">Что входит в <b>коммерческую поставку</b></h2>
+    <p class="sec-sub">Вы получаете полный исходный пакет и права на коммерческое использование.</p>
+    <div class="pack">
+      <div class="pack-item flag">
+        <h3><span class="badge">Полная версия</span> Ядро и клиент</h3>
+        <ul>
+          <li>Исходники Rust-ядра (вся симуляция и баланс)</li>
+          <li>Весь клиент на JS — 25 систем, без вырезок</li>
+          <li>Полный баланс и все задания, включая эндгейм-набор</li>
+          <li>Ресурсы: графика, звук, музыка</li>
+        </ul>
+      </div>
+      <div class="pack-item">
+        <h3>🖥 Сервер и данные</h3>
+        <ul>
+          <li>Сервер авторизации и сохранений</li>
+          <li>Схема БД и миграции (Supabase)</li>
+          <li>Конфиг баланса как отдельный JSON</li>
+          <li>Скрипты деплоя</li>
+        </ul>
+      </div>
+      <div class="pack-item">
+        <h3>📦 Документация и права</h3>
+        <ul>
+          <li>Техническая документация по архитектуре</li>
+          <li>Инструкция по запуску и развёртыванию</li>
+          <li>Коммерческая лицензия на использование</li>
+          <li>Рекомендации по монетизации</li>
+        </ul>
+      </div>
     </div>
+  </div>
+</section>
 
-    <div class="stat-card-large">
-        <div class="stat-title">🔥 ПОТЕРИ И ПРОГРЕСС</div>
-        <div class="stat-line">
-            <span class="stat-label">Угля сожжено:</span>
-            <span class="stat-value" id="coalBurned">0</span>
-            <span class="stat-delta" id="coalBurnedDelta"></span>
-        </div>
-        <div class="stat-line">
-            <span class="stat-label">Украдено угля:</span>
-            <span class="stat-value" id="coalStolen">0</span>
-            <span class="stat-delta" id="coalStolenDelta"></span>
-        </div>
-        <div class="stat-line"><span class="stat-label">Время игры:</span><span class="stat-value" id="playTime">0 сек</span></div>
-        <div class="stat-line"><span class="stat-label">Сессий:</span><span class="stat-value" id="sessionsCount">1</span></div>
+<section id="shots">
+  <div class="wrap">
+    <h2 class="sec-title">Как выглядит <b>игра</b></h2>
+    <p class="sec-sub">Промо-визуализация: в полном пакете — реальные скриншоты и доступ к играбельной сборке.</p>
+    <div class="shots">
+      <figure class="shot">
+        <img src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=cyberpunk%20resource%20management%20game%20interface%2C%20holographic%20control%20panels%2C%20resource%20counters%20and%20upgrade%20trees%2C%20mining%20station%20hud%2C%20neon%20UI%2C%20dark%20sci-fi%20atmosphere%2C%20game%20screenshot%20style&image_size=landscape_16_9" alt="Игровой интерфейс добычи">
+        <figcaption>Интерфейс добычи и улучшений</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=abstract%20visualization%20of%20a%20game%20engine%20core%2C%20glowing%20red%20and%20cyan%20energy%20sphere%20with%20particles%2C%20holographic%20circuit%20patterns%2C%20dark%20background%2C%20technical%20cyberpunk%20style&image_size=landscape_16_9" alt="Ядро симуляции">
+        <figcaption>WASM-ядро симуляции (Rust)</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="https://coresg-normal.trae.ai/api/ide/v1/text_to_image?prompt=futuristic%20space%20expedition%20fleet%2C%20ships%20traveling%20between%20neon%20planets%2C%20holographic%20route%20map%20overlay%2C%20cyberpunk%20style%2C%20game%20screenshot&image_size=landscape_16_9" alt="Космический модуль">
+        <figcaption>Космические экспедиции</figcaption>
+      </figure>
     </div>
+  </div>
+</section>
 
-    <div class="stat-card-large">
-        <div class="stat-title">🚀 ФЛОТ И РАЗРАБОТКИ</div>
-        <div class="stat-line"><span class="stat-label">🚀 Кораблей:</span><span class="stat-value" id="fleetShips">0/20</span></div>
-        <div class="stat-line"><span class="stat-label">⚔️ Мощь флота:</span><span class="stat-value" id="fleetCombatPower">0</span></div>
-        <div class="stat-line"><span class="stat-label">📐 Чертежей:</span><span class="stat-value" id="blueprintsUnlocked">0/3</span></div>
-        <div class="stat-line"><span class="stat-label">🔧 Ур. добычи:</span><span class="stat-value" id="miningLevel">0</span></div>
+<section id="license" style="background:var(--bg2)">
+  <div class="wrap">
+    <h2 class="sec-title">Лицензия и <b>условия</b></h2>
+    <div class="license">
+      <p>Это публичное демо — презентационная страница продукта. Играбельная и полная версии не распространяются публично.</p>
+      <h3>Условия покупки</h3>
+      <ul>
+        <li>Передача исходников и прав — после оплаты и подписания договора купли-продажи.</li>
+        <li>Коммерческая лицензия: вы вправе запускать, модифицировать и монетизировать продукт без роялти.</li>
+        <li>Запрещена публичная перепродажа исходного кода как самостоятельного продукта.</li>
+        <li>Полная сборка, ядро, БД-схема и документация передаются приватно и в публичный репозиторий не загружаются.</li>
+      </ul>
+      <h3>Обновления и поддержка</h3>
+      <ul>
+        <li>Сборка обновляется по мере развития продукта.</li>
+        <li>Консультации по развёртыванию — в рамках договора.</li>
+      </ul>
     </div>
-</div>
+  </div>
+</section>
 
-                        <div class="statistics-controls">
-    <button id="refreshStatsBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
-    <button id="exportStatsBtn" class="stat-btn">📤 ЭКСПОРТ</button>
-    <button id="importStatsBtn" class="stat-btn">📥 ИМПОРТ</button>
-    <button id="resetStatsBtn" class="stat-btn danger">🗑️ СБРОСИТЬ СТАТИСТИКУ</button>
-</div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="leaderboard-section" class="status-section" style="display: none;">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🏆 ТАБЛИЦА ЛИДЕРОВ (Нейро-рейтинг)</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div id="leaderboardContainer">
-                            <div class="leaderboard-loading">⏳ Загрузка локального нейро-рейтинга...</div>
-                        </div>
-                        <button id="refreshLeaderboardBtn" class="stat-btn">🔄 ОБНОВИТЬ</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tabs" id="tabs">
-                <div class="tab active" data-tab="inventory" id="inventory-tab-btn">📦 ИНВЕНТАРЬ</div>
-                <div class="tab" data-tab="upgrades" id="upgrades-tab-btn">🔧 МОДУЛИ</div>
-                <div class="tab" data-tab="trade" id="trade-tab-btn">💱 ТОРГОВЛЯ</div>
-                <div class="tab" data-tab="quests" id="quests-tab-btn">📋 ЗАДАНИЯ</div>
-                <div class="tab" data-tab="command" id="command-tab-btn">⚔️ КОМАНДНЫЙ ПУНКТ</div>
-                <div class="tab" data-tab="craft" id="craft-tab-btn">🔨 КРАФТ</div>
-                <div class="tab" data-tab="design" id="design-tab-btn">📐 РАЗРАБОТКА</div>
-                <div class="tab" data-tab="fleet" id="fleet-tab-btn">🚀 ФЛОТ</div>
-                <div class="tab" data-tab="space" id="space-tab-btn">🌌 КАРТА</div>
-            </div>
-
-            <div class="tab-content active" id="inventory-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>📦 СИСТЕМНЫЕ РЕСУРСЫ</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div id="resourcesContainer"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tab-content" id="upgrades-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🔧 МОДУЛИ УЛУЧШЕНИЙ</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="upgrade-container" id="upgradesContainer"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tab-content" id="trade-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>💱 P2P ТОРГОВЛЯ</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div id="tradeContainer"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tab-content" id="quests-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>📋 СИСТЕМНЫЕ ЗАДАЧИ</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="quest-container" id="questsContainer"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tab-content" id="command-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🎯 КОМАНДНЫЙ ПУНКТ</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                <div class="cc-wrap">
-                    <div class="cc-header">
-                        <div class="cc-dot" id="cc-status-dot"></div>
-                        <span class="cc-title-text">Командный пункт</span>
-                        <span class="cc-day-label" id="cc-day-label">ДЕНЬ</span>
-                        <span class="cc-clock" id="cc-clock">--:--:--</span>
-                    </div>
-
-                    <!-- ── СВОДКА ── -->
-                    <div class="cc-dashboard">
-                        <div class="cc-dash-row">
-                            <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Эволюция</span>
-                                <span class="cc-dash-val cc-color-teal" id="cc-evol">—</span>
-                                <span style="font-size:9px;color:#555">→ <span id="cc-consc">—</span>%</span>
-                            </div>
-                            <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Очки</span>
-                                <span class="cc-dash-val cc-color-purple" id="cc-score">—</span>
-                                <span style="font-size:9px;color:#555"><span id="cc-score-next">—</span></span>
-                            </div>
-                            <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Защита</span>
-                                <span class="cc-dash-val cc-color-teal" id="cc-def-bonus">—</span>
-                                <span style="font-size:9px;color:#555" id="cc-aimode">—</span>
-                            </div>
-                        </div>
-                        <div class="cc-dash-row">
-                            <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Активность</span>
-                                <div class="cc-bar" style="flex:1;min-width:40px"><div class="cc-bar-fill" id="cc-bar-rebel" style="width:0%"></div></div>
-                                <span class="cc-badge" id="cc-rebel-badge">0/15</span>
-                            </div>
-                            <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Уязвимость</span>
-                                <span class="cc-badge" id="cc-vuln">нет</span>
-                            </div>
-                            <div class="cc-dash-item">
-                                <span class="cc-dash-lbl">Защита</span>
-                                <span class="cc-badge" id="cc-prot-status">неактивна</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- ── OPERATIONS BRIEF ── -->
-                    <section class="cc-brief" id="cc-operations-brief" aria-live="polite">
-                        <div class="cc-brief-kicker">ОПЕРАЦИОННЫЙ BRIEF</div>
-                        <div class="cc-brief-title" id="cc-brief-title">Ожидание данных ядра</div>
-                        <div class="cc-brief-body" id="cc-brief-body">Синхронизируйте базу, чтобы получить следующий приказ.</div>
-                        <button class="cc-brief-action" id="cc-brief-action" type="button" data-tab="inventory">ОТКРЫТЬ ИНВЕНТАРЬ</button>
-                    </section>
-                    <div id="corebox-ops-deck-host"></div>
-
-                    <!-- ── АКТИВНЫЕ ТРЕВОГИ ── -->
-                    <div class="cc-alerts" id="cc-alerts">
-                        <div class="cc-threat-row cc-danger-row" id="cc-multiphase-row" style="display:none"></div>
-                        <div class="cc-threat-row cc-danger-row" id="cc-attack-warning" style="display:none">
-                            <span class="cc-threat-label" style="color:#ff9944;font-weight:bold" id="cc-attack-warning-text">—</span>
-                        </div>
-                        <div class="cc-threat-row cc-danger-row" id="cc-blueprint-lock" style="display:none"></div>
-                        <div class="cc-threat-row cc-danger-row" id="cc-tec-sabotage" style="display:none"></div>
-                        <div class="cc-threat-row" id="cc-fear-level" style="display:none"></div>
-                        <div class="cc-threat-row" id="cc-fleet-attack" style="display:none"></div>
-                        <div class="cc-threat-row cc-danger-row" id="cc-breaches-row" style="display:none">
-                            <span class="cc-threat-label">💀 Прорывов защиты</span>
-                            <span class="cc-badge cc-badge-danger" id="cc-breaches">0</span>
-                        </div>
-                    </div>
-
-                    <!-- ── КОНТР-ОПЕРАЦИИ ── -->
-                    <div class="cc-section">
-                        <div class="cc-sec-label">⚔️ Контр-операции <span id="cc-cd" style="margin-left:6px;font-size:10px;color:#4aff9d">—</span></div>
-                        <div class="cc-ops-grid"></div>
-                    </div>
-
-                    <!-- ── СВОРАЧИВАЕМАЯ: Разведка ── -->
-                    <div class="cc-panel" id="cc-intel-panel">
-                        <div class="cc-panel-hdr" data-panel="cc-intel">
-                            <span>📡 Разведка</span>
-                            <span class="cc-panel-arrow">▶</span>
-                        </div>
-                        <div class="cc-panel-body" style="display:none">
-                            <div style="margin-bottom:6px">
-                                <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Досье фракций</div>
-                                <div id="cc-factions"><div class="cc-intercept-empty">Нет данных</div></div>
-                            </div>
-                            <div>
-                                <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Перехваты</div>
-                                <div id="cc-intercepts" style="background:rgba(0,255,100,0.02);border:1px solid rgba(0,255,100,0.1);border-radius:4px;padding:4px;max-height:100px;overflow-y:auto;">
-                                    <div class="cc-intercept-empty">Нет перехватов</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- ── СВОРАЧИВАЕМАЯ: Статистика ── -->
-                    <div class="cc-panel" id="cc-stats-panel">
-                        <div class="cc-panel-hdr" data-panel="cc-stats">
-                            <span>📊 Статистика</span>
-                            <span class="cc-panel-arrow">▶</span>
-                        </div>
-                        <div class="cc-panel-body" style="display:none">
-                            <div class="cc-grid3" style="margin-bottom:6px">
-                                <div class="cc-stat">
-                                    <div class="cc-stat-lbl">Отражено</div>
-                                    <div class="cc-stat-val good" id="cc-defended">—</div>
-                                    <div class="cc-stat-sub">из <span id="cc-total-attacks">—</span></div>
-                                </div>
-                                <div class="cc-stat">
-                                    <div class="cc-stat-lbl">Ночей</div>
-                                    <div class="cc-stat-val" id="cc-nights">—</div>
-                                </div>
-                                <div class="cc-stat">
-                                    <div class="cc-stat-lbl">Всего очков</div>
-                                    <div class="cc-stat-val" id="cc-score-total">0</div>
-                                </div>
-                            </div>
-                            <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px">Защита от повстанцев</div>
-                            <div id="rebelProtectionPanel" class="protection-panel"></div>
-                            <div class="cc-sec-label" style="font-size:9px;margin-bottom:3px;margin-top:6px">История атак</div>
-                            <div id="attackHistory" class="attack-history"></div>
-                        </div>
-                    </div>
-
-                    <!-- ── Флот / ПВП ── -->
-                    <div class="cc-panel" id="cc-fleet-panel">
-                        <div class="cc-panel-hdr" data-panel="cc-fleet">
-                            <span>🚀 Флот / ПВП</span>
-                            <span class="cc-panel-arrow">▶</span>
-                        </div>
-                        <div class="cc-panel-body" style="display:none">
-                            <div id="commandCenterLog" class="pvp-log-container" style="background:rgba(0,0,0,0.3);border:1px solid rgba(255,74,74,0.15);border-radius:4px;padding:6px;max-height:160px;overflow-y:auto;font-size:11px;">
-                                <div style="color:#444">Ожидание данных...</div>
-                            </div>
-                        </div>
-                    </div>
-
-
-                </div><!-- /cc-wrap -->
-                    </div><!-- /panel-content -->
-                </div><!-- /panel -->
-            </div>
-
-            <div class="tab-content" id="craft-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🔨 СИСТЕМА КРАФТА</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="craft-container" id="craftContainer"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tab-content" id="design-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>📐 РАЗРАБОТКА КОРАБЛЕЙ</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="design-container" id="designContainer"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tab-content" id="fleet-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🚀 МОЙ ФЛОТ</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content">
-                        <div class="fleet-container" id="fleetContainer"></div>
-                    </div>
-                </div>
-        </div>
-
-            <div class="tab-content" id="space-tab">
-                <div class="panel">
-                    <div class="panel-title">
-                        <span>🌌 КОСМИЧЕСКАЯ КАРТА</span>
-                        <span id="space-online-count" style="font-size:10px;opacity:0.7;margin-left:auto;">0 онлайн</span>
-                        <span class="collapse-icon">▼</span>
-                    </div>
-                    <div class="panel-content" style="padding:0;">
-                       <div id="space-status-bar" style="display:flex;gap:12px;padding:8px 12px;background:rgba(0,0,0,0.3);flex-wrap:wrap;align-items:center;">
-    <div style="font-size:11px;opacity:0.7;">⚡ <span id="space-power-current">0</span>/<span id="space-power-max">1000</span></div>
-    <div style="font-size:11px;opacity:0.7;">🚀 <span id="space-ships-count">0</span> кор.</div>
-    <div style="font-size:11px;opacity:0.9; color: #4aff9d; font-weight: bold;" id="space-flight-status">🚀 Нет активных полетов</div>
-    <div style="margin-left:auto;display:flex;gap:4px;">
+<section id="contact">
+  <div class="wrap">
+    <div class="cta">
+      <h2>Запросить полную версию</h2>
+      <p>Оставьте контакты — пришлём коммерческое предложение, состав пакета и демо-доступ.</p>
+      <form class="form" onsubmit="event.preventDefault();alert('Заявка отправлена! Мы свяжемся с вами в ближайшее время.');this.reset();">
+        <input type="text" placeholder="Ваше имя" required>
+        <input type="email" placeholder="E-mail" required>
+        <input type="text" placeholder="Telegram / телефон">
+        <textarea placeholder="Сообщение: для какого проекта планируете использовать"></textarea>
+        <button type="submit" class="btn btn-primary" style="flex-basis:100%">Отправить заявку</button>
+      </form>
+      <div class="hint">Демо-сборка публично не выкладывается. Контакты передаются только владельцу — продавцу.</div>
     </div>
-</div>
+  </div>
+</section>
 
-                        <div class="star-map" id="space-star-map" style="position: relative; width: 100%; height: 55vw; min-height: 260px; max-height: 400px; overflow: hidden; touch-action: none; cursor: grab;">
-                            <div id="space-stars-layer" class="stars-layer"></div>
-                            <div id="space-map-viewport" class="map-viewport">
-                                <div id="space-objects-layer" style="display: none;"></div>
-                            </div>
-                            <canvas id="space-main-canvas" width="800" height="400"></canvas>
-                            <div class="map-zoom-controls" role="group" aria-label="Управление масштабом карты">
-                                <button id="map-zoom-in" type="button" aria-label="Увеличить карту" title="Увеличить">+</button>
-                                <button id="map-zoom-reset" type="button" aria-label="Сбросить масштаб" title="Центрировать">◎</button>
-                                <button id="map-zoom-out" type="button" aria-label="Уменьшить карту" title="Уменьшить">−</button>
-                            </div>
+<footer>
+  <div class="wrap">CoreBox 5.0 · демо для разработчиков и покупателей · © 2026 One1Game</div>
+</footer>
 
-                            <div id="space-coordinates">
-                                🗺️ 5000×5000 📍 --- --- 🔍 ---x
-                            </div>
-                        </div>
-
-                        <div style="padding:10px 12px;">
-                            <button id="space-research-btn" style="width:100%;padding:10px;background:rgba(74,158,255,0.1);border:1px solid rgba(74,158,255,0.3);border-radius:8px;color:#4a9eff;font-family:monospace;font-size:12px;cursor:pointer;">🔍 ИССЛЕДОВАТЬ ПЛАНЕТУ (нужно 100⚡)</button>
-                        </div>
-
-                        <div style="padding:0 12px 12px;">
-                            <div style="font-size:11px;opacity:0.6;margin-bottom:6px;">👥 ДРУГИЕ ИГРОКИ</div>
-                            <div id="space-players-list" style="max-height:200px;overflow-y:auto;"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div id="floatingMineBtn" class="floating-mine-btn">
-            <svg class="power-ring" viewBox="0 0 100 100">
-                <circle class="ring-back" cx="50" cy="50" r="45" fill="none" stroke-width="2" />
-                <circle class="ring-fill" cx="50" cy="50" r="45" fill="none" stroke-width="2" />
-            </svg>
-            <span class="btn-icon">⚙️</span>
-            <span class="btn-text">ДОБЫЧА</span>
-            <span id="miningBonusFloat" class="mining-bonus">+0%</span>
-            <span id="clickComboIndicator" class="click-combo-indicator" style="display:none;"></span>
-        </div>
-    </div>
-
-    <script src="./i18n.js"></script>
-    <script src="./mobile-patch.js"></script>
-    <script src="./onboarding.js"></script>
-    <script src="./db-adapter.js"></script>
-    <script type="module" src="./game.js"></script>
-
-    <audio id="bgMusic" autoplay loop preload="none" style="display: none;">
-        <source src="music/game-music.mp3" type="audio/mpeg">
-    </audio>
-
-    <script>
-    (function() {
-        window.onload = function() {
-            const bgMusic = document.getElementById('bgMusic');
-            if (bgMusic) {
-                bgMusic.volume = 0.025;
-
-                // ✅ ПРОВЕРКА СОХРАНЁННОГО СОСТОЯНИЯ MUTE
-                const isMuted = localStorage.getItem('corebox_sound_muted') === 'true';
-
-                function forcePlay() {
-                    document.addEventListener('click', function playOnce() {
-                        // ✅ НЕ ЗАПУСКАЕМ музыку, если пользователь её выключил
-                        if (!isMuted) {
-                            bgMusic.play().catch(() => {});
-                        }
-                        document.removeEventListener('click', playOnce);
-                    }, { once: true });
-                }
-                forcePlay();
-            }
-
-            window.showNotif = function(msg, isError = false) {
-                const div = document.createElement('div');
-                div.className = `notification ${isError ? 'error' : 'success'}`;
-                div.textContent = msg;
-                document.body.appendChild(div);
-                setTimeout(() => div.remove(), 2500);
-            };
-        };
-    })();
-    </script>
-    <script type="module">
-        import { initButtonSounds, Sounds } from './sounds-handler.js';
-
-        window.addEventListener('DOMContentLoaded', () => {
-            initButtonSounds();
-        });
-
-        window.Sounds = Sounds;
-    </script>
 </body>
 </html>
