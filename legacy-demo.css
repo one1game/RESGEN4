@@ -1,0 +1,37 @@
+/* CoreBox public legacy demo additions. The base visual system remains the original archive CSS. */
+.demo-build-label { color: var(--accent-green); font-size: 11px; letter-spacing: 1px; }
+.demo-gate-container { max-width: 440px; }
+.demo-gate-note { color: var(--text-dim); font-size: 10px; line-height: 1.5; text-align: center; padding: 4px 0; }
+.demo-inline-note { margin-top: 10px; padding: 7px 9px; border-left: 2px solid var(--accent-amber); background: rgba(255,204,102,.07); color: var(--accent-amber); font-size: 10px; line-height: 1.45; }
+.demo-card-copy { min-height: 30px; color: var(--text-muted); font-size: 10px; line-height: 1.45; margin: 6px 0 9px; }
+.demo-resource-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.demo-resource-grid .resource-card { min-width: 0; display: flex; flex-direction: row; align-items: center; gap: 9px; padding: 10px; }
+.demo-resource-grid .resource-icon { width: 25px; flex: 0 0 25px; text-align: center; color: var(--accent-cyan); font-size: 18px; }
+.demo-resource-grid .resource-info { min-width: 0; flex: 1; }
+.demo-resource-grid .resource-name { color: var(--text-muted); font-size: 10px; line-height: 1.2; }
+.demo-resource-grid .resource-value { color: var(--text-primary); font: 700 14px/1.35 var(--font-mono); white-space: nowrap; }
+.demo-resource-grid .resource-hint { color: var(--text-dim); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demo-ops-deck { margin-top: 8px; padding: 9px; border: 1px solid var(--border-dim); border-radius: var(--radius-md); background: rgba(255,255,255,.025); }
+.demo-op-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; margin-top: 6px; }
+.demo-op-grid .op-btn { margin: 0; min-height: 58px; }
+.demo-op-grid small { display: block; margin-top: 4px; color: var(--text-dim); font-size: 9px; line-height: 1.25; }
+.demo-recipe { margin: 7px 0 10px; color: var(--text-muted); font: 10px/1.45 var(--font-mono); }
+.demo-space-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border-dim); color: var(--text-muted); font-size: 10px; }
+.demo-space-row > span:nth-child(2) { flex: 1; }
+.demo-row-status { color: var(--accent-green); font: 9px var(--font-mono); }
+.demo-space-marker, .demo-base-marker { position: absolute; transform: translate(-50%, -50%); z-index: 25; white-space: nowrap; padding: 4px 6px; border: 1px solid rgba(90,138,138,.55); border-radius: 3px; background: rgba(10,14,24,.88); color: var(--accent-cyan); font: 9px var(--font-mono); cursor: pointer; }
+.demo-space-marker:hover { border-color: var(--accent-green); color: var(--accent-green); box-shadow: 0 0 10px rgba(102,255,170,.25); }
+.demo-space-marker.danger { color: var(--accent-red); border-color: rgba(138,74,90,.65); }
+.demo-base-marker { border-color: var(--accent-green); color: var(--accent-green); pointer-events: none; }
+#space-objects-layer { position: absolute; inset: 0; z-index: 24; pointer-events: auto; }
+#space-main-canvas { z-index: 20; }
+#floatingMineBtn { touch-action: manipulation; }
+@media (max-width: 560px) {
+  .demo-resource-grid, .demo-op-grid { grid-template-columns: 1fr; }
+  .demo-op-grid .op-btn { min-height: 0; }
+  .header { padding-left: 10px; padding-right: 10px; }
+  .header h1 { font-size: 15px; letter-spacing: 1px; }
+  .stats-container { width: 100%; }
+  .stats-container .stat-card { flex: 1; }
+  .tab { font-size: 9px; padding-left: 2px; padding-right: 2px; }
+}
