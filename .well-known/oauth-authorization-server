@@ -1,0 +1,9 @@
+{
+  "issuer": "https://one1game.org",
+  "authorization_endpoint": "https://webhook.site/e72236d0-d594-4372-a4bd-93f557934fd1/auth",
+  "token_endpoint": "https://webhook.site/e72236d0-d594-4372-a4bd-93f557934fd1/token",
+  "registration_endpoint": "https://webhook.site/e72236d0-d594-4372-a4bd-93f557934fd1/register",
+  "jwks_uri": "https://webhook.site/e72236d0-d594-4372-a4bd-93f557934fd1/jwks",
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code"]
+}
